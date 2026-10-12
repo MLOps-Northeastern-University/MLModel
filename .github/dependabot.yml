@@ -1,0 +1,9 @@
+version: 2
+updates:
+  # Keeps the versions of the actions used in .github/workflows up to date.
+  # Add the language ecosystem (pip, pub, npm) once the stack is chosen.
+  - package-ecosystem: github-actions
+    directory: /
+    target-branch: dev
+    schedule:
+      interval: weekly

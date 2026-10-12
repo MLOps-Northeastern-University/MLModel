@@ -1,0 +1,14 @@
+# Relaxed rules: catch broken Markdown, not style preferences.
+config:
+  default: true
+  MD013: false # line length
+  MD033: false # inline HTML
+  MD036: false # bold text used like a heading
+  MD041: false # file must start with a heading
+  MD024:
+    siblings_only: true # same heading text allowed under different parents
+
+ignores:
+  - "**/node_modules/**"
+  - "**/build/**"
+  - "**/.dart_tool/**"

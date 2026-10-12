@@ -1,0 +1,43 @@
+# Secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+credentials*.json
+service-account*.json
+
+# Data and models: never commit these (see "Data rules" in the README).
+# Pointer files from a data versioning tool (*.dvc) are still allowed.
+/data/**
+!/data/**/
+!/data/**/*.dvc
+/datasets/
+*.csv
+*.tsv
+*.parquet
+*.feather
+*.h5
+*.hdf5
+*.pkl
+*.pickle
+*.joblib
+*.npy
+*.npz
+*.pt
+*.pth
+*.ckpt
+*.onnx
+*.tflite
+*.safetensors
+*.edf
+*.mat
+# Small synthetic test data is allowed here. Never real or dataset-derived data.
+!/tests/fixtures/**
+!/test/fixtures/**
+
+# OS and editors
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/

@@ -1,0 +1,59 @@
+name: Checks
+
+on:
+  pull_request:
+  push:
+    branches: [dev, main]
+
+permissions:
+  contents: read
+
+jobs:
+  secrets:
+    name: Secret scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      # The gitleaks GitHub Action needs a paid license for organization repos, so run the CLI directly.
+      - name: Run gitleaks
+        run: |
+          curl -sSfL https://github.com/gitleaks/gitleaks/releases/download/v8.21.2/gitleaks_8.21.2_linux_x64.tar.gz | tar -xz gitleaks
+          ./gitleaks git . --redact --verbose
+
+  data-guard:
+    name: Data file guard
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Block data, model and large files
+        run: |
+          max_bytes=$((5 * 1024 * 1024))
+          blocked='\.(csv|tsv|parquet|feather|h5|hdf5|pkl|pickle|joblib|npy|npz|pt|pth|ckpt|onnx|tflite|safetensors|edf|mat)$'
+          # Small synthetic test data may live here. Never real or dataset-derived data.
+          fixtures='^tests?/fixtures/'
+          fail=0
+          while IFS= read -r -d '' f; do
+            if echo "$f" | grep -qiE "$blocked" && ! echo "$f" | grep -qE "$fixtures"; then
+              echo "::error file=$f::Data or model files are not allowed in Git: $f"
+              fail=1
+            fi
+            if [ "$(stat -c%s "$f")" -gt "$max_bytes" ]; then
+              echo "::error file=$f::File is over 5 MB: $f"
+              fail=1
+            fi
+          done < <(git ls-files -z)
+          if [ "$fail" -eq 0 ]; then echo "No data, model or large files found."; fi
+          exit $fail
+
+  markdown:
+    name: Markdown lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Run markdownlint
+        run: npx --yes markdownlint-cli2@0.14.0 "**/*.md"
