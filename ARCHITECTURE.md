@@ -146,4 +146,4 @@ _Owner: TBD · Decide by: TBD_
 _Decided · Owner: Sam Selvaraj · Date: 2026-10-12_
 
 **Decision:** GitHub Actions runs a secret scan, a data file guard and Markdown lint on every PR and every push to `dev` or `main`. Language checks get added once the stack is chosen.
-**Why:** The repos are public and the project handles licensed health data, so a leaked key or committed data is the most costly mistake we could make. These checks don't depend on the undecided stack. GitHub Actions is built into GitHub and covered in the course.
+**Why:** Everyone with access to a repo sees everything in it, and the project handles licensed health data, so a leaked key or committed data is the most costly mistake we could make. These checks don't depend on the undecided stack. GitHub Actions is built into GitHub and covered in the course.

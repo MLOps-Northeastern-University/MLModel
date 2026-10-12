@@ -25,7 +25,7 @@ The datasets themselves are **not** stored in this repo.
 
 | Repo | Role |
 |---|---|
-| [AndroidApp](https://github.com/MLOps-Northeastern-University/AndroidApp) | Patient app (Flutter), collects watch data |
+| [AndroidApp](https://github.com/MLOps-Northeastern-University/AndroidApp) | Patient app (native Android, Java), collects watch data |
 | [Backend](https://github.com/MLOps-Northeastern-University/Backend) | Serves this repo's model |
 | [Careportal](https://github.com/MLOps-Northeastern-University/Careportal) | Clinician web portal |
 | **MLModel** | This repo |
@@ -79,6 +79,7 @@ Newest first. One row per merged PR.
 
 | Date | Who | What changed | PR |
 |---|---|---|---|
+| 2026-10-12 | Sam Selvaraj | Updated docs: AndroidApp is native Android (Java), and the wording no longer assumes the repos are public | — |
 | 2026-10-12 | Sam Selvaraj | Updated CI actions: actions/checkout v7, actions/setup-node v7 | — |
 | 2026-10-12 | Sam Selvaraj | Added a tests line to the PR template | — |
 | 2026-10-12 | Sam Selvaraj | Added `dev` branch flow: PRs go to `dev`, release PRs move `dev` into `main` | — |
