@@ -79,6 +79,7 @@ Newest first. One row per merged PR.
 
 | Date | Who | What changed | PR |
 |---|---|---|---|
+| 2026-10-12 | Sam Selvaraj | Updated CI actions: actions/checkout v7, actions/setup-node v7 | — |
 | 2026-10-12 | Sam Selvaraj | Added a tests line to the PR template | — |
 | 2026-10-12 | Sam Selvaraj | Added `dev` branch flow: PRs go to `dev`, release PRs move `dev` into `main` | — |
 | 2026-10-12 | Sam Selvaraj | Added CI checks (secret scan, data file guard, Markdown lint), .gitignore, PR template and Dependabot | — |
