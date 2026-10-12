@@ -9,4 +9,5 @@
 - [ ] Added a row to **Progress** in the README
 - [ ] No data, model files or secrets (CI checks this too)
 - [ ] Updated ARCHITECTURE.md if this changes a technical decision
+- [ ] Added or updated tests for any code change (synthetic data from `tests/fixtures/` only)
 - [ ] Tested locally
