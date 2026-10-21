@@ -75,13 +75,8 @@ To run the Markdown check locally: `npx markdownlint-cli2 "**/*.md"`
 
 ## Progress
 
-Newest first. One row per merged PR.
+Newest first. One row per milestone, not per small change.
 
 | Date | Who | What changed | PR |
 |---|---|---|---|
-| 2026-10-12 | Sam Selvaraj | Updated docs: AndroidApp is native Android (Java), and the wording no longer assumes the repos are public | — |
-| 2026-10-12 | Sam Selvaraj | Updated CI actions: actions/checkout v7, actions/setup-node v7 | — |
-| 2026-10-12 | Sam Selvaraj | Added a tests line to the PR template | — |
-| 2026-10-12 | Sam Selvaraj | Added `dev` branch flow: PRs go to `dev`, release PRs move `dev` into `main` | — |
-| 2026-10-12 | Sam Selvaraj | Added CI checks (secret scan, data file guard, Markdown lint), .gitignore, PR template and Dependabot | — |
-| 2026-10-12 | Sam Selvaraj | Added README and ARCHITECTURE.md | — |
+| 2026-10-12 | Sam Selvaraj | Repo setup: README, ARCHITECTURE.md, CI checks (secret scan, data file guard, Markdown lint) and the `dev` branch flow | — |
