@@ -1,0 +1,418 @@
+{
+  "created_at": "2026-10-21T21:10:22.793909+00:00",
+  "n_rows": 36,
+  "columns": {
+    "participant_id": {
+      "dtype": "categorical",
+      "null_fraction": 0.0,
+      "allowed_values": [
+        "COPS-25"
+      ]
+    },
+    "day": {
+      "dtype": "numeric",
+      "null_fraction": 0.0,
+      "min": 0.0,
+      "max": 2.0
+    },
+    "hour_start": {
+      "dtype": "numeric",
+      "null_fraction": 0.0,
+      "min": 0.0,
+      "max": 23.0
+    },
+    "hour_index": {
+      "dtype": "numeric",
+      "null_fraction": 0.0,
+      "min": 17.0,
+      "max": 57.0
+    },
+    "visit": {
+      "dtype": "categorical",
+      "null_fraction": 0.0,
+      "allowed_values": [
+        "inpatient"
+      ]
+    },
+    "kinesia_text": {
+      "dtype": "categorical",
+      "null_fraction": 0.0,
+      "allowed_values": [
+        "Discomforting Dyskinesia",
+        "Good Kinesia",
+        "Severe Dyskinesia",
+        "Slight Dyskinesia"
+      ]
+    },
+    "kinesia_score": {
+      "dtype": "numeric",
+      "null_fraction": 0.0,
+      "min": 0.0,
+      "max": 3.0
+    },
+    "kinesia_class": {
+      "dtype": "categorical",
+      "null_fraction": 0.0,
+      "allowed_values": [
+        "dyskinetic",
+        "on"
+      ]
+    },
+    "tremor_score": {
+      "dtype": "numeric",
+      "null_fraction": 0.2222222222222222,
+      "min": 0.0,
+      "max": 2.0
+    },
+    "tremor_present": {
+      "dtype": "numeric",
+      "null_fraction": 0.2222222222222222,
+      "min": 0.0,
+      "max": 1.0
+    },
+    "freezing": {
+      "dtype": "numeric",
+      "null_fraction": 0.0,
+      "min": 0.0,
+      "max": 0.0
+    },
+    "fall": {
+      "dtype": "numeric",
+      "null_fraction": 0.0,
+      "min": 0.0,
+      "max": 0.0
+    },
+    "medication_taken": {
+      "dtype": "numeric",
+      "null_fraction": 0.0,
+      "min": 0.0,
+      "max": 1.0
+    },
+    "medication": {
+      "dtype": "categorical",
+      "null_fraction": 0.8333333333333334,
+      "allowed_values": [
+        "Levodopa / Carbidopa"
+      ]
+    },
+    "dosage_mg": {
+      "dtype": "numeric",
+      "null_fraction": 0.8333333333333334,
+      "min": 200.0,
+      "max": 200.0
+    },
+    "wear_status": {
+      "dtype": "categorical",
+      "null_fraction": 0.0,
+      "allowed_values": [
+        "Wearable Worn"
+      ]
+    },
+    "left_zip": {
+      "dtype": "categorical",
+      "null_fraction": 0.0
+    },
+    "left_csv": {
+      "dtype": "categorical",
+      "null_fraction": 0.0
+    },
+    "right_zip": {
+      "dtype": "categorical",
+      "null_fraction": 0.0
+    },
+    "right_csv": {
+      "dtype": "categorical",
+      "null_fraction": 0.0
+    },
+    "hours_since_dose": {
+      "dtype": "numeric",
+      "null_fraction": 0.0,
+      "min": 0.0,
+      "max": 12.0
+    },
+    "L_move_mean": {
+      "dtype": "numeric",
+      "null_fraction": 0.0,
+      "min": 0.0015488222177218,
+      "max": 0.0751203604481588
+    },
+    "L_move_std": {
+      "dtype": "numeric",
+      "null_fraction": 0.0,
+      "min": 0.003608732715675,
+      "max": 0.1123175163129103
+    },
+    "L_move_p95": {
+      "dtype": "numeric",
+      "null_fraction": 0.0,
+      "min": 0.0021422585261299,
+      "max": 0.2996030335324165
+    },
+    "L_still_fraction": {
+      "dtype": "numeric",
+      "null_fraction": 0.0,
+      "min": 0.37,
+      "max": 0.9952764656849123
+    },
+    "L_tremor_mean": {
+      "dtype": "numeric",
+      "null_fraction": 0.0,
+      "min": 0.0019302733386809,
+      "max": 0.086533177770144
+    },
+    "L_tremor_p95": {
+      "dtype": "numeric",
+      "null_fraction": 0.0,
+      "min": 0.0025045195689211,
+      "max": 0.2749713736040925
+    },
+    "L_tremor_ratio": {
+      "dtype": "numeric",
+      "null_fraction": 0.0,
+      "min": 0.5048586383255362,
+      "max": 3.218911209347197
+    },
+    "L_n_samples": {
+      "dtype": "numeric",
+      "null_fraction": 0.0,
+      "min": 359999.0,
+      "max": 360000.0
+    },
+    "L_valid_fraction": {
+      "dtype": "numeric",
+      "null_fraction": 0.0,
+      "min": 0.9999972222222222,
+      "max": 1.0
+    },
+    "L_n_gaps": {
+      "dtype": "numeric",
+      "null_fraction": 0.0,
+      "min": 0.0,
+      "max": 0.0
+    },
+    "L_n_clipped": {
+      "dtype": "numeric",
+      "null_fraction": 0.0,
+      "min": 0.0,
+      "max": 117.0
+    },
+    "L_temp_mean": {
+      "dtype": "numeric",
+      "null_fraction": 0.0,
+      "min": 27.137251388888888,
+      "max": 33.26207444444443
+    },
+    "L_photo_mean": {
+      "dtype": "numeric",
+      "null_fraction": 0.0,
+      "min": 0.0,
+      "max": 984.7149583333334
+    },
+    "L_status": {
+      "dtype": "categorical",
+      "null_fraction": 0.0,
+      "allowed_values": [
+        "ok"
+      ]
+    },
+    "R_move_mean": {
+      "dtype": "numeric",
+      "null_fraction": 0.0,
+      "min": 0.0014498166435418,
+      "max": 0.0882033170674114
+    },
+    "R_move_std": {
+      "dtype": "numeric",
+      "null_fraction": 0.0,
+      "min": 0.0010835771795126,
+      "max": 0.1518969650351659
+    },
+    "R_move_p95": {
+      "dtype": "numeric",
+      "null_fraction": 0.0,
+      "min": 0.0021681144467029,
+      "max": 0.3702262040359085
+    },
+    "R_still_fraction": {
+      "dtype": "numeric",
+      "null_fraction": 0.0,
+      "min": 0.2952777777777777,
+      "max": 0.9986107252014448
+    },
+    "R_tremor_mean": {
+      "dtype": "numeric",
+      "null_fraction": 0.0,
+      "min": 0.0017737512073812,
+      "max": 0.1323353510486252
+    },
+    "R_tremor_p95": {
+      "dtype": "numeric",
+      "null_fraction": 0.0,
+      "min": 0.0024524431687228,
+      "max": 0.4027857418434286
+    },
+    "R_tremor_ratio": {
+      "dtype": "numeric",
+      "null_fraction": 0.0,
+      "min": 0.5031698799363823,
+      "max": 2.617328515676306
+    },
+    "R_n_samples": {
+      "dtype": "numeric",
+      "null_fraction": 0.0,
+      "min": 359999.0,
+      "max": 360000.0
+    },
+    "R_valid_fraction": {
+      "dtype": "numeric",
+      "null_fraction": 0.0,
+      "min": 0.9999972222222222,
+      "max": 1.0
+    },
+    "R_n_gaps": {
+      "dtype": "numeric",
+      "null_fraction": 0.0,
+      "min": 0.0,
+      "max": 0.0
+    },
+    "R_n_clipped": {
+      "dtype": "numeric",
+      "null_fraction": 0.0,
+      "min": 0.0,
+      "max": 120.0
+    },
+    "R_temp_mean": {
+      "dtype": "numeric",
+      "null_fraction": 0.0,
+      "min": 26.264511111111112,
+      "max": 30.66300222222224
+    },
+    "R_photo_mean": {
+      "dtype": "numeric",
+      "null_fraction": 0.0,
+      "min": 0.0,
+      "max": 555.10185
+    },
+    "R_status": {
+      "dtype": "categorical",
+      "null_fraction": 0.0,
+      "allowed_values": [
+        "ok"
+      ]
+    },
+    "asym_move_mean": {
+      "dtype": "numeric",
+      "null_fraction": 0.0,
+      "min": -0.175729724112789,
+      "max": 0.4087532313350393
+    },
+    "asym_tremor_mean": {
+      "dtype": "numeric",
+      "null_fraction": 0.0,
+      "min": -0.1699315909840242,
+      "max": 0.3202381375110996
+    },
+    "asym_still_fraction": {
+      "dtype": "numeric",
+      "null_fraction": 0.0,
+      "min": -0.2055555555555555,
+      "max": 0.0419444444444444
+    },
+    "updrs_off_total": {
+      "dtype": "numeric",
+      "null_fraction": 0.0,
+      "min": 46.0,
+      "max": 46.0
+    },
+    "updrs_on_total": {
+      "dtype": "numeric",
+      "null_fraction": 0.0,
+      "min": 17.0,
+      "max": 17.0
+    },
+    "levodopa_response": {
+      "dtype": "numeric",
+      "null_fraction": 0.0,
+      "min": 0.6304347826086957,
+      "max": 0.6304347826086957
+    },
+    "updrs_days_since_exam": {
+      "dtype": "numeric",
+      "null_fraction": 0.0,
+      "min": 72.0,
+      "max": 72.0
+    },
+    "has_updrs_off": {
+      "dtype": "numeric",
+      "null_fraction": 0.0,
+      "min": 1.0,
+      "max": 1.0
+    },
+    "has_updrs_on": {
+      "dtype": "numeric",
+      "null_fraction": 0.0,
+      "min": 1.0,
+      "max": 1.0
+    },
+    "age": {
+      "dtype": "numeric",
+      "null_fraction": 0.0,
+      "min": 58.0,
+      "max": 58.0
+    },
+    "sex": {
+      "dtype": "categorical",
+      "null_fraction": 0.0,
+      "allowed_values": [
+        "male"
+      ]
+    },
+    "handedness": {
+      "dtype": "categorical",
+      "null_fraction": 0.0,
+      "allowed_values": [
+        "right"
+      ]
+    },
+    "pd_subtype": {
+      "dtype": "categorical",
+      "null_fraction": 0.0,
+      "allowed_values": [
+        "equivalence-type"
+      ]
+    },
+    "pd_dominantside": {
+      "dtype": "categorical",
+      "null_fraction": 0.0,
+      "allowed_values": [
+        "right"
+      ]
+    },
+    "hoehn_yahr": {
+      "dtype": "numeric",
+      "null_fraction": 0.0,
+      "min": 3.0,
+      "max": 3.0
+    },
+    "pd_yearssincediagnosis": {
+      "dtype": "numeric",
+      "null_fraction": 0.0,
+      "min": 13.0,
+      "max": 13.0
+    },
+    "dbs": {
+      "dtype": "categorical",
+      "null_fraction": 0.0,
+      "allowed_values": [
+        "yes"
+      ]
+    },
+    "age_group": {
+      "dtype": "categorical",
+      "null_fraction": 0.0,
+      "allowed_values": [
+        "55-64"
+      ]
+    }
+  }
+}

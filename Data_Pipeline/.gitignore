@@ -1,0 +1,21 @@
+# Secrets
+.env
+keys/
+
+# Raw and intermediate data never go in Git (processed data is tracked by DVC)
+data/raw/*
+data/interim/*
+!data/raw/.gitkeep
+!data/interim/.gitkeep
+*.part
+*.zip
+
+# Logs
+logs/*
+!logs/.gitkeep
+
+# Python
+__pycache__/
+*.pyc
+.pytest_cache/
+.venv/

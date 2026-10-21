@@ -1,0 +1,127 @@
+[
+  {
+    "type": "schema_warning",
+    "column": "participant_id",
+    "detail": "new categories ['COPS-25']"
+  },
+  {
+    "type": "schema_warning",
+    "column": "hour_start",
+    "detail": "range [0, 23] outside baseline [6, 21]"
+  },
+  {
+    "type": "schema_warning",
+    "column": "kinesia_text",
+    "detail": "new categories ['Severe Dyskinesia']"
+  },
+  {
+    "type": "schema_warning",
+    "column": "tremor_score",
+    "detail": "null fraction up by 16.5%"
+  },
+  {
+    "type": "schema_warning",
+    "column": "tremor_score",
+    "detail": "range [0, 2] outside baseline [0, 1]"
+  },
+  {
+    "type": "schema_warning",
+    "column": "tremor_present",
+    "detail": "null fraction up by 16.5%"
+  },
+  {
+    "type": "schema_warning",
+    "column": "dosage_mg",
+    "detail": "range [200, 200] outside baseline [100, 100]"
+  },
+  {
+    "type": "schema_warning",
+    "column": "hours_since_dose",
+    "detail": "range [0, 12] outside baseline [0, 7]"
+  },
+  {
+    "type": "schema_warning",
+    "column": "L_move_mean",
+    "detail": "range [0.001549, 0.07512] outside baseline [0.004252, 0.0531]"
+  },
+  {
+    "type": "schema_warning",
+    "column": "L_tremor_mean",
+    "detail": "range [0.00193, 0.08653] outside baseline [0.005321, 0.03163]"
+  },
+  {
+    "type": "schema_warning",
+    "column": "L_tremor_p95",
+    "detail": "range [0.002505, 0.275] outside baseline [0.01981, 0.1546]"
+  },
+  {
+    "type": "schema_warning",
+    "column": "L_n_clipped",
+    "detail": "range [0, 117] outside baseline [0, 17]"
+  },
+  {
+    "type": "schema_warning",
+    "column": "R_move_std",
+    "detail": "range [0.001084, 0.1519] outside baseline [0.01071, 0.09303]"
+  },
+  {
+    "type": "schema_warning",
+    "column": "R_move_p95",
+    "detail": "range [0.002168, 0.3702] outside baseline [0.01589, 0.2632]"
+  },
+  {
+    "type": "schema_warning",
+    "column": "R_tremor_mean",
+    "detail": "range [0.001774, 0.1323] outside baseline [0.004402, 0.04757]"
+  },
+  {
+    "type": "schema_warning",
+    "column": "R_tremor_p95",
+    "detail": "range [0.002452, 0.4028] outside baseline [0.01226, 0.1503]"
+  },
+  {
+    "type": "schema_warning",
+    "column": "R_n_clipped",
+    "detail": "range [0, 120] outside baseline [0, 19]"
+  },
+  {
+    "type": "schema_warning",
+    "column": "updrs_on_total",
+    "detail": "range [17, 17] outside baseline [26, 26]"
+  },
+  {
+    "type": "schema_warning",
+    "column": "levodopa_response",
+    "detail": "range [0.6304, 0.6304] outside baseline [0.3659, 0.3659]"
+  },
+  {
+    "type": "schema_warning",
+    "column": "updrs_days_since_exam",
+    "detail": "range [72, 72] outside baseline [139, 139]"
+  },
+  {
+    "type": "schema_warning",
+    "column": "sex",
+    "detail": "new categories ['male']"
+  },
+  {
+    "type": "schema_warning",
+    "column": "pd_subtype",
+    "detail": "new categories ['equivalence-type']"
+  },
+  {
+    "type": "schema_warning",
+    "column": "pd_dominantside",
+    "detail": "new categories ['right']"
+  },
+  {
+    "type": "schema_warning",
+    "column": "pd_yearssincediagnosis",
+    "detail": "range [13, 13] outside baseline [8, 8]"
+  },
+  {
+    "type": "schema_warning",
+    "column": "age_group",
+    "detail": "new categories ['55-64']"
+  }
+]
