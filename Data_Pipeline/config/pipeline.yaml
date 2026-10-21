@@ -1,0 +1,126 @@
+# Central configuration for the COPS data pipeline.
+# Every tunable value lives here so scripts contain no hard-coded settings.
+
+data:
+  osf_project_id: 5xvwn
+  osf_api_url: https://api.osf.io/v2
+  # "sample" processes the N smallest participant zips; "full" processes all.
+  mode: sample
+  sample_size: 5
+  # Optional: a folder that already contains participant zips (e.g. COPS-7.zip).
+  # When set, the pipeline uses these files instead of downloading from OSF.
+  local_zip_dir: null
+  # Delete each raw zip after its features are extracted, to save disk space.
+  delete_raw_after_processing: true
+  random_seed: 42
+
+paths:
+  raw_dir: data/raw
+  interim_dir: data/interim
+  processed_dir: data/processed
+  reports_dir: data/reports
+  log_file: logs/pipeline.log
+
+download:
+  timeout_seconds: 120
+  max_retries: 3
+  backoff_seconds: 5
+  chunk_size_bytes: 1048576
+
+files:
+  csv_separator: ";"
+  demographics_file: Demographics.csv
+  participant_zip_pattern: "^COPS-\\d+\\.zip$"
+
+features:
+  sampling_rate_hz: 100
+  expected_seconds_per_file: 3600
+  movement_band_hz: [0.1, 3.0]
+  tremor_band_hz: [4.0, 8.0]
+  filter_order: 4
+  epoch_seconds: 1
+  # An epoch counts as "still" when its mean movement is below this (in g).
+  still_threshold_g: 0.01
+  # GENEActiv sensor range; values outside are physically impossible.
+  accel_range_g: [-8.0, 8.0]
+  # Gaps between samples longer than this are counted as recording gaps.
+  max_sample_gap_seconds: 0.05
+  # Hours with less than this much valid data are not used for features.
+  min_valid_seconds: 60
+
+labels:
+  kinesia_text_to_score:
+    Severe Akinesia: -3
+    Discomforting Akinesia: -2
+    Slight Akinesia: -1
+    Good Kinesia: 0
+    Slight Dyskinesia: 1
+    Discomforting Dyskinesia: 2
+    Severe Dyskinesia: 3
+  tremor_text_to_score:
+    No Tremor: 0
+    Weak Tremor: 1
+    Slight Tremor: 1
+    Strong Tremor: 2
+    Severe Tremor: 2
+  # Collapse the 7-point kinesia score into three classes.
+  kinesia_classes:
+    "off": [-3, -2, -1]
+    "on": [0]
+    "dyskinetic": [1, 2, 3]
+
+cleaning:
+  require_both_wrists: true
+  # Minimum share of the hour with valid samples (applies to partially worn hours too).
+  min_valid_fraction: 0.8
+  # Sensor-based non-wear check, in addition to the diary flag.
+  nonwear_max_temp_c: 25.0
+  nonwear_min_still_fraction: 0.95
+
+anomalies:
+  max_missing_fraction: 0.05
+  # Robust z-score (median / MAD) above which a value is an outlier.
+  outlier_z_limit: 6.0
+  max_outlier_fraction: 0.02
+  min_hours_per_participant: 24
+  # Anomaly types that stop the pipeline (others only send a warning alert).
+  critical_types: [schema_violation, empty_dataset, expectation_failed]
+
+validation:
+  categorical_max_unique: 20
+  # Allowed slack when comparing new numeric ranges with the baseline schema.
+  range_tolerance: 0.25
+  max_null_fraction_increase: 0.05
+
+bias:
+  slice_columns: [sex, age_group, visit, dbs, hoehn_yahr, pd_subtype]
+  age_bins: [0, 55, 65, 120]
+  age_labels: ["<55", "55-64", "65+"]
+  # Binary target used for slice-level model metrics.
+  positive_class: "off"
+  test_fraction: 0.3
+  min_participants_for_model: 4
+  min_slice_rows: 20
+  # A recall gap larger than this between slices is reported as bias.
+  max_recall_gap: 0.10
+
+demographics:
+  # Map Demographics.csv headers to standard names. Headers are lower-cased
+  # and spaces replaced with "_" first. Real headers (checked): id, age, sex,
+  # handedness, pd_subtype, pd_dominantside, pd_hoehnandyahr,
+  # pd_yearssincediagnosis, dbs.
+  column_map:
+    id: participant_id
+    subject: participant_id
+    gender: sex
+    "h&y": hoehn_yahr
+    hoehn_and_yahr: hoehn_yahr
+    hoehnyahr: hoehn_yahr
+    pd_hoehnandyahr: hoehn_yahr
+    subtype: pd_subtype
+    pd_subtype: pd_subtype
+    deep_brain_stimulation: dbs
+
+alerts:
+  email_enabled: true
+  slack_enabled: true
