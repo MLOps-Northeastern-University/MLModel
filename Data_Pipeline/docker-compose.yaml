@@ -39,10 +39,15 @@ services:
 
   airflow-init:
     <<: *airflow-common
-    command: >
-      bash -c "airflow db migrate &&
-               airflow users create --username airflow --password airflow
-               --firstname Admin --lastname User --role Admin --email admin@example.com || true"
+    # One folded line: extra indentation would keep the line breaks and split the command.
+    # Only "user already exists" is ignored; a failed migration still fails.
+    command:
+      - bash
+      - -c
+      - >-
+        airflow db migrate &&
+        (airflow users create --username airflow --password airflow
+        --firstname Admin --lastname User --role Admin --email admin@example.com || true)
 
   airflow-webserver:
     <<: *airflow-common
