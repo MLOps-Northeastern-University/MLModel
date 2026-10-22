@@ -42,8 +42,20 @@ python -m scripts.run_pipeline --local-zips C:\path\to\folder
 - For `--local-zips`, the folder needs the original zips, named like `COPS-7.zip`, plus `Demographics.csv` from the top level of the OSF project.
 - Each participant takes a few minutes. Progress is logged every 20 hours.
 - All settings are in `config/pipeline.yaml`.
+- A participant that fails is skipped and listed in `data/reports/failed_participants.json`, and an alert is sent. If more than 20% fail (`data.max_failed_fraction`), the run stops with exit code 1.
 
-The same steps run as an Airflow DAG in `dags/cops_pipeline_dag.py`, started with `docker compose up airflow-init` and `docker compose up -d`.
+### Airflow
+
+The same steps run as an Airflow DAG in `dags/cops_pipeline_dag.py`. From this folder:
+
+```bash
+docker compose up airflow-init   # first time only: sets up the database and the login
+docker compose up -d             # starts the webserver and scheduler
+```
+
+Open <http://localhost:8080> and log in as `airflow` / `airflow`. Trigger `cops_data_pipeline` with `{"mode": "sample"}` or `{"mode": "full"}`.
+
+A `.env` file is optional. Copy `.env.example` to `.env` only to turn on email or Slack alerts. Without it, alerts are skipped and logged.
 
 ## Test run so far
 
@@ -82,6 +94,7 @@ All in `data/`.
 | `processed/hourly_all.csv` | All diary hours before cleaning |
 | `processed/label_issues.json` | Diary text/score mismatches and missing UPDRS files |
 | `interim/COPS-X_hourly.csv` | Per-participant table before merging |
+| `reports/failed_participants.json` | Participants that could not be processed, with the error (empty means none) |
 | `reports/cleaning_summary.json` | Hours kept and removed, by reason |
 | `reports/schema_baseline.json` | Reference schema from the first run |
 | `reports/validation_report.json` | Failed checks (empty means all passed) |

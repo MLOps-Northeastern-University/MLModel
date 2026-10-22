@@ -9,12 +9,55 @@ Used by `dvc repro` and for quick local runs:
 import argparse
 import sys
 from datetime import datetime
+from pathlib import Path
 
 from scripts import pipeline_steps as steps
+from scripts.alerts import notify
 from scripts.utils.config import load_config
+from scripts.utils.file_io import write_json
 from scripts.utils.logging_setup import get_logger
 
 logger = get_logger("run_pipeline")
+
+
+def process_participants(cfg, participants):
+    """Process every participant, collecting failures instead of stopping.
+
+    Returns:
+        (list, list[dict]): Results of the participants that worked, and one
+        {"participant_id", "error"} entry per participant that failed.
+    """
+    results, failures = [], []
+    for entry in participants:
+        try:
+            results.append(steps.step_participant(cfg, entry))
+        except Exception as exc:  # One bad participant should not stop the rest.
+            logger.error("Skipping %s: %s", entry.get("name"), exc)
+            failures.append({"participant_id": Path(entry.get("name") or "?").stem,
+                             "error": f"{type(exc).__name__}: {exc}"})
+    return results, failures
+
+
+def report_failures(cfg, failures, total):
+    """Save the failed participants, alert on them, and check the limit.
+
+    Writes data/reports/failed_participants.json (empty list when none failed).
+
+    Returns:
+        bool: True when more than data.max_failed_fraction of participants failed.
+    """
+    write_json(failures, cfg["resolved_paths"]["reports_dir"] / "failed_participants.json")
+    if not failures:
+        return False
+    limit = cfg["data"]["max_failed_fraction"]
+    share = len(failures) / total
+    notify(f"[COPS pipeline] {len(failures)} of {total} participants failed",
+           "\n".join(f"{f['participant_id']}: {f['error']}" for f in failures), cfg)
+    if share > limit:
+        logger.error("%d of %d participants failed (%.0f%%, limit %.0f%%)",
+                     len(failures), total, share * 100, limit * 100)
+        return True
+    return False
 
 
 def main(argv=None):
@@ -30,14 +73,9 @@ def main(argv=None):
 
     manifest = steps.step_manifest(cfg, args.mode)
     demographics = steps.step_demographics(cfg, manifest)
-    results = []
-    for entry in manifest["participants"]:
-        try:
-            results.append(steps.step_participant(cfg, entry))
-        except Exception as exc:  # One bad participant should not stop the rest.
-            logger.error("Skipping %s: %s", entry.get("name"), exc)
-    if not results:
-        logger.error("No participants processed")
+    results, failures = process_participants(cfg, manifest["participants"])
+    if report_failures(cfg, failures, len(manifest["participants"])) or not results:
+        logger.error("Stopping: too many participants failed (see failed_participants.json)")
         return 1
 
     merged = steps.step_merge(cfg, results, demographics)

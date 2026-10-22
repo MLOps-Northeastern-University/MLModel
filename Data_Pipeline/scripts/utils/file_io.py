@@ -6,6 +6,10 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
+# Columns that hold text even when a file's values all look like numbers
+# (dosage "50" in one file, "50;50" in another), so reading never changes their type.
+TEXT_COLUMNS = {"dosage_mg": str}
+
 
 def write_table(df, path):
     """Write a DataFrame to CSV, creating the parent folder."""
@@ -17,7 +21,7 @@ def write_table(df, path):
 
 def read_table(path):
     """Read a CSV written by write_table."""
-    return pd.read_csv(path)
+    return pd.read_csv(path, dtype=TEXT_COLUMNS)
 
 
 def write_json(obj, path):

@@ -60,8 +60,13 @@ def check_expectations(df, cfg):
 
 
 def infer_schema(df, cfg):
-    """Describe each column: type, null rate, numeric range or categories."""
+    """Describe each column: type, null rate, numeric range or categories.
+
+    ID columns (validation.id_columns) get no category list, because every
+    new participant would otherwise look like a new category.
+    """
     max_unique = cfg["validation"]["categorical_max_unique"]
+    id_columns = set(cfg["validation"]["id_columns"])
     columns = {}
     for col in df.columns:
         s = df[col]
@@ -70,7 +75,7 @@ def infer_schema(df, cfg):
         if info["dtype"] == "numeric":
             info["min"] = None if s.dropna().empty else float(s.min())
             info["max"] = None if s.dropna().empty else float(s.max())
-        elif s.nunique(dropna=True) <= max_unique:
+        elif col not in id_columns and s.nunique(dropna=True) <= max_unique:
             info["allowed_values"] = sorted(map(str, s.dropna().unique()))
         columns[col] = info
     return {"created_at": datetime.now(timezone.utc).isoformat(), "n_rows": len(df), "columns": columns}

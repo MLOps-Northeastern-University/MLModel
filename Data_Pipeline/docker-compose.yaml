@@ -1,17 +1,20 @@
 # Airflow with LocalExecutor and Postgres.
-# Run from the Data-Pipeline folder. The whole repository (..) is mounted so
+# Run from the Data_Pipeline folder. The whole repository (..) is mounted so
 # DVC and Git work inside the containers.
 
 x-airflow-common: &airflow-common
   build: .
-  env_file: .env
+  # Optional: copy .env.example to .env to turn on email/Slack alerts.
+  env_file:
+    - path: .env
+      required: false
   environment:
     AIRFLOW__CORE__EXECUTOR: LocalExecutor
     AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@postgres/airflow
     AIRFLOW__CORE__LOAD_EXAMPLES: "false"
-    AIRFLOW__CORE__DAGS_FOLDER: /opt/airflow/repo/Data-Pipeline/dags
+    AIRFLOW__CORE__DAGS_FOLDER: /opt/airflow/repo/Data_Pipeline/dags
     AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: "true"
-    PYTHONPATH: /opt/airflow/repo/Data-Pipeline
+    PYTHONPATH: /opt/airflow/repo/Data_Pipeline
   volumes:
     - ..:/opt/airflow/repo
     - ./logs/airflow:/opt/airflow/logs
