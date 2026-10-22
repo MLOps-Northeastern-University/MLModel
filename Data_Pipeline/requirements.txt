@@ -1,0 +1,15 @@
+# Pipeline libraries (installed in the Airflow image and for local runs)
+pandas==2.2.3
+numpy==1.26.4
+scipy==1.13.1
+scikit-learn==1.5.2
+PyYAML==6.0.2
+requests==2.32.3
+fairlearn==0.11.0
+
+# Data versioning
+dvc[gs]==3.55.2
+
+# Testing and style
+pytest==8.3.3
+flake8==7.1.1

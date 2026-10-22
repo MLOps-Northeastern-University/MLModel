@@ -1,0 +1,16 @@
+# The same pipeline as the Airflow DAG, runnable with `dvc repro`.
+# After an Airflow run, the dvc_version task records the outputs with
+# `dvc commit -f build_dataset`, updating dvc.lock.
+stages:
+  build_dataset:
+    cmd: python -m scripts.run_pipeline --mode sample
+    deps:
+      - scripts
+      - config/pipeline.yaml
+    outs:
+      - data/processed/hourly_features.csv
+      - data/processed/hourly_all.csv
+      - data/processed/label_issues.json
+    metrics:
+      - data/reports/cleaning_summary.json:
+          cache: false
