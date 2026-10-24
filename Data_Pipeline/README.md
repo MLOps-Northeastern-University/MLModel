@@ -105,6 +105,45 @@ All in `data/`.
 
 Raw and interim data are not committed to Git.
 
+## Data versioning (DVC)
+
+The pipeline is one DVC stage, `build_dataset` in `dvc.yaml`: its inputs are `scripts/` and `config/pipeline.yaml`, and its outputs are every file above except `raw/` and `interim/`. DVC is set up in this folder (`dvc init --subdir`, so `.dvc/` is here and not at the repo root).
+
+**What goes where:**
+
+| Where | What |
+| --- | --- |
+| Git | The code, `dvc.yaml`, and `dvc.lock`, which records the hash of every input and output for each version |
+| Git, readable by anyone | The summary reports with no participant IDs: `cleaning_summary.json`, `bias_report.md` and `bias_report.json` (`cache: false` in `dvc.yaml`) |
+| DVC, never Git | The datasets and the reports that name participants: `processed/`, the statistics, schema, validation, anomaly and failure reports |
+
+The schema baseline, the statistics and their history are `persist: true`, so they're kept between runs: each run is validated against the first, and the history grows by one line per run.
+
+**Making a version:**
+
+```bash
+dvc repro            # runs the pipeline if code, config or data changed, and updates dvc.lock
+git add dvc.lock data/reports/cleaning_summary.json data/reports/bias_report.*
+git commit -m "Data version: <what changed>"
+dvc push             # uploads the data to the remote
+```
+
+After an Airflow run, the `dvc_version` task does the same with `dvc commit -f build_dataset`.
+
+**Getting a version:** `git checkout <commit>` and then `dvc pull` restore exactly the data of that commit. Without access to the remote, `dvc repro` rebuilds it from OSF, and `dvc.lock` shows whether the result matches.
+
+**Where the data is stored (the remote).** The data goes to a DVC remote, set once per machine. It isn't set in the repo yet, so choose one:
+
+```bash
+# Google Cloud Storage (dvc[gs] is in requirements.txt). Sign in first: gcloud auth application-default login
+dvc remote add -d storage gs://<bucket>/cops-dvc
+
+# Or a folder outside the repo, until a bucket exists
+dvc remote add -d --local storage <path outside the repo>
+```
+
+`--local` keeps a folder remote in `.dvc/config.local`, which is not committed, so each person's path stays their own. A bucket remote is committed in `.dvc/config` for everyone. Moving from a folder to a bucket later needs no re-run: add the bucket remote, then `dvc push`.
+
 ## Contributions
 
 Newest first.
