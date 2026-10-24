@@ -107,15 +107,15 @@ Raw and interim data are not committed to Git.
 
 ## Data versioning (DVC)
 
-The pipeline is one DVC stage, `build_dataset` in `dvc.yaml`: its inputs are `scripts/` and `config/pipeline.yaml`, and its outputs are every file above except `raw/` and `interim/`. DVC is set up in this folder (`dvc init --subdir`, so `.dvc/` is here and not at the repo root).
+The pipeline is one DVC stage, `build_dataset` in `dvc.yaml`: its inputs are `scripts/` and `config/pipeline.yaml`, and its outputs are everything it writes to `processed/` and `reports/` (listed in `dvc.yaml`). `raw/` and `interim/` are working files and aren't versioned. DVC is set up in this folder (`dvc init --subdir`, so `.dvc/` is here and not at the repo root).
 
 **What goes where:**
 
 | Where | What |
 | --- | --- |
 | Git | The code, `dvc.yaml`, and `dvc.lock`, which records the hash of every input and output for each version |
-| Git, readable by anyone | The summary reports with no participant IDs: `cleaning_summary.json`, `bias_report.md` and `bias_report.json` (`cache: false` in `dvc.yaml`) |
-| DVC, never Git | The datasets and the reports that name participants: `processed/`, the statistics, schema, validation, anomaly and failure reports |
+| Git, readable by anyone | The summary reports with no participant IDs: `cleaning_summary.json` and `bias_report.md` (`cache: false` in `dvc.yaml`) |
+| DVC, never Git | The datasets and the reports that name participants: `processed/`, the statistics, schema, validation, anomaly and failure reports, and `bias_report.json` (it lists the test participants) |
 
 The schema baseline, the statistics and their history are `persist: true`, so they're kept between runs: each run is validated against the first, and the history grows by one line per run.
 
@@ -123,7 +123,7 @@ The schema baseline, the statistics and their history are `persist: true`, so th
 
 ```bash
 dvc repro            # runs the pipeline if code, config or data changed, and updates dvc.lock
-git add dvc.lock data/reports/cleaning_summary.json data/reports/bias_report.*
+git add dvc.lock data/reports/cleaning_summary.json data/reports/bias_report.md
 git commit -m "Data version: <what changed>"
 dvc push             # uploads the data to the remote
 ```

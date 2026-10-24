@@ -14,7 +14,6 @@ data/reports/*
 !data/processed/.gitkeep
 !data/reports/.gitkeep
 !data/reports/cleaning_summary.json
-!data/reports/bias_report.json
 !data/reports/bias_report.md
 *.part
 *.zip

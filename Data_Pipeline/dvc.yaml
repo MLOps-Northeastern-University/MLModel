@@ -5,8 +5,8 @@
 # Outputs are versioned by DVC, not Git: dvc.lock (in Git) records each one's
 # hash, and `dvc push` / `dvc pull` move the files to and from the remote.
 # Reports that name participants (row-level issues, statistics, schema) stay
-# out of Git. The summary reports that don't (bias report, cleaning summary)
-# are `cache: false`, so they're kept in Git for anyone to read.
+# out of Git. The summary reports that don't (bias_report.md, the cleaning
+# summary) are `cache: false`, so they're kept in Git for anyone to read.
 stages:
   build_dataset:
     cmd: python -m scripts.run_pipeline --mode sample
@@ -21,8 +21,9 @@ stages:
       - data/reports/validation_report.json
       - data/reports/schema_latest.json
       - data/reports/anomalies.json
-      - data/reports/bias_report.json:
-          cache: false
+      # The JSON lists which participants the bias model was tested on, so it
+      # stays in DVC; the Markdown summary has no IDs and is kept in Git.
+      - data/reports/bias_report.json
       - data/reports/bias_report.md:
           cache: false
       # Kept between runs (DVC deletes outputs before a run otherwise): the
