@@ -74,8 +74,10 @@ jobs:
         run: pip install -r requirements.txt
       - name: Lint (flake8)
         run: flake8 scripts dags tests
-      - name: Unit tests
-        run: pytest -q
+      # Fails if coverage of scripts/ drops below 85%. The DAG's own tests need Airflow and
+      # skip here; they run in the Airflow image (see tests/test_dag.py).
+      - name: Unit tests, with a coverage floor
+        run: pytest -q --cov=scripts --cov-branch --cov-report=term-missing:skip-covered --cov-fail-under=85
       - name: DVC reads the pipeline
         run: dvc dag
 

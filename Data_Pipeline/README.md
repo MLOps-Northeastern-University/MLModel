@@ -35,6 +35,25 @@ pytest -v
 
 All tests should pass. They use small synthetic files, so no download is needed.
 
+## Tests
+
+`pytest` runs 83 tests in `tests/`, on synthetic participants made by `tests/helpers.py`. No test downloads anything or sends a real alert.
+
+| File | What it checks |
+| --- | --- |
+| `test_diary.py` | Diary parsing, kinesia classes, text/score mismatches, every dose-column layout |
+| `test_features.py` | Movement and tremor features, gravity removal, missing and impossible values, corrupt files, and the fast CSV reader matching pandas exactly |
+| `test_clean_and_join.py` | Every cleaning rule, duplicates, merging participants and demographics |
+| `test_validate_and_anomalies.py` | Rules, schema against the baseline, statistics, outliers, label issues |
+| `test_acquire_and_bias.py` | Choosing participants from the OSF listing, and the bias report |
+| `test_download.py` | Retries after a dropped connection, refusing corrupt or truncated downloads, the download cache, OSF paging and outages, local zips |
+| `test_alerts.py` | Email and Slack alerts when set up, skipped when not, and a broken mail server or webhook never crashing the run |
+| `test_run_pipeline.py` | Failed participants reported, the failure limit, parallel runs matching sequential ones |
+| `test_end_to_end.py` | The whole pipeline on four synthetic participants: every output, exact row counts, a second run checked against the first, and stopping on too many failures or on critical anomalies |
+| `test_dag.py` | The Airflow DAG loads, its tasks run in order, and failures retry and alert. Needs Airflow, so it skips locally; run it in the Airflow image: `docker compose run --rm -w /opt/airflow/repo/Data_Pipeline airflow-scheduler python -m pytest tests/test_dag.py` |
+
+Coverage of `scripts/` is about 91%: `pytest --cov=scripts --cov-branch`. CI fails below 85%.
+
 ## Running
 
 Run from this folder.
