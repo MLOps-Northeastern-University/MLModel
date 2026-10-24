@@ -36,6 +36,9 @@ download:
   max_retries: 3
   backoff_seconds: 5
   chunk_size_bytes: 1048576
+  # Downloads are refused unless they're https:// on one of these domains (or a
+  # subdomain, like files.osf.io), whatever address the OSF listing gives.
+  allowed_hosts: [osf.io]
 
 files:
   csv_separator: ";"

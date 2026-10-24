@@ -20,7 +20,7 @@ def cfg(tmp_path):
 
 
 def entry(**overrides):
-    base = {"name": "COPS-1.zip", "download_url": "https://osf.example/1",
+    base = {"name": "COPS-1.zip", "download_url": "https://files.osf.io/v1/resources/5xvwn/providers/osfstorage/1",
             "size": len(CONTENT), "sha256": SHA}
     return {**base, **overrides}
 
@@ -217,3 +217,32 @@ def test_an_empty_local_folder_is_reported(tmp_path):
     cfg = make_config(tmp_path, data={"local_zip_dir": str(tmp_path / "zips")})
     with pytest.raises(acquire.AcquisitionError, match="No participant zips found"):
         acquire.build_local_manifest(cfg, "full")
+
+
+# ---------- safety ----------
+
+@pytest.mark.parametrize("url", [
+    "http://files.osf.io/v1/file",           # not https
+    "https://evil.example/COPS-1.zip",        # another site
+    "https://osf.io.evil.example/x",          # osf.io only as part of another domain
+    "https://notosf.io/x",                    # a look-alike domain
+    "file:///etc/passwd",                     # a local file
+    "",                                       # no address at all
+])
+def test_downloads_only_from_osf_over_https(cfg, tmp_path, url):
+    with pytest.raises(acquire.AcquisitionError, match="Refusing to download"):
+        acquire.download_file(entry(download_url=url), cfg, tmp_path / "raw", NoNetwork())
+
+
+@pytest.mark.parametrize("url", ["https://osf.io/download/abc/", "https://files.osf.io/v1/resources/x"])
+def test_osf_addresses_are_accepted(cfg, url):
+    acquire.check_download_url(url, cfg)  # no error
+
+
+@pytest.mark.parametrize("name", ["../../COPS-1.zip", "COPS-1.zip/../../evil.zip", "COPS-1.zip.exe",
+                                  r"C:\COPS-1.zip", "COPS-x.zip"])
+def test_odd_file_names_in_the_listing_are_never_chosen(cfg, name):
+    files = [{"name": name, "size": 1}, {"name": "COPS-2.zip", "size": 2},
+             {"name": "Demographics.csv", "size": 1}]
+    manifest = acquire.build_manifest(files, cfg, "full")
+    assert [p["name"] for p in manifest["participants"]] == ["COPS-2.zip"]
