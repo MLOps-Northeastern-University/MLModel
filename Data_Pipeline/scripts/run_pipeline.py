@@ -15,7 +15,6 @@ from pathlib import Path
 from scripts import pipeline_steps as steps
 from scripts.alerts import notify
 from scripts.utils.config import load_config
-from scripts.utils.file_io import write_json
 from scripts.utils.logging_setup import get_logger
 
 logger = get_logger("run_pipeline")
@@ -70,18 +69,8 @@ def report_failures(cfg, failures, total):
     Returns:
         bool: True when more than data.max_failed_fraction of participants failed.
     """
-    write_json(failures, cfg["resolved_paths"]["reports_dir"] / "failed_participants.json")
-    if not failures:
-        return False
-    limit = cfg["data"]["max_failed_fraction"]
-    share = len(failures) / total
-    notify(f"[COPS pipeline] {len(failures)} of {total} participants failed",
-           "\n".join(f"{f['participant_id']}: {f['error']}" for f in failures), cfg)
-    if share > limit:
-        logger.error("%d of %d participants failed (%.0f%%, limit %.0f%%)",
-                     len(failures), total, share * 100, limit * 100)
-        return True
-    return False
+    # The same rule as the DAG's check_failures task.
+    return steps.record_failures(cfg, failures, total, alert=notify)
 
 
 def main(argv=None):

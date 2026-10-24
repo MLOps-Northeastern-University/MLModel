@@ -1,9 +1,12 @@
 """Airflow DAG for the COPS Parkinson's data pipeline.
 
 Flow:
-    fetch_manifest -> download_demographics ----------------------------+
-                   -> process_participant (one mapped task per person) -+-> merge
+    fetch_manifest -> download_demographics ---------------------------------------------+
+                   -> process_participant (one mapped task per person) -> check_failures -+-> merge
     merge -> clean -> validate -> detect_anomalies -> bias_report -> dvc_version -> notify
+
+check_failures runs when every participant has finished or failed, and stops
+the run only if more than data.max_failed_fraction failed.
 
 process_participant downloads, extracts features and deletes the zip in one
 task. Splitting download and processing into two mapped tasks would make
@@ -69,6 +72,13 @@ def cops_data_pipeline():
     def process_participant(entry):
         return steps.step_participant(load_config(), entry)
 
+    # Runs once every participant has finished or failed ("all_done"), so one
+    # participant that fails after its retries doesn't fail the whole run.
+    # Like the command line, it stops only if too many failed.
+    @task(trigger_rule="all_done")
+    def check_failures(manifest, results):
+        return steps.step_check_failures(load_config(), manifest, list(results))
+
     @task
     def merge(results, demographics_path):
         return steps.step_merge(load_config(), list(results), demographics_path)
@@ -110,7 +120,8 @@ def cops_data_pipeline():
     manifest = fetch_manifest()
     demographics = download_demographics(manifest)
     results = process_participant.expand(entry=list_participants(manifest))
-    features = validate(clean(merge(results, demographics)))
+    succeeded = check_failures(manifest, results)
+    features = validate(clean(merge(succeeded, demographics)))
     report = bias_report(detect_anomalies(features))
     report >> dvc_version >> notify_success(report)
 

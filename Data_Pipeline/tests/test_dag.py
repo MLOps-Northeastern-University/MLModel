@@ -33,7 +33,7 @@ def upstream(dag, task_id):
 def test_the_dag_has_every_step(dag):
     assert set(dag.task_ids) == {
         "fetch_manifest", "download_demographics", "list_participants", "process_participant",
-        "merge", "clean", "validate", "detect_anomalies", "bias_report", "dvc_version",
+        "check_failures", "merge", "clean", "validate", "detect_anomalies", "bias_report", "dvc_version",
         "notify_success",
     }
 
@@ -42,8 +42,10 @@ def test_the_steps_run_in_order(dag):
     assert upstream(dag, "download_demographics") == {"fetch_manifest"}
     assert upstream(dag, "list_participants") == {"fetch_manifest"}
     assert upstream(dag, "process_participant") == {"list_participants"}
-    # Merging waits for every participant and the demographics.
-    assert upstream(dag, "merge") == {"process_participant", "download_demographics"}
+    # Every participant has finished or failed before the failures are checked,
+    # and merging waits for that check and the demographics.
+    assert upstream(dag, "check_failures") == {"fetch_manifest", "process_participant"}
+    assert upstream(dag, "merge") == {"check_failures", "download_demographics"}
     for task, before in [("clean", "merge"), ("validate", "clean"), ("detect_anomalies", "validate"),
                          ("bias_report", "detect_anomalies"), ("dvc_version", "bias_report")]:
         assert upstream(dag, task) == {before}, task
@@ -57,6 +59,14 @@ def test_failures_retry_and_alert(dag):
     assert dag.get_task("process_participant").retries == 2  # downloads can fail for a moment
     assert dag.get_task("detect_anomalies").retries == 0  # bad data won't get better by retrying
     assert dag.get_task("merge").retries == 1
+
+
+def test_one_failed_participant_does_not_fail_the_run(dag):
+    # check_failures runs even when some participants failed; it decides whether to carry on.
+    assert dag.get_task("check_failures").trigger_rule == "all_done"
+    # Every later step still needs everything before it to have worked.
+    for task in ["merge", "clean", "validate", "detect_anomalies", "bias_report"]:
+        assert dag.get_task(task).trigger_rule == "all_success", task
 
 
 def test_participants_run_in_parallel_as_configured(dag):
