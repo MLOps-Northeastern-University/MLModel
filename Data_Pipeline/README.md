@@ -10,6 +10,18 @@ Turns the COPS Parkinson's dataset ([osf.io/5xvwn](https://osf.io/5xvwn/)) into 
 | 0 | `on` |
 | +1, +2, +3 | `dyskinetic` |
 
+## Dataset
+
+**COPS** ([osf.io/5xvwn](https://osf.io/5xvwn/)), a public dataset of people with Parkinson's disease recorded at home. Check the OSF page for its licence, and cite it as the page asks.
+
+- **66 participants**, one zip each (47.9 GB in all; the 5 smallest, used by `sample` mode, are 1.1 GB).
+- **Wrist sensors** on both wrists: one CSV per wrist per hour, 100 samples a second, with acceleration `X`, `Y`, `Z` (in g), `Photo` (light) and `Temp` (temperature).
+- **An hourly symptom diary** filled in by the participant: kinesia (−3 to +3, the label), tremor, freezing, falls, medication and dose, and whether the watch was worn.
+- **Clinical exams:** MDS-UPDRS Part III, OFF and ON medication.
+- **`Demographics.csv`:** age, sex, handedness, Parkinson's subtype and dominant side, Hoehn & Yahr stage, years since diagnosis, and DBS.
+
+Participant IDs are the dataset's own pseudonyms (`COPS-7`). Even so, files that list participants are versioned by DVC, not committed (see [Data versioning](#data-versioning-dvc)).
+
 ## Setup
 
 Use **Python 3.11**. Newer versions fail to install the pinned libraries.
@@ -40,7 +52,8 @@ python -m scripts.run_pipeline --local-zips C:\path\to\folder
 
 - Write `scripts.run_pipeline` without `.py`.
 - For `--local-zips`, the folder needs the original zips, named like `COPS-7.zip`, plus `Demographics.csv` from the top level of the OSF project.
-- Each participant takes a few minutes. Progress is logged every 20 hours.
+- Processing one participant takes about half a minute, plus its download (see [Speed](#speed)). Progress is logged every 20 hours.
+- Participants run 4 at a time (`run.parallel_participants`), each in its own process. Set it to 1 to run them one after another.
 - All settings are in `config/pipeline.yaml`.
 - A participant that fails is skipped and listed in `data/reports/failed_participants.json`, and an alert is sent. If more than 20% fail (`data.max_failed_fraction`), the run stops with exit code 1.
 
@@ -59,18 +72,18 @@ A `.env` file is optional. Copy `.env.example` to `.env` only to turn on email o
 
 ## Test run so far
 
-The full dataset is very large (hundreds of hourly sensor files per participant), so the pipeline has so far been run on **one participant, COPS-7**, downloaded manually from OSF and run with `--local-zips`. All current outputs describe COPS-7 only:
+The full dataset is very large (hundreds of hourly sensor files per participant), so the pipeline has so far been run on **single participants**, downloaded manually from OSF and run with `--local-zips`. The first run, on **COPS-7**:
 
 - 192 diary hours, 105 usable after cleaning (58 dyskinetic, 31 on, 16 off)
 - Removed: 80 without a label (sleep, no data), 5 not worn, 2 with too little valid sensor data
 - 0 validation failures; 4 anomaly warnings, all diary text/score mismatches
 - The bias report has data-level slices only. The model-level comparison needs several participants and was skipped.
 
-Results across participants will come from a `sample` or `full` run.
+The summary reports in Git (`data/reports/cleaning_summary.json`, `bias_report.md`) are from a later single-participant run, on COPS-25: 72 diary hours, 36 usable. Results across participants will come from a `sample` or `full` run.
 
 ## Preprocessing steps
 
-1. **Acquire:** list files on OSF, pick participants, download one zip at a time, and delete it after processing.
+1. **Acquire:** list files on OSF, pick participants, and for each one download its zip (checked against OSF's SHA-256, with retries), process it, and delete it. Several participants run at once.
 2. **Parse the diary:** read the hourly diary, map `KinesiaScore` to off / on / dyskinetic, and flag rows where the text and score disagree (the text is trusted).
 3. **Extract features** for each hour and each wrist:
     1. Magnitude per row: √(X² + Y² + Z²)
@@ -97,13 +110,64 @@ All in `data/`.
 | `reports/failed_participants.json` | Participants that could not be processed, with the error (empty means none) |
 | `reports/cleaning_summary.json` | Hours kept and removed, by reason |
 | `reports/schema_baseline.json` | Reference schema from the first run |
+| `reports/schema_latest.json` | Schema of the latest run |
 | `reports/validation_report.json` | Failed checks (empty means all passed) |
+| `reports/stats/stats_<run>.json` | Full statistics of each run |
 | `reports/stats_history.csv` | One summary line per run |
 | `reports/anomalies.json` | Critical anomalies and warnings |
-| `reports/bias_report.md` | Bias slicing results |
+| `reports/bias_report.md` | Bias slicing results, to read |
+| `reports/bias_report.json` | The same, as data, with the participants the model was tested on |
 | `raw/manifest.json` | Files used in the run |
 
-Raw and interim data are not committed to Git.
+Only `cleaning_summary.json` and `bias_report.md` are committed to Git; DVC versions the rest of `processed/` and `reports/`. Raw and interim data aren't versioned.
+
+## Data card
+
+`processed/hourly_features.csv`: one row per participant-hour that has a label and usable sensor data from both wrists.
+
+| Group | Columns | What they are |
+| --- | --- | --- |
+| Identifiers | `participant_id`, `visit`, `day`, `hour_start`, `hour_index` | Who and when: the diary day, the hour it starts (0–23), and hours since the first diary day (`day × 24 + hour_start`) |
+| **Label** | `kinesia_class` | `off`, `on` or `dyskinetic`, from `kinesia_score` |
+| Diary | `kinesia_text`, `kinesia_score`, `tremor_score`, `tremor_present`, `freezing`, `fall`, `wear_status` | The participant's own hourly entries; `kinesia_score` runs from −3 to +3 |
+| Medication | `medication_taken`, `medication`, `dosage_mg`, `hours_since_dose` | Doses logged in the diary, and hours since the last one |
+| Movement, per wrist (`L_`, `R_`) | `move_mean`, `move_std`, `move_p95`, `still_fraction` | Everyday movement (0.1–3 Hz), from the per-second averages over the hour |
+| Tremor, per wrist | `tremor_mean`, `tremor_p95`, `tremor_ratio` | Tremor-band movement (4–8 Hz), and its size relative to everyday movement |
+| Quality, per wrist | `n_samples`, `valid_fraction`, `n_gaps`, `n_clipped`, `temp_mean`, `photo_mean`, `status` | How much usable data the hour had, gaps and clipped values, and the sensor's temperature and light |
+| Asymmetry | `asym_move_mean`, `asym_tremor_mean`, `asym_still_fraction` | Right against left: +1 all on the right, −1 all on the left |
+| Clinical | `updrs_off_total`, `updrs_on_total`, `levodopa_response`, `updrs_days_since_exam`, `has_updrs_off`, `has_updrs_on` | MDS-UPDRS Part III OFF and ON; `levodopa_response` is (OFF − ON) / OFF |
+| Demographics | `age`, `age_group`, `sex`, `handedness`, `pd_subtype`, `pd_dominantside`, `hoehn_yahr`, `pd_yearssincediagnosis`, `dbs` | From `Demographics.csv`; `age_group` is `<55`, `55-64` or `65+`. Also the slices for the bias report. |
+| Files | `left_zip`, `left_csv`, `right_zip`, `right_csv` | The sensor files each row was computed from, for tracing |
+
+## Code structure
+
+```text
+Data_Pipeline/
+├── config/pipeline.yaml   every setting: paths, download, features, cleaning, validation, alerts, bias
+├── dags/                  cops_pipeline_dag.py: the Airflow DAG
+├── scripts/               the pipeline, one module per step
+│   ├── acquire.py         list OSF files, choose participants, download with retries and checksums
+│   ├── diary.py           read the hourly diary, map kinesia to classes, flag text/score mismatches
+│   ├── features.py        read the wrist CSVs, filter, and compute the hourly features per wrist
+│   ├── patient_info.py    UPDRS exams and levodopa response
+│   ├── process_patient.py one participant zip -> one hourly table (the unit of parallel work)
+│   ├── join.py            merge participants and demographics
+│   ├── clean.py           drop unusable hours, with a count for each reason
+│   ├── validate.py        rules, schema against the baseline, statistics and their history
+│   ├── anomalies.py       missing values, outliers, low coverage, label issues
+│   ├── bias.py            data slicing and the baseline model's results per slice, with reweighting
+│   ├── alerts.py          email and Slack alerts
+│   ├── pipeline_steps.py  each step as a function, shared by the DAG and the command line
+│   ├── run_pipeline.py    the whole pipeline without Airflow (also what dvc repro runs)
+│   └── utils/             config loading, file reading and writing, logging
+├── tests/                 pytest tests on small synthetic files (no download)
+├── data/                  raw/, interim/, processed/, reports/ (see Output files)
+├── docs/gantt/            Airflow Gantt charts
+├── logs/                  pipeline.log
+├── dvc.yaml               the DVC stage
+├── Dockerfile, docker-compose.yaml   the Airflow setup
+└── requirements.txt
+```
 
 ## Data versioning (DVC)
 
@@ -116,6 +180,8 @@ The pipeline is one DVC stage, `build_dataset` in `dvc.yaml`: its inputs are `sc
 | Git | The code, `dvc.yaml`, and `dvc.lock`, which records the hash of every input and output for each version |
 | Git, readable by anyone | The summary reports with no participant IDs: `cleaning_summary.json` and `bias_report.md` (`cache: false` in `dvc.yaml`) |
 | DVC, never Git | The datasets and the reports that name participants: `processed/`, the statistics, schema, validation, anomaly and failure reports, and `bias_report.json` (it lists the test participants) |
+
+There are no separate `.dvc` files: in a DVC pipeline, `dvc.lock` records the outputs, doing the job `.dvc` files do for data added with `dvc add`.
 
 The schema baseline, the statistics and their history are `persist: true`, so they're kept between runs: each run is validated against the first, and the history grows by one line per run.
 
@@ -143,6 +209,17 @@ dvc remote add -d --local storage <path outside the repo>
 ```
 
 `--local` keeps a folder remote in `.dvc/config.local`, which is not committed, so each person's path stays their own. A bucket remote is committed in `.dvc/config` for everyone. Moving from a folder to a bucket later needs no re-run: add the bucket remote, then `dvc push`.
+
+## Speed
+
+Each participant has about 190 diary hours, and each hour is one CSV per wrist of 360,000 rows (100 a second). Profiling one full-size hour showed where the time went: reading the CSV (0.25 s) and converting its clock times to seconds (0.20 s), not the filtering (0.015 s). Two changes followed:
+
+| Change | Before | After |
+| --- | --- | --- |
+| Read each CSV with pyarrow, with typed columns, so clock times are parsed while reading. Files with a broken value fall back to pandas and are cleaned as before; the features are identical. | 0.68 s per wrist-hour | 0.09 s per wrist-hour |
+| Process participants in parallel on the command line too, not only in Airflow (`run.parallel_participants`, 4) | One participant at a time | 4 at a time |
+
+Together, processing one participant went from about 4.3 minutes to about 35 seconds, and the command-line run handles four at once. Downloading is now the larger share of the time. Measured on one laptop with a synthetic full-size hour; real runs also depend on the network.
 
 ## Contributions
 
