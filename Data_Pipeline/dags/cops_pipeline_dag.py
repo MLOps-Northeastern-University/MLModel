@@ -29,7 +29,8 @@ from scripts import pipeline_steps as steps  # noqa: E402
 from scripts.alerts import airflow_failure_callback, notify  # noqa: E402
 from scripts.utils.config import load_config  # noqa: E402
 
-PARALLEL_PARTICIPANTS = 4
+# How many participants run at once: the same setting as the command-line run.
+PARALLEL_PARTICIPANTS = load_config()["run"]["parallel_participants"]
 
 default_args = {
     "owner": "mednova",

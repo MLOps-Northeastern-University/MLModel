@@ -17,6 +17,13 @@ data:
   # Failed participants are listed in reports/failed_participants.json either way.
   max_failed_fraction: 0.2
 
+run:
+  # Participants processed at the same time, each in its own process (download,
+  # features, delete the zip), by the command-line run and the Airflow DAG.
+  # 1 processes them one after another. Each uses one CPU core and holds one
+  # participant zip on disk at a time.
+  parallel_participants: 4
+
 paths:
   raw_dir: data/raw
   interim_dir: data/interim
