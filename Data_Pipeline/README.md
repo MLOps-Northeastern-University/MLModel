@@ -104,3 +104,12 @@ All in `data/`.
 | `raw/manifest.json` | Files used in the run |
 
 Raw and interim data are not committed to Git.
+
+## Contributions
+
+Newest first.
+
+| Date | Who | What changed | PR |
+| --- | --- | --- | --- |
+| 2026-10-22 | Shaikh Basim | Fixed the pipeline run: diaries with `Dosage` or `Dosage_1..N` columns are read, failed participants are listed in `failed_participants.json` with an alert, the Airflow DAG path in `docker-compose.yaml` is fixed, `.env` is optional, Airflow is pinned in the Dockerfile, and `airflow-init` creates the admin user | #4 |
+| 2026-10-21 | Tejaswini Sarikonda | Built the data pipeline: download from OSF, diary parsing, wrist features, cleaning, validation and statistics, anomaly alerts, bias slicing, the Airflow DAG, the DVC stage, the Docker setup and the tests | #3 |
