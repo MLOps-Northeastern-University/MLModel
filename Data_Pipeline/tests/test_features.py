@@ -1,8 +1,13 @@
+import io
+
 import numpy as np
+import pandas as pd
 import pytest
 
-from scripts.features import ParticipantArchive, bandpass, combine_wrists, compute_hour_features, wrist_features
-from tests.helpers import make_config, make_participant_zip, signal
+from scripts.features import (
+    ParticipantArchive, bandpass, combine_wrists, compute_hour_features, read_hour_csv, wrist_features,
+)
+from tests.helpers import csv_bytes, make_config, make_participant_zip, signal
 
 
 @pytest.fixture
@@ -80,3 +85,48 @@ def test_time_parsing_fast_path_and_fallback():
     assert out[1] == pytest.approx(86399.99)
     assert out[2] == pytest.approx(32400.5)  # odd layout uses the fallback
     assert np.isnan(out[3])
+
+
+# ---------- The fast CSV reader ----------
+
+def _slow_read(data):
+    """What read_hour_csv did before the fast reader: pandas, everything as text."""
+    return pd.read_csv(io.BytesIO(data), sep=";")
+
+
+def test_fast_reader_gives_the_same_features_as_pandas(cfg):
+    data = csv_bytes(signal("tremor"))
+    fast = compute_hour_features(read_hour_csv(io.BytesIO(data)), cfg)
+    slow = compute_hour_features(_slow_read(data), cfg)
+    assert fast == pytest.approx(slow, nan_ok=True)
+
+
+def test_fast_reader_turns_clock_times_into_seconds():
+    df = read_hour_csv(io.BytesIO(csv_bytes(signal("still", seconds=2))))
+    assert pd.api.types.is_float_dtype(df["Time"])
+    assert df["Time"].iloc[0] == pytest.approx(11 * 3600 + 0.01)
+
+
+def test_empty_values_stay_missing_with_the_fast_reader(cfg):
+    df = signal("moving")
+    df.loc[:500, "X"] = np.nan
+    read = read_hour_csv(io.BytesIO(csv_bytes(df)))
+    assert read["X"].isna().sum() == 501
+    assert compute_hour_features(read, cfg)["valid_fraction"] < 1
+
+
+def test_a_broken_value_falls_back_to_pandas_and_is_cleaned(cfg):
+    df = signal("moving").astype({"X": object})
+    df.loc[3, "X"] = "garbage"
+    df.loc[4, "Time"] = "not a time"
+    read = read_hour_csv(io.BytesIO(csv_bytes(df)))
+    assert read["X"].dtype == object  # read as text, by pandas
+    f = compute_hour_features(read, cfg)
+    assert f["status"] == "ok"
+    assert f["valid_fraction"] < 1  # the broken row is dropped
+
+
+def test_missing_columns_are_still_refused():
+    data = csv_bytes(signal("still", seconds=2).drop(columns=["Z"]))
+    with pytest.raises(ValueError, match="missing columns"):
+        read_hour_csv(io.BytesIO(data))

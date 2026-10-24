@@ -33,10 +33,18 @@ jobs:
           blocked='\.(csv|tsv|parquet|feather|h5|hdf5|pkl|pickle|joblib|npy|npz|pt|pth|ckpt|onnx|tflite|safetensors|edf|mat)$'
           # Small synthetic test data may live here. Never real or dataset-derived data.
           fixtures='^tests?/fixtures/'
+          # The pipeline's data folders hold dataset-derived files of any type (JSON reports
+          # name participants), so nothing in them may be committed except these. DVC versions the rest.
+          data_dirs='(^|/)data/(raw|interim|processed|reports)/'
+          allowed_in_data='/(\.gitkeep|cleaning_summary\.json|bias_report\.md)$'
           fail=0
           while IFS= read -r -d '' f; do
             if echo "$f" | grep -qiE "$blocked" && ! echo "$f" | grep -qE "$fixtures"; then
               echo "::error file=$f::Data or model files are not allowed in Git: $f"
+              fail=1
+            fi
+            if echo "$f" | grep -qE "$data_dirs" && ! echo "$f" | grep -qE "$allowed_in_data"; then
+              echo "::error file=$f::Pipeline data and reports are versioned by DVC, not Git: $f"
               fail=1
             fi
             if [ "$(stat -c%s "$f")" -gt "$max_bytes" ]; then
@@ -46,6 +54,32 @@ jobs:
           done < <(git ls-files -z)
           if [ "$fail" -eq 0 ]; then echo "No data, model or large files found."; fi
           exit $fail
+
+  pipeline:
+    name: Data pipeline tests
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: Data_Pipeline
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          # The pinned libraries need 3.11 (see Data_Pipeline/README.md).
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: Data_Pipeline/requirements.txt
+      # The full requirements, so a broken pin fails here before it fails on someone's machine.
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+      - name: Lint (flake8)
+        run: flake8 scripts dags tests
+      # Fails if coverage of scripts/ drops below 85%. The DAG's own tests need Airflow and
+      # skip here; they run in the Airflow image (see tests/test_dag.py).
+      - name: Unit tests, with a coverage floor
+        run: pytest -q --cov=scripts --cov-branch --cov-report=term-missing:skip-covered --cov-fail-under=85
+      - name: DVC reads the pipeline
+        run: dvc dag
 
   markdown:
     name: Markdown lint

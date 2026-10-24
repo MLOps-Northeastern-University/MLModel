@@ -1,6 +1,12 @@
 # The same pipeline as the Airflow DAG, runnable with `dvc repro`.
 # After an Airflow run, the dvc_version task records the outputs with
 # `dvc commit -f build_dataset`, updating dvc.lock.
+#
+# Outputs are versioned by DVC, not Git: dvc.lock (in Git) records each one's
+# hash, and `dvc push` / `dvc pull` move the files to and from the remote.
+# Reports that name participants (row-level issues, statistics, schema) stay
+# out of Git. The summary reports that don't (bias_report.md, the cleaning
+# summary) are `cache: false`, so they're kept in Git for anyone to read.
 stages:
   build_dataset:
     cmd: python -m scripts.run_pipeline --mode sample
@@ -11,6 +17,24 @@ stages:
       - data/processed/hourly_features.csv
       - data/processed/hourly_all.csv
       - data/processed/label_issues.json
+      - data/reports/failed_participants.json
+      - data/reports/validation_report.json
+      - data/reports/schema_latest.json
+      - data/reports/anomalies.json
+      # The JSON lists which participants the bias model was tested on, so it
+      # stays in DVC; the Markdown summary has no IDs and is kept in Git.
+      - data/reports/bias_report.json
+      - data/reports/bias_report.md:
+          cache: false
+      # Kept between runs (DVC deletes outputs before a run otherwise): the
+      # first run's schema is the baseline later runs are validated against,
+      # and the statistics and their history grow by one entry per run.
+      - data/reports/schema_baseline.json:
+          persist: true
+      - data/reports/stats:
+          persist: true
+      - data/reports/stats_history.csv:
+          persist: true
     metrics:
       - data/reports/cleaning_summary.json:
           cache: false

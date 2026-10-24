@@ -18,6 +18,7 @@ import re
 import numpy as np
 import pandas as pd
 
+from scripts.utils.file_io import read_text_csv
 from scripts.utils.logging_setup import get_logger
 
 logger = get_logger("diary")
@@ -40,8 +41,8 @@ class DiaryError(ValueError):
 
 
 def load_diary(source, sep=";"):
-    """Read a raw diary CSV (path or file object)."""
-    return pd.read_csv(source, sep=sep, na_values=["NaN", ""], keep_default_na=True)
+    """Read a raw diary CSV (path or file object), UTF-8 or Windows-encoded."""
+    return read_text_csv(source, sep=sep, na_values=["NaN", ""], keep_default_na=True)
 
 
 def _first_int(value):
@@ -120,6 +121,8 @@ def parse_diary(raw, cfg):
     missing = [c for c in REQUIRED_COLUMNS if c not in raw.columns]
     if missing:
         raise DiaryError(f"Diary is missing columns: {missing}")
+    if raw.empty:
+        raise DiaryError("Diary has no rows")
     dose_cols = dosage_columns(raw.columns)
     if not dose_cols:
         logger.warning("Diary has no Dosage column; dosage_mg will be empty")

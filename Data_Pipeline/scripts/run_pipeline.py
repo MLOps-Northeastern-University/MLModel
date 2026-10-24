@@ -8,13 +8,13 @@ Used by `dvc repro` and for quick local runs:
 
 import argparse
 import sys
+from concurrent.futures import ProcessPoolExecutor
 from datetime import datetime
 from pathlib import Path
 
 from scripts import pipeline_steps as steps
 from scripts.alerts import notify
 from scripts.utils.config import load_config
-from scripts.utils.file_io import write_json
 from scripts.utils.logging_setup import get_logger
 
 logger = get_logger("run_pipeline")
@@ -23,19 +23,42 @@ logger = get_logger("run_pipeline")
 def process_participants(cfg, participants):
     """Process every participant, collecting failures instead of stopping.
 
+    Participants are independent, so up to run.parallel_participants of them
+    run at the same time, each in its own process (the work is CPU-bound).
+    Results keep the manifest's order either way.
+
     Returns:
         (list, list[dict]): Results of the participants that worked, and one
         {"participant_id", "error"} entry per participant that failed.
     """
+    workers = min(cfg.get("run", {}).get("parallel_participants", 1), len(participants))
+    if workers <= 1:
+        outcomes = [_attempt(cfg, entry) for entry in participants]
+    else:
+        logger.info("Processing %d participants, %d at a time", len(participants), workers)
+        with ProcessPoolExecutor(max_workers=workers) as pool:
+            outcomes = list(pool.map(_attempt, [cfg] * len(participants), participants))
+
     results, failures = [], []
-    for entry in participants:
-        try:
-            results.append(steps.step_participant(cfg, entry))
-        except Exception as exc:  # One bad participant should not stop the rest.
-            logger.error("Skipping %s: %s", entry.get("name"), exc)
-            failures.append({"participant_id": Path(entry.get("name") or "?").stem,
-                             "error": f"{type(exc).__name__}: {exc}"})
+    for entry, (result, error) in zip(participants, outcomes):
+        if error is None:
+            results.append(result)
+        else:  # One bad participant should not stop the rest.
+            logger.error("Skipping %s: %s", entry.get("name"), error)
+            failures.append({"participant_id": Path(entry.get("name") or "?").stem, "error": error})
     return results, failures
+
+
+def _attempt(cfg, entry):
+    """Process one participant. Returns (result, None), or (None, error text) if it failed.
+
+    Errors are returned, not raised, so a failure in a worker process reaches
+    the parent as text, whatever the exception type.
+    """
+    try:
+        return steps.step_participant(cfg, entry), None
+    except Exception as exc:
+        return None, f"{type(exc).__name__}: {exc}"
 
 
 def report_failures(cfg, failures, total):
@@ -46,18 +69,8 @@ def report_failures(cfg, failures, total):
     Returns:
         bool: True when more than data.max_failed_fraction of participants failed.
     """
-    write_json(failures, cfg["resolved_paths"]["reports_dir"] / "failed_participants.json")
-    if not failures:
-        return False
-    limit = cfg["data"]["max_failed_fraction"]
-    share = len(failures) / total
-    notify(f"[COPS pipeline] {len(failures)} of {total} participants failed",
-           "\n".join(f"{f['participant_id']}: {f['error']}" for f in failures), cfg)
-    if share > limit:
-        logger.error("%d of %d participants failed (%.0f%%, limit %.0f%%)",
-                     len(failures), total, share * 100, limit * 100)
-        return True
-    return False
+    # The same rule as the DAG's check_failures task.
+    return steps.record_failures(cfg, failures, total, alert=notify)
 
 
 def main(argv=None):
