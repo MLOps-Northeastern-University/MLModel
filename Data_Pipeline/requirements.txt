@@ -1,5 +1,7 @@
 # Pipeline libraries (installed in the Airflow image and for local runs)
 pandas==2.2.3
+# Fast typed reading of the hourly accelerometry CSVs (scripts/features.py)
+pyarrow==17.0.0
 numpy==1.26.4
 scipy==1.13.1
 scikit-learn==1.5.2
