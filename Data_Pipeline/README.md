@@ -37,7 +37,7 @@ All tests should pass. They use small synthetic files, so no download is needed.
 
 ## Tests
 
-`pytest` runs 83 tests in `tests/`, on synthetic participants made by `tests/helpers.py`. No test downloads anything or sends a real alert.
+`pytest` runs 116 tests in `tests/`, on synthetic participants made by `tests/helpers.py`. No test downloads anything or sends a real alert.
 
 | File | What it checks |
 | --- | --- |
@@ -46,13 +46,14 @@ All tests should pass. They use small synthetic files, so no download is needed.
 | `test_clean_and_join.py` | Every cleaning rule, duplicates, merging participants and demographics |
 | `test_validate_and_anomalies.py` | Rules, schema against the baseline, statistics, outliers, label issues |
 | `test_acquire_and_bias.py` | Choosing participants from the OSF listing, and the bias report |
-| `test_download.py` | Retries after a dropped connection, refusing corrupt or truncated downloads, the download cache, OSF paging and outages, local zips |
+| `test_download.py` | Retries after a dropped connection, refusing corrupt or truncated downloads, the download cache, OSF paging and outages, local zips, downloading only `https://` from OSF, and never choosing an odd file name |
+| `test_robustness.py` | Diaries in UTF-8, with a BOM or in Windows encoding; wrong separators, empty and cut-off files; partial failures (one participant failing doesn't stop the run, too many do); config files; passwords never logged |
 | `test_alerts.py` | Email and Slack alerts when set up, skipped when not, and a broken mail server or webhook never crashing the run |
 | `test_run_pipeline.py` | Failed participants reported, the failure limit, parallel runs matching sequential ones |
 | `test_end_to_end.py` | The whole pipeline on four synthetic participants: every output, exact row counts, a second run checked against the first, and stopping on too many failures or on critical anomalies |
-| `test_dag.py` | The Airflow DAG loads, its tasks run in order, and failures retry and alert. Needs Airflow, so it skips locally; run it in the Airflow image: `docker compose run --rm -w /opt/airflow/repo/Data_Pipeline airflow-scheduler python -m pytest tests/test_dag.py` |
+| `test_dag.py` | The Airflow DAG loads, its tasks run in order, failures retry and alert, and one failed participant doesn't fail the run. Needs Airflow, so it skips locally; run it in the Airflow image: `docker compose run --rm -w /opt/airflow/repo/Data_Pipeline airflow-scheduler python -m pytest tests/test_dag.py` |
 
-Coverage of `scripts/` is about 91%: `pytest --cov=scripts --cov-branch`. CI fails below 85%.
+Coverage of `scripts/` is about 92%: `pytest --cov=scripts --cov-branch`. CI fails below 85%.
 
 ## Running
 
@@ -74,7 +75,7 @@ python -m scripts.run_pipeline --local-zips C:\path\to\folder
 - Processing one participant takes about half a minute, plus its download (see [Speed](#speed)). Progress is logged every 20 hours.
 - Participants run 4 at a time (`run.parallel_participants`), each in its own process. Set it to 1 to run them one after another.
 - All settings are in `config/pipeline.yaml`.
-- A participant that fails is skipped and listed in `data/reports/failed_participants.json`, and an alert is sent. If more than 20% fail (`data.max_failed_fraction`), the run stops with exit code 1.
+- A participant that fails is skipped and listed in `data/reports/failed_participants.json`, and an alert is sent. If more than 20% fail (`data.max_failed_fraction`), the run stops with exit code 1. Airflow follows the same rule, in its `check_failures` task.
 
 ### Airflow
 
