@@ -247,5 +247,6 @@ Newest first.
 
 | Date | Who | What changed | PR |
 | --- | --- | --- | --- |
+| 2026-10-24 | Sam Selvaraj | Set up DVC (every output versioned, participant-level reports kept out of Git, summaries kept in), made processing about 7× faster (pyarrow reading, parallel participants on the command line), fixed one failed participant failing the whole Airflow run, Windows-encoded and empty diaries, and unchecked download addresses, added CI for the pipeline (lint, tests with an 85% coverage floor, DVC, a stricter data guard), and added tests for downloads, alerts, the whole pipeline end to end, the DAG and robustness (coverage 73% to 92%) | — |
 | 2026-10-22 | Shaikh Basim | Fixed the pipeline run: diaries with `Dosage` or `Dosage_1..N` columns are read, failed participants are listed in `failed_participants.json` with an alert, the Airflow DAG path in `docker-compose.yaml` is fixed, `.env` is optional, Airflow is pinned in the Dockerfile, and `airflow-init` creates the admin user | #4 |
 | 2026-10-21 | Tejaswini Sarikonda | Built the data pipeline: download from OSF, diary parsing, wrist features, cleaning, validation and statistics, anomaly alerts, bias slicing, the Airflow DAG, the DVC stage, the Docker setup and the tests | #3 |
