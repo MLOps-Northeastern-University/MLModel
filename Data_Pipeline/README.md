@@ -35,6 +35,15 @@ pytest -v
 
 All tests should pass. They use small synthetic files, so no download is needed.
 
+If you do not use conda:
+
+```bash
+python3.11 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+pytest -v
+```
+
 ## Tests
 
 `pytest` runs 116 tests in `tests/`, on synthetic participants made by `tests/helpers.py`. No test downloads anything or sends a real alert.
@@ -90,16 +99,49 @@ Open <http://localhost:8080> and log in as `airflow` / `airflow`. Trigger `cops_
 
 A `.env` file is optional. Copy `.env.example` to `.env` only to turn on email or Slack alerts. Without it, alerts are skipped and logged.
 
-## Test run so far
+To run the DAG:
 
-The full dataset is very large (hundreds of hourly sensor files per participant), so the pipeline has so far been run on **single participants**, downloaded manually from OSF and run with `--local-zips`. The first run, on **COPS-7**:
+1. On the DAGs page, set the toggle of `cops_data_pipeline` to on. DAGs are paused when Airflow starts.
+2. Click ▶, then **Trigger DAG w/ config**. Type `{"mode": "sample"}` and click **Trigger**.
+3. Look at the run in **Grid** (state of each task), **Graph** (how the tasks connect), and **Gantt** (time of each task). To see the output of a task, click the task and then **Logs**.
+4. Stop Airflow with `docker compose down`. The run history stays in the Docker volume `data_pipeline_postgres-db`. To delete it, use `docker compose down -v`.
 
-- 192 diary hours, 105 usable after cleaning (58 dyskinetic, 31 on, 16 off)
-- Removed: 80 without a label (sleep, no data), 5 not worn, 2 with too little valid sensor data
-- 0 validation failures; 4 anomaly warnings, all diary text/score mismatches
-- The bias report has data-level slices only. The model-level comparison needs several participants and was skipped.
+The sign-in and the database are local test values in `docker-compose.yaml`: the `airflow-init` service makes the web user `airflow` with the password `airflow` and the Admin role, and the `postgres` service makes the database user `airflow`.
 
-The summary reports in Git (`data/reports/cleaning_summary.json`, `bias_report.md`) are from a later single-participant run, on COPS-25: 72 diary hours, 36 usable. Results across participants will come from a `sample` or `full` run.
+The DAG has 13 tasks. `process_participant` is mapped: Airflow makes one task for each participant and runs 4 at a time.
+
+![DAG graph view](docs/dag_graph.png)
+
+In the sample run all 13 tasks passed. The Event Log shows each task go from running to success.
+
+![Event log of a sample run](docs/dag_run.png)
+
+## Results of the sample run
+
+On 2026-10-25 we ran the pipeline on the 5 participants of `sample` mode (COPS-11, 18, 25, 44, 46; 1.08 GB), with Python 3.11. We ran it with `dvc repro` and with the Airflow DAG. Both runs gave the same results.
+
+| Step | Result |
+| --- | --- |
+| Run time | 2 min 6 s with `dvc repro`. Approximately 4 min with Airflow. 0 participants failed. |
+| Cleaning | 118 of 336 hours kept. Removed: 209 without a label, 5 with low valid data, 4 where the sensor showed the watch was not worn. |
+| Final dataset | 118 rows, 67 columns. Labels: off 63, dyskinetic 35, on 20. |
+| Validation | 0 violations. This run is the schema baseline. |
+| Anomalies | 0 critical, 10 warnings: tremor outliers, 2 participants with less than 24 usable hours, and 6 diary rows with a score but no label. An alert was sent. |
+| DVC | `dvc.lock` records this version. The data is in the DVC remote. |
+
+![Hours kept and removed by cleaning](docs/charts/01_cleaning.png)
+
+The labels depend strongly on the participant:
+
+![Labels per participant](docs/charts/02_labels_per_participant.png)
+
+The tremor features are higher in dyskinetic hours, and the share of still seconds is highest in off hours:
+
+![Wrist features by label](docs/charts/03_features_by_label.png)
+
+![Anomaly warnings](docs/charts/06_anomalies.png)
+
+Earlier runs used single participants: COPS-7 (192 diary hours, 105 usable) and COPS-25 (72 diary hours, 36 usable). The reports in Git now come from the 5-participant run.
 
 ## Preprocessing steps
 
@@ -116,6 +158,8 @@ The summary reports in Git (`data/reports/cleaning_summary.json`, `bias_report.m
 7. **Validate:** check fixed rules, compare with the baseline schema, and save statistics.
 8. **Detect anomalies:** missing values, outliers, low coverage, and label issues. Alerts are sent by email or Slack if set up in `.env`.
 9. **Bias report:** compare label balance and a baseline model's results across sex, age group, visit, DBS, Hoehn & Yahr, and PD subtype.
+
+**Why we use our own checks for step 7.** TFDV needs TensorFlow. Great Expectations needs a large setup for one table. Our checks in `scripts/validate.py` do the same 3 tasks with pandas: fixed expectations, a schema baseline that we compare with each run, and statistics with a history file. The checks run the same in Airflow and on the command line. Unit tests check them.
 
 ## Output files
 
@@ -159,6 +203,34 @@ Only `cleaning_summary.json` and `bias_report.md` are committed to Git; DVC vers
 | Demographics | `age`, `age_group`, `sex`, `handedness`, `pd_subtype`, `pd_dominantside`, `hoehn_yahr`, `pd_yearssincediagnosis`, `dbs` | From `Demographics.csv`; `age_group` is `<55`, `55-64` or `65+`. Also the slices for the bias report. |
 | Files | `left_zip`, `left_csv`, `right_zip`, `right_csv` | The sensor files each row was computed from, for tracing |
 
+## Bias detection and mitigation
+
+**What we checked.** We used 6 slices: sex, age group, visit, DBS, Hoehn and Yahr stage, and Parkinson's subtype.
+
+- Data level: the number of rows and participants, and the label balance, for each group.
+- Model level: a baseline logistic regression that predicts "off" or "not off". The training participants and the test participants are different (`GroupShuffleSplit`). For each group we calculate recall, precision, and false positive rate with Fairlearn's `MetricFrame`.
+
+**What we found in the sample run.** The test set has 2 participants and 50 hours.
+
+- Overall recall is 0.889. Precision is 0.909. The false positive rate is 0.8. 90% of the test hours are "off", so the baseline almost always predicts "off". We use this model only to find bias. It is not our final model.
+- 2 slices have 2 groups in the test set. Age group: 55-64 has recall 0.90 and 65+ has 0.88. Subtype: akinetic-rigid has 0.90 and equivalence-type has 0.88. The gap is 0.02. Our limit is 0.10 (`bias.max_recall_gap`).
+- 4 slices have only 1 group in the test set. Both test participants are male, inpatient, have DBS, and have Hoehn and Yahr stage 3. Thus we cannot measure a gap for these slices. The report shows `nan` for them.
+- Data level: some groups have only 1 participant (65+, no DBS, Hoehn and Yahr 2 and 4). The labels depend strongly on the participant. One participant is 89% dyskinetic. Another is 100% off.
+
+![Data-level slices](docs/charts/04_bias_data_level.png)
+
+![Model-level slices](docs/charts/05_bias_model_level.png)
+
+**Mitigation.** If a recall gap is more than 0.10, `bias.py` trains the model again with sample weights. These weights give each group the same total weight. The report then shows the recall before and after. The unit tests check this step. In the sample run no gap was more than 0.10, so this step did not start.
+
+**Limits and next steps.** 5 participants are not sufficient to say if the data is fair. In the model phase we will:
+
+1. Use more participants.
+2. Use leave-one-participant-out, so that each participant and each group is tested one time.
+3. Compare the recall of each group before and after we change the weights.
+
+We expect this trade-off: the new weights can decrease the overall recall a little, but they make the gap between the groups smaller.
+
 ## Code structure
 
 ```text
@@ -182,7 +254,7 @@ Data_Pipeline/
 │   └── utils/             config loading, file reading and writing, logging
 ├── tests/                 pytest tests on small synthetic files (no download)
 ├── data/                  raw/, interim/, processed/, reports/ (see Output files)
-├── docs/gantt/            Airflow Gantt charts
+├── docs/                  DAG screenshots, gantt/ (Airflow Gantt charts), charts/ (results of the sample run)
 ├── logs/                  pipeline.log
 ├── dvc.yaml               the DVC stage
 ├── Dockerfile, docker-compose.yaml   the Airflow setup
@@ -218,7 +290,7 @@ After an Airflow run, the `dvc_version` task does the same with `dvc commit -f b
 
 **Getting a version:** `git checkout <commit>` and then `dvc pull` restore exactly the data of that commit. Without access to the remote, `dvc repro` rebuilds it from OSF, and `dvc.lock` shows whether the result matches.
 
-**Where the data is stored (the remote).** The data goes to a DVC remote, set once per machine. It isn't set in the repo yet, so choose one:
+**Where the data is stored (the remote).** The data goes to a DVC remote, set once per machine. The repo has no shared remote yet. The first version (the sample run of 2026-10-25) is in a local folder remote, set with `--local`. To use a remote, choose one:
 
 ```bash
 # Google Cloud Storage (dvc[gs] is in requirements.txt). Sign in first: gcloud auth application-default login
@@ -241,12 +313,19 @@ Each participant has about 190 diary hours, and each hour is one CSV per wrist o
 
 Together, processing one participant went from about 4.3 minutes to about 35 seconds, and the command-line run handles four at once. Downloading is now the larger share of the time. Measured on one laptop with a synthetic full-size hour; real runs also depend on the network.
 
+### Gantt chart
+
+![Airflow Gantt chart of a sample run](docs/gantt/gantt_sample.png)
+
+The Gantt chart of the sample run shows that `process_participant` takes the most time. Each of these 5 mapped tasks downloads the zip file of one participant and calculates the features for each wrist-hour. They took approximately 3.5 minutes, nearly all of the run. The 8 tasks after them (`check_failures` to `notify_success`) took approximately 10 seconds together. Thus the two changes above (pyarrow, and 4 participants at a time) are on the slow part of the pipeline.
+
 ## Contributions
 
 Newest first.
 
 | Date | Who | What changed | PR |
 | --- | --- | --- | --- |
+| 2026-10-25 | Ayush Varma | Ran the pipeline on the 5 sample participants with `dvc repro` and with the Airflow DAG (same results), recorded the first data version (`dvc.lock`, pushed to a local DVC remote), committed the 5-participant summary reports, and documented the results, the bias findings, the Gantt chart, the Airflow steps and a `venv` setup, with DAG screenshots and charts in `docs/` | (this PR) |
 | 2026-10-24 | Sam Selvaraj | Set up DVC (every output versioned, participant-level reports kept out of Git, summaries kept in), made processing about 7× faster (pyarrow reading, parallel participants on the command line), fixed one failed participant failing the whole Airflow run, Windows-encoded and empty diaries, and unchecked download addresses, added CI for the pipeline (lint, tests with an 85% coverage floor, DVC, a stricter data guard), and added tests for downloads, alerts, the whole pipeline end to end, the DAG and robustness (coverage 73% to 92%) | — |
 | 2026-10-22 | Shaikh Basim | Fixed the pipeline run: diaries with `Dosage` or `Dosage_1..N` columns are read, failed participants are listed in `failed_participants.json` with an alert, the Airflow DAG path in `docker-compose.yaml` is fixed, `.env` is optional, Airflow is pinned in the Dockerfile, and `airflow-init` creates the admin user | #4 |
 | 2026-10-21 | Tejaswini Sarikonda | Built the data pipeline: download from OSF, diary parsing, wrist features, cleaning, validation and statistics, anomaly alerts, bias slicing, the Airflow DAG, the DVC stage, the Docker setup and the tests | #3 |
