@@ -108,11 +108,11 @@ To run the DAG:
 
 The sign-in and the database are local test values in `docker-compose.yaml`: the `airflow-init` service makes the web user `airflow` with the password `airflow` and the Admin role, and the `postgres` service makes the database user `airflow`.
 
-The DAG has 13 tasks. `process_participant` is mapped: Airflow makes one task for each participant and runs 4 at a time.
+The DAG has 12 tasks. `process_participant` is mapped: Airflow makes one task for each participant and runs 4 at a time.
 
 ![DAG graph view](docs/dag_graph.png)
 
-In the sample run all 13 tasks passed. The Event Log shows each task go from running to success.
+In the sample run all 12 tasks passed, including the 5 mapped `process_participant` tasks. The Event Log shows each task go from running to success.
 
 ![Event log of a sample run](docs/dag_run.png)
 
