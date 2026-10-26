@@ -1,0 +1,68 @@
+schema: '2.0'
+stages:
+  build_dataset:
+    cmd: python -m scripts.run_pipeline --mode sample
+    deps:
+    - path: config/pipeline.yaml
+      hash: md5
+      md5: 11d3ee0e74639a41a824589fa63fc1dc
+      size: 4599
+    - path: scripts
+      hash: md5
+      md5: 7c66f85a4ad33409674ef45a4350f60e.dir
+      size: 76165
+      nfiles: 18
+    outs:
+    - path: data/processed/hourly_all.csv
+      hash: md5
+      md5: 409d57c0d178d832b00c7aa1cfead6c1
+      size: 197279
+    - path: data/processed/hourly_features.csv
+      hash: md5
+      md5: 5ec95ab0ab261e225f94e21437b4361e
+      size: 91065
+    - path: data/processed/label_issues.json
+      hash: md5
+      md5: 9f00af1d755d3e6353a1e25c17c0375d
+      size: 3632
+    - path: data/reports/anomalies.json
+      hash: md5
+      md5: bda3b98bb551c56efe9501c4d34700ad
+      size: 1306
+    - path: data/reports/bias_report.json
+      hash: md5
+      md5: 1605440a725c91a11218ccb3ffd3b69b
+      size: 4903
+    - path: data/reports/bias_report.md
+      hash: md5
+      md5: a5089b5b0b08e32d6232182652289999
+      size: 2488
+    - path: data/reports/cleaning_summary.json
+      hash: md5
+      md5: a1a364e46fa86addd4352efd43781863
+      size: 158
+    - path: data/reports/failed_participants.json
+      hash: md5
+      md5: d751713988987e9331980363e24189ce
+      size: 2
+    - path: data/reports/schema_baseline.json
+      hash: md5
+      md5: ed6d42106010c188aeff66dc124bbb57
+      size: 9913
+    - path: data/reports/schema_latest.json
+      hash: md5
+      md5: f2ff262b00a1bfc59be7f4400f4f3406
+      size: 9913
+    - path: data/reports/stats
+      hash: md5
+      md5: da532eaddbc177f2c6c602700e487495.dir
+      size: 37434
+      nfiles: 2
+    - path: data/reports/stats_history.csv
+      hash: md5
+      md5: b86c20cfc31d89acef8959deefe512da
+      size: 450
+    - path: data/reports/validation_report.json
+      hash: md5
+      md5: d751713988987e9331980363e24189ce
+      size: 2
