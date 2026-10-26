@@ -6,6 +6,7 @@ Nothing here comes from the real dataset. Each fake "hour" is only
 
 import io
 import zipfile
+from functools import partial
 
 import numpy as np
 import pandas as pd
@@ -14,12 +15,28 @@ from scripts.utils.config import load_config
 
 FS = 100
 SECONDS = 120
-DIARY_COLUMNS = [
+_COLUMNS_BEFORE_DOSES = [
     "ID", "Day", "Time", "Visit", "Kinesia", "KinesiaScore", "Tremor", "TremorScore",
-    "Freezing", "FreezingScore", "Fall", "FallScore", "Medication", "Dosage",
+    "Freezing", "FreezingScore", "Fall", "FallScore", "Medication",
+]
+_COLUMNS_AFTER_DOSES = [
     "WearableDataAvailability", "WearableDataLeftCSV", "WearableDataLeftZIP",
     "WearableDataRightCSV", "WearableDataRightZIP",
 ]
+
+
+def dose_column_names(dose_columns=1):
+    """Real diaries have either one "Dosage" column or "Dosage_1".."Dosage_4"."""
+    if dose_columns == 1:
+        return ["Dosage"]
+    return [f"Dosage_{i}" for i in range(1, dose_columns + 1)]
+
+
+def diary_columns(dose_columns=1):
+    return _COLUMNS_BEFORE_DOSES + dose_column_names(dose_columns) + _COLUMNS_AFTER_DOSES
+
+
+DIARY_COLUMNS = diary_columns()
 
 
 def make_config(tmp_path, **sections):
@@ -64,40 +81,55 @@ def inner_zip(df, csv_name):
 
 
 def diary_row(pid, day, hour_end, kinesia, score, wear="Wearable Worn", tremor="No Tremor",
-              tremor_score=0, medication=None, files=True, visit="outpatient"):
+              tremor_score=0, medication=None, doses=None, files=True, visit="outpatient",
+              dose_columns=1):
     stem = f"{pid}_Day{day}_{hour_end - 1}h-{hour_end}h"
-    return {
+    doses = doses if doses is not None else ([100] if medication else [])
+    row = {
         "ID": pid, "Day": f"{day} days", "Time": f"{hour_end} hr", "Visit": visit,
         "Kinesia": kinesia, "KinesiaScore": score, "Tremor": tremor, "TremorScore": tremor_score,
         "Freezing": "No Freezing", "FreezingScore": 0, "Fall": "No Fall", "FallScore": 0,
-        "Medication": medication, "Dosage": 100 if medication else None,
+        "Medication": medication,
         "WearableDataAvailability": wear,
         "WearableDataLeftCSV": f"{stem}_leftWrist.csv" if files else None,
         "WearableDataLeftZIP": f"{stem}_leftWrist.zip" if files else None,
         "WearableDataRightCSV": f"{stem}_rightWrist.csv" if files else None,
         "WearableDataRightZIP": f"{stem}_rightWrist.zip" if files else None,
     }
+    for i, name in enumerate(dose_column_names(dose_columns)):
+        row[name] = doses[i] if i < len(doses) else None
+    return row
 
 
-def default_hours(pid):
-    """(diary row, signal kind) pairs covering the main label types."""
+def default_hours(pid, dose_columns=1):
+    """(diary row, signal kind) pairs covering the main label types.
+
+    With numbered dose columns, the first hour has two medications in one
+    quoted field, like the real COPS-11 diary.
+    """
+    if dose_columns == 1:
+        meds = {"medication": "Levodopa / Carbidopa", "doses": [100]}
+    else:
+        meds = {"medication": "Levodopa / Benserazid;Opicapone", "doses": [50, 50]}
+    row = partial(diary_row, dose_columns=dose_columns)
     return [
-        (diary_row(pid, 0, 9, "Good Kinesia", 0, medication="Levodopa / Carbidopa"), "moving"),
-        (diary_row(pid, 0, 10, "Slight Akinesia", -1), "still"),
-        (diary_row(pid, 0, 11, "Slight Dyskinesia", 1, tremor="Weak Tremor", tremor_score=1), "tremor"),
-        (diary_row(pid, 0, 12, "Discomforting Dyskinesia", 2), "moving"),
-        (diary_row(pid, 0, 13, "Sleep", None), "still"),
-        (diary_row(pid, 0, 14, "No Data", 1), "still"),  # text and score disagree
-        (diary_row(pid, 0, 15, "Slight Dyskinesia", 1, wear="Wearable Not Worn", files=False), None),
+        (row(pid, 0, 9, "Good Kinesia", 0, **meds), "moving"),
+        (row(pid, 0, 10, "Slight Akinesia", -1), "still"),
+        (row(pid, 0, 11, "Slight Dyskinesia", 1, tremor="Weak Tremor", tremor_score=1), "tremor"),
+        (row(pid, 0, 12, "Discomforting Dyskinesia", 2), "moving"),
+        (row(pid, 0, 13, "Sleep", None), "still"),
+        (row(pid, 0, 14, "No Data", 1), "still"),  # text and score disagree
+        (row(pid, 0, 15, "Slight Dyskinesia", 1, wear="Wearable Not Worn", files=False), None),
     ]
 
 
-def make_participant_zip(folder, pid="COPS-99", hours=None, include_updrs=True, corrupt=None):
+def make_participant_zip(folder, pid="COPS-99", hours=None, include_updrs=True, corrupt=None,
+                         dose_columns=1):
     """Write a participant zip shaped like the real ones and return its path."""
-    hours = hours or default_hours(pid)
+    hours = hours or default_hours(pid, dose_columns)
     path = folder / f"{pid}.zip"
     with zipfile.ZipFile(path, "w") as z:
-        diary = pd.DataFrame([row for row, _ in hours], columns=DIARY_COLUMNS)
+        diary = pd.DataFrame([row for row, _ in hours], columns=diary_columns(dose_columns))
         z.writestr(f"{pid}/{pid}_symptomdiary.csv", csv_bytes(diary))
         if include_updrs:
             for state, total in [("OFF", 41), ("ON", 20)]:

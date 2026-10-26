@@ -4,6 +4,7 @@ import json
 
 import pandas as pd
 
+from scripts.utils.file_io import read_table
 from scripts.utils.logging_setup import get_logger
 
 logger = get_logger("join")
@@ -17,7 +18,7 @@ def merge_participants(results):
     """
     tables, issues = [], []
     for res in results:
-        tables.append(pd.read_csv(res["table"]))
+        tables.append(read_table(res["table"]))
         with open(res["issues"], encoding="utf-8") as f:
             issues.extend(json.load(f))
     if not tables:

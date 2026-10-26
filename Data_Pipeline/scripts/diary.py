@@ -7,6 +7,10 @@ disagreement is recorded as a label issue.
 
 Time convention: a row with Time "18 hr" describes the hour 17:00-18:00,
 matching the accelerometry file "..._17h-18h_...".
+
+Dose columns differ between participants: some diaries have one "Dosage"
+column, others have "Dosage_1" to "Dosage_4", one per medication taken in
+the same hour. Both layouts are accepted.
 """
 
 import re
@@ -14,16 +18,18 @@ import re
 import numpy as np
 import pandas as pd
 
+from scripts.utils.file_io import read_text_csv
 from scripts.utils.logging_setup import get_logger
 
 logger = get_logger("diary")
 
 REQUIRED_COLUMNS = [
     "ID", "Day", "Time", "Visit", "Kinesia", "KinesiaScore", "Tremor", "TremorScore",
-    "Freezing", "FreezingScore", "Fall", "FallScore", "Medication", "Dosage",
+    "Freezing", "FreezingScore", "Fall", "FallScore", "Medication",
     "WearableDataAvailability", "WearableDataLeftCSV", "WearableDataLeftZIP",
     "WearableDataRightCSV", "WearableDataRightZIP",
 ]
+DOSAGE_COLUMN = re.compile(r"^Dosage(?:_(\d+))?$")
 BINARY_TEXT = {
     "No Freezing": 0, "Freezing": 1,
     "No Fall": 0, "Fall": 1,
@@ -35,8 +41,8 @@ class DiaryError(ValueError):
 
 
 def load_diary(source, sep=";"):
-    """Read a raw diary CSV (path or file object)."""
-    return pd.read_csv(source, sep=sep, na_values=["NaN", ""], keep_default_na=True)
+    """Read a raw diary CSV (path or file object), UTF-8 or Windows-encoded."""
+    return read_text_csv(source, sep=sep, na_values=["NaN", ""], keep_default_na=True)
 
 
 def _first_int(value):
@@ -66,6 +72,32 @@ def reconcile(text, score, mapping):
     return np.nan, None
 
 
+def dosage_columns(columns):
+    """Return the dose columns in order: ["Dosage"] or ["Dosage_1", "Dosage_2", ...]."""
+    found = []
+    for col in columns:
+        match = DOSAGE_COLUMN.match(str(col))
+        if match:
+            found.append((int(match.group(1) or 0), col))
+    return [col for _, col in sorted(found)]
+
+
+def join_doses(row, columns):
+    """Join one hour's doses as text, e.g. "50" or "50;50" (NaN if none).
+
+    The order matches the ";"-separated Medication field. Doses are kept as
+    text so every participant gives the same column type.
+    """
+    doses = []
+    for col in columns:
+        value = row[col]
+        if pd.isna(value):
+            continue
+        number = pd.to_numeric(value, errors="coerce")
+        doses.append(str(value).strip() if pd.isna(number) else f"{number:g}")
+    return ";".join(doses) if doses else np.nan
+
+
 def map_kinesia_class(score, classes):
     """Map a -3..+3 kinesia score to 'off', 'on' or 'dyskinetic'."""
     if pd.isna(score):
@@ -89,6 +121,11 @@ def parse_diary(raw, cfg):
     missing = [c for c in REQUIRED_COLUMNS if c not in raw.columns]
     if missing:
         raise DiaryError(f"Diary is missing columns: {missing}")
+    if raw.empty:
+        raise DiaryError("Diary has no rows")
+    dose_cols = dosage_columns(raw.columns)
+    if not dose_cols:
+        logger.warning("Diary has no Dosage column; dosage_mg will be empty")
 
     labels = cfg["labels"]
     rows, issues = [], []
@@ -123,7 +160,7 @@ def parse_diary(raw, cfg):
             "fall": fall_score,
             "medication_taken": int(not pd.isna(r["Medication"])),
             "medication": r["Medication"],
-            "dosage_mg": r["Dosage"],
+            "dosage_mg": join_doses(r, dose_cols),
             "wear_status": r["WearableDataAvailability"],
             "left_zip": r["WearableDataLeftZIP"],
             "left_csv": r["WearableDataLeftCSV"],

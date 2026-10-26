@@ -1,8 +1,10 @@
 {
-  "kept": 36,
-  "total": 72,
+  "kept": 118,
+  "total": 336,
   "removed": {
-    "no_label": 35,
-    "L_low_valid_fraction": 1
+    "no_label": 209,
+    "L_low_valid_fraction": 5,
+    "R_sensor_nonwear": 3,
+    "L_sensor_nonwear": 1
   }
 }

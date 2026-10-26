@@ -2,24 +2,24 @@
 
 The data and model pipelines for our Parkinson's monitoring system. It turns wrist-worn smartwatch movement data into symptom estimates (tremor severity, dyskinesia and slowness) for short time windows. The [Backend](https://github.com/MLOps-Northeastern-University/Backend) serves these estimates.
 
-> **Status:** setting up. Tools aren't chosen yet. Sections marked _TBD_ get filled in once they are.
+> **Status:** the data pipeline is complete, in [Data_Pipeline/](Data_Pipeline/README.md). The model pipeline is next.
 
 ## What this repo does
 
-- **Data pipeline:** loads the datasets, resamples sensors to a common rate, cuts fixed-length windows, joins clinician ratings to sensor windows, and validates the data
-- **Model pipeline:** trains and evaluates models with subject-wise splits (no patient in both train and test), and tracks experiments
-- **Promotion:** a new model replaces the current one only if it beats it on a fixed test set
-- **Monitoring:** checks incoming data against the training data for drift
+| Part | Status | What it does |
+|---|---|---|
+| **Data pipeline** | Done: [Data_Pipeline/README.md](Data_Pipeline/README.md) | Downloads the COPS dataset, turns wrist accelerometry and the symptom diary into one row of features and a label for each participant-hour, then cleans, validates, checks for anomalies and bias, and versions the output with DVC. It runs as an Airflow DAG or as one command. |
+| **Model pipeline** | Next | Trains and evaluates models with subject-wise splits (no patient in both train and test), and tracks experiments |
+| **Promotion** | Planned | A new model replaces the current one only if it beats it on a fixed test set |
+| **Monitoring** | Planned | Checks incoming data against the training data for drift |
 
-## Datasets
+## Dataset
 
 | Dataset | Use | Access |
 |---|---|---|
-| PADS | Learn what Parkinson's wrist movement looks like | Open download |
-| MJFF Levodopa Response Study | Train and test the symptom severity model | Synapse. Each teammate must be approved individually. |
-| Parkinson@Home | Check the model works in real homes | Repository terms apply |
+| COPS ([osf.io/5xvwn](https://osf.io/5xvwn/)) | People with Parkinson's at home: both wrists at 100 Hz, an hourly symptom diary (the label: off, on, or dyskinetic), MDS-UPDRS III exams, and demographics. 66 participants, 47.9 GB. | Public download from OSF. The pipeline downloads it. |
 
-The datasets themselves are **not** stored in this repo.
+The dataset itself is **not** stored in this repo. DVC versions the pipeline's outputs.
 
 ## Related repos
 
@@ -34,19 +34,35 @@ The datasets themselves are **not** stored in this repo.
 
 The options we considered for each technical choice and why we picked the one we did: [ARCHITECTURE.md](ARCHITECTURE.md).
 
+## Tools
+
+| Job | Tool |
+|---|---|
+| Orchestration | Airflow 2.10 in Docker (`Data_Pipeline/docker-compose.yaml`) |
+| Data versioning | DVC (`Data_Pipeline/dvc.yaml`, `dvc.lock`) |
+| Schema, statistics and anomalies | Our own checks with pandas (`Data_Pipeline/scripts/validate.py`, `anomalies.py`) |
+| Bias slicing | Fairlearn |
+| Tests and style | pytest (coverage floor 85%), flake8 |
+
 ## Getting started
 
-_TBD once tools are chosen._ The goal is that one command runs each pipeline end to end.
+Use Python 3.11. From `Data_Pipeline/`:
+
+```bash
+pip install -r requirements.txt
+python -m scripts.run_pipeline --mode sample   # 5 participants, 1.08 GB download
+```
+
+To run it in Airflow, see [Data_Pipeline/README.md](Data_Pipeline/README.md#airflow).
 
 ## Running tests
 
-_TBD._ CI will run on a small sample dataset, never on the gated datasets.
+From `Data_Pipeline/`: `pytest -v`. The tests use small synthetic files, so they download nothing.
 
 ## Data rules
 
-- **Never commit data, extracted features or model weights.** Git holds code only. Data and models go in access-controlled storage, tracked by a versioning tool (_TBD_).
-- MJFF data stays with approved teammates under the Synapse terms. Don't share it or upload it to third-party services.
-- Cite each dataset as its license requires.
+- **Never commit data, extracted features or model weights.** Git holds code only. DVC versions the data. Only the summary reports with no participant IDs are in Git.
+- Cite the COPS dataset as its OSF page requires.
 
 ## Checks
 
@@ -57,8 +73,9 @@ Every PR and every push to `dev` or `main` runs [.github/workflows/checks.yml](.
 | Secret scan | Fails if a key, token or password is committed (gitleaks) |
 | Data file guard | Fails on data or model files (`.csv`, `.h5`, `.pt` and similar) or any file over 5 MB. Small synthetic test data may go in `tests/fixtures/`. |
 | Markdown lint | Fails on broken Markdown. Rules are relaxed; see `.markdownlint-cli2.yaml`. |
+| Data pipeline tests | flake8, pytest with an 85% coverage floor, and `dvc dag`, on Python 3.11 |
 
-Dependabot opens PRs to keep the workflow's actions up to date. Language checks get added here once the stack is chosen.
+Dependabot opens PRs to keep the workflow's actions up to date.
 
 To run the Markdown check locally: `npx markdownlint-cli2 "**/*.md"`
 
@@ -75,13 +92,12 @@ To run the Markdown check locally: `npx markdownlint-cli2 "**/*.md"`
 
 ## Progress
 
-Newest first. One row per merged PR.
+Newest first. One row per milestone, not per small change.
 
 | Date | Who | What changed | PR |
 |---|---|---|---|
-| 2026-10-12 | Sam Selvaraj | Updated docs: AndroidApp is native Android (Java), and the wording no longer assumes the repos are public | — |
-| 2026-10-12 | Sam Selvaraj | Updated CI actions: actions/checkout v7, actions/setup-node v7 | — |
-| 2026-10-12 | Sam Selvaraj | Added a tests line to the PR template | — |
-| 2026-10-12 | Sam Selvaraj | Added `dev` branch flow: PRs go to `dev`, release PRs move `dev` into `main` | — |
-| 2026-10-12 | Sam Selvaraj | Added CI checks (secret scan, data file guard, Markdown lint), .gitignore, PR template and Dependabot | — |
-| 2026-10-12 | Sam Selvaraj | Added README and ARCHITECTURE.md | — |
+| 2026-10-25 | Ayush Varma | Data pipeline run on 5 sample participants with `dvc repro` and Airflow, first DVC data version, results, bias findings, Gantt chart and screenshots in the docs, and this README updated | (this PR) |
+| 2026-10-24 | Sam Selvaraj | Data pipeline: DVC, 7× faster processing, robustness fixes, CI, and tests (coverage 92%) | #5 |
+| 2026-10-22 | Shaikh Basim | Data pipeline: fixed the run and the Airflow setup | #4 |
+| 2026-10-21 | Tejaswini Sarikonda | Data pipeline: download, features, cleaning, validation, anomalies, bias, DAG, DVC stage, Docker and tests | #3 |
+| 2026-10-12 | Sam Selvaraj | Repo setup: README, ARCHITECTURE.md, CI checks (secret scan, data file guard, Markdown lint) and the `dev` branch flow | — |

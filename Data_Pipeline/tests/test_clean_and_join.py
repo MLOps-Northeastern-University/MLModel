@@ -5,6 +5,7 @@ from scripts.clean import clean_hours, drop_duplicate_hours
 from scripts.join import attach_demographics, merge_participants
 from scripts.patient_info import load_demographics, summarise_updrs
 from scripts.process_patient import process_participant
+from scripts.utils.file_io import read_table
 from tests.helpers import make_config, make_demographics, make_participant_zip
 
 
@@ -24,6 +25,24 @@ def test_process_participant_builds_table(processed):
     assert table["updrs_off_total"].iloc[0] == 41
     assert table["levodopa_response"].iloc[0] == pytest.approx((41 - 20) / 41)
     assert {"L_move_mean", "R_tremor_mean", "asym_move_mean"}.issubset(table.columns)
+
+
+def test_numbered_dosage_columns_process_end_to_end(cfg, tmp_path):
+    # Most real participants (e.g. COPS-11) have Dosage_1, Dosage_2 instead of Dosage.
+    res = process_participant(make_participant_zip(tmp_path, "COPS-11", dose_columns=2), cfg)
+    table = read_table(res["table"])
+    assert len(table) == 7
+    first = table.loc[table["hour_start"] == 8].iloc[0]
+    assert first["dosage_mg"] == "50;50"
+    assert first["L_status"] == "ok"
+
+
+def test_dosage_stays_text_when_merging_layouts(cfg, tmp_path):
+    one = process_participant(make_participant_zip(tmp_path, "COPS-1", dose_columns=1), cfg)
+    two = process_participant(make_participant_zip(tmp_path, "COPS-2", dose_columns=3), cfg)
+    merged, _ = merge_participants([one, two])
+    doses = merged.groupby("participant_id")["dosage_mg"].first()
+    assert doses.to_dict() == {"COPS-1": "100", "COPS-2": "50;50"}
 
 
 def test_cleaning_keeps_only_labelled_worn_hours(cfg, processed):

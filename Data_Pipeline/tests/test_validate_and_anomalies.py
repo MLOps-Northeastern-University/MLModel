@@ -46,6 +46,14 @@ def test_schema_detects_missing_column_and_drift(cfg):
     assert ("schema_warning", "L_move_mean") in types
 
 
+def test_new_participants_are_not_schema_drift(cfg):
+    schema = infer_schema(good_df(), cfg)
+    assert "allowed_values" not in schema["columns"]["participant_id"]
+    new = good_df(seed=1)
+    new["participant_id"] = "COPS-3"
+    assert not any(v["column"] == "participant_id" for v in validate_against_schema(new, schema, cfg))
+
+
 def test_run_validation_saves_baseline_and_history(cfg):
     run_validation(good_df(), cfg, "run1")
     run_validation(good_df(seed=2), cfg, "run2")

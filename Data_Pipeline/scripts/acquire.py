@@ -10,6 +10,7 @@ import re
 import shutil
 import time
 from pathlib import Path
+from urllib.parse import urlsplit
 
 import requests
 
@@ -183,6 +184,7 @@ def download_file(entry, cfg, dest_dir=None, session=None):
         logger.info("Using cached %s", dest.name)
         return dest
 
+    check_download_url(entry.get("download_url"), cfg)
     session = session or requests.Session()
     retries = cfg["download"]["max_retries"]
     backoff = cfg["download"]["backoff_seconds"]
@@ -210,6 +212,19 @@ def download_file(entry, cfg, dest_dir=None, session=None):
                 raise AcquisitionError(f"Giving up on {entry['name']}") from exc
             time.sleep(backoff * 2 ** (attempt - 1))
     return None
+
+
+def check_download_url(url, cfg):
+    """Refuse a download address that isn't https:// on an allowed domain.
+
+    The address comes from the OSF listing, so this keeps a changed or
+    tampered listing from sending the pipeline anywhere else.
+    """
+    parts = urlsplit(url or "")
+    host = (parts.hostname or "").lower()
+    allowed = [h.lower() for h in cfg["download"]["allowed_hosts"]]
+    if parts.scheme != "https" or not any(host == h or host.endswith("." + h) for h in allowed):
+        raise AcquisitionError(f"Refusing to download from {url!r}: not https:// on {', '.join(allowed)}")
 
 
 def _is_valid(path, entry):

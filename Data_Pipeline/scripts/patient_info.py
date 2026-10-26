@@ -7,6 +7,7 @@ for bias slicing and as optional patient-level features.
 import numpy as np
 import pandas as pd
 
+from scripts.utils.file_io import read_text_csv
 from scripts.utils.logging_setup import get_logger
 
 logger = get_logger("patient_info")
@@ -14,7 +15,7 @@ logger = get_logger("patient_info")
 
 def load_updrs(source, sep=";"):
     """Read one UPDRS file (a single exam) and return its key values."""
-    df = pd.read_csv(source, sep=sep, na_values=["NaN", ""])
+    df = read_text_csv(source, sep=sep, na_values=["NaN", ""])
     if df.empty or "TotalScore" not in df.columns:
         raise ValueError("UPDRS file is empty or has no TotalScore column")
     row = df.iloc[0]
@@ -49,7 +50,7 @@ def load_demographics(path, cfg):
     spaces become underscores, and config demographics.column_map renames
     them to standard names (participant_id, sex, age, ...).
     """
-    df = pd.read_csv(path, sep=None, engine="python")
+    df = read_text_csv(path, sep=None, engine="python")
     df.columns = [str(c).strip().lower().replace(" ", "_") for c in df.columns]
     df = df.rename(columns=cfg["demographics"]["column_map"])
 

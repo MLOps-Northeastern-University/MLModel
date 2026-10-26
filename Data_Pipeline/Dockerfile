@@ -7,5 +7,6 @@ RUN apt-get update \
 
 USER airflow
 COPY requirements.txt /tmp/requirements.txt
-RUN pip install --no-cache-dir -r /tmp/requirements.txt \
+# Pinning apache-airflow stops pip from up- or downgrading Airflow itself.
+RUN pip install --no-cache-dir "apache-airflow==${AIRFLOW_VERSION}" -r /tmp/requirements.txt \
     && git config --global --add safe.directory '*'

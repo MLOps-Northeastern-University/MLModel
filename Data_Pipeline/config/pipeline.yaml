@@ -13,6 +13,16 @@ data:
   # Delete each raw zip after its features are extracted, to save disk space.
   delete_raw_after_processing: true
   random_seed: 42
+  # Stop the command-line run if more than this share of participants fail.
+  # Failed participants are listed in reports/failed_participants.json either way.
+  max_failed_fraction: 0.2
+
+run:
+  # Participants processed at the same time, each in its own process (download,
+  # features, delete the zip), by the command-line run and the Airflow DAG.
+  # 1 processes them one after another. Each uses one CPU core and holds one
+  # participant zip on disk at a time.
+  parallel_participants: 4
 
 paths:
   raw_dir: data/raw
@@ -26,6 +36,9 @@ download:
   max_retries: 3
   backoff_seconds: 5
   chunk_size_bytes: 1048576
+  # Downloads are refused unless they're https:// on one of these domains (or a
+  # subdomain, like files.osf.io), whatever address the OSF listing gives.
+  allowed_hosts: [osf.io]
 
 files:
   csv_separator: ";"
@@ -88,6 +101,8 @@ anomalies:
 
 validation:
   categorical_max_unique: 20
+  # ID columns: new values are expected, so they are never treated as new categories.
+  id_columns: [participant_id]
   # Allowed slack when comparing new numeric ranges with the baseline schema.
   range_tolerance: 0.25
   max_null_fraction_increase: 0.05
