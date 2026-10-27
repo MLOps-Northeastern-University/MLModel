@@ -22,6 +22,24 @@ Turns the COPS Parkinson's dataset ([osf.io/5xvwn](https://osf.io/5xvwn/)) into 
 
 Participant IDs are the dataset's own pseudonyms (`COPS-7`). Even so, files that list participants are versioned by DVC, not committed (see [Data versioning](#data-versioning-dvc)).
 
+## Quick start (only Docker needed)
+
+Install [Docker Desktop](https://www.docker.com/products/docker-desktop/) and give it at least 4 GB of memory. Then, from this folder:
+
+```bash
+mkdir -p logs/airflow && echo "AIRFLOW_UID=$(id -u)" > .env    # Linux only, once, before docker compose
+docker compose run --rm tests       # run the tests in the Airflow image (first run builds the image, ~5 min)
+docker compose run --rm pipeline    # run the pipeline on the 5 smallest participants (~1.1 GB download)
+docker compose up airflow-init      # first time only: sets up Airflow's database and login
+docker compose up -d                # starts Airflow at http://localhost:8080 (see Airflow below to run the DAG)
+```
+
+Outputs land in `data/` on your machine (see [Output files](#output-files)). Don't run the `pipeline` service and the Airflow DAG at the same time: both write to `data/`. Stop Airflow with `docker compose down`.
+
+**On Linux,** the containers write to this folder as user `AIRFLOW_UID` (50000 by default), which isn't you, so writing to `data/` and `logs/` fails without the first line. It runs the containers as your own user instead. Mac and Windows don't need it. If you copy `.env.example` to `.env` for alerts, set `AIRFLOW_UID` in it to the output of `id -u`.
+
+To work without Docker, set up Python as below.
+
 ## Setup
 
 Use **Python 3.11**. Newer versions fail to install the pinned libraries.
@@ -46,7 +64,7 @@ pytest -v
 
 ## Tests
 
-`pytest` runs 116 tests in `tests/`, on synthetic participants made by `tests/helpers.py`. No test downloads anything or sends a real alert.
+`docker compose run --rm tests` runs 122 tests in `tests/`, on synthetic participants made by `tests/helpers.py`. Plain `pytest` outside Docker runs 116 of them: the 6 in `test_dag.py` need Airflow and skip. No test downloads anything or sends a real alert.
 
 | File | What it checks |
 | --- | --- |
@@ -60,7 +78,7 @@ pytest -v
 | `test_alerts.py` | Email and Slack alerts when set up, skipped when not, and a broken mail server or webhook never crashing the run |
 | `test_run_pipeline.py` | Failed participants reported, the failure limit, parallel runs matching sequential ones |
 | `test_end_to_end.py` | The whole pipeline on four synthetic participants: every output, exact row counts, a second run checked against the first, and stopping on too many failures or on critical anomalies |
-| `test_dag.py` | The Airflow DAG loads, its tasks run in order, failures retry and alert, and one failed participant doesn't fail the run. Needs Airflow, so it skips locally; run it in the Airflow image: `docker compose run --rm -w /opt/airflow/repo/Data_Pipeline airflow-scheduler python -m pytest tests/test_dag.py` |
+| `test_dag.py` | The Airflow DAG loads, its tasks run in order, failures retry and alert, and one failed participant doesn't fail the run. Needs Airflow, so it skips outside Docker. `docker compose run --rm tests` runs it; for this file alone, `docker compose run --rm tests python -m pytest tests/test_dag.py` |
 
 Coverage of `scripts/` is about 92%: `pytest --cov=scripts --cov-branch`. CI fails below 85%.
 
@@ -85,10 +103,11 @@ python -m scripts.run_pipeline --local-zips C:\path\to\folder
 - Participants run 4 at a time (`run.parallel_participants`), each in its own process. Set it to 1 to run them one after another.
 - All settings are in `config/pipeline.yaml`.
 - A participant that fails is skipped and listed in `data/reports/failed_participants.json`, and an alert is sent. If more than 20% fail (`data.max_failed_fraction`), the run stops with exit code 1. Airflow follows the same rule, in its `check_failures` task.
+- With Docker, the same commands work through the `pipeline` service, e.g. `docker compose run --rm pipeline python -m scripts.run_pipeline --mode full`.
 
 ### Airflow
 
-The same steps run as an Airflow DAG in `dags/cops_pipeline_dag.py`. From this folder:
+The same steps run as an Airflow DAG in `dags/cops_pipeline_dag.py`. On Linux, run the one-time setup line from [Quick start](#quick-start-only-docker-needed) first. From this folder:
 
 ```bash
 docker compose up airflow-init   # first time only: sets up the database and the login

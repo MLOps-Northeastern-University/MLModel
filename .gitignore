@@ -41,3 +41,4 @@ service-account*.json
 Thumbs.db
 .vscode/
 .idea/
+.venv/

@@ -2,7 +2,7 @@
 
 Needs Airflow, which isn't in requirements.txt (the Airflow image brings it), so
 these tests skip where Airflow isn't installed. Run them in the image:
-    docker compose run --rm -w /opt/airflow/repo/Data_Pipeline airflow-scheduler python -m pytest tests/test_dag.py
+    docker compose run --rm tests python -m pytest tests/test_dag.py
 """
 
 from pathlib import Path
