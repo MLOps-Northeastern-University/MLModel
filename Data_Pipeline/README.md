@@ -28,7 +28,7 @@ Install [Docker Desktop](https://www.docker.com/products/docker-desktop/) and gi
 
 ```bash
 mkdir -p logs/airflow && echo "AIRFLOW_UID=$(id -u)" > .env    # Linux only, once, before docker compose
-docker compose run --rm tests       # run the tests in the Airflow image (first run builds the image, ~5 min)
+docker compose run --rm tests       # run the tests in the Airflow image (first run builds the image, a few minutes)
 docker compose run --rm pipeline    # run the pipeline on the 5 smallest participants (~1.1 GB download)
 docker compose up airflow-init      # first time only: sets up Airflow's database and login
 docker compose up -d                # starts Airflow at http://localhost:8080 (see Airflow below to run the DAG)
@@ -42,7 +42,7 @@ To work without Docker, set up Python as below.
 
 ## Setup
 
-Use **Python 3.11**. Newer versions fail to install the pinned libraries.
+Use **Python 3.11** or 3.12. Python 3.13 and newer fail to install the pinned libraries.
 
 ```bash
 conda create -n cops python=3.11 -y
@@ -94,7 +94,7 @@ python -m scripts.run_pipeline --mode sample
 python -m scripts.run_pipeline --mode full
 
 # Use participant zips you already downloaded
-python -m scripts.run_pipeline --local-zips C:\path\to\folder
+python -m scripts.run_pipeline --local-zips /path/to/folder
 ```
 
 - Write `scripts.run_pipeline` without `.py`.
@@ -190,6 +190,7 @@ All in `data/`.
 | `processed/hourly_all.csv` | All diary hours before cleaning |
 | `processed/label_issues.json` | Diary text/score mismatches and missing UPDRS files |
 | `interim/COPS-X_hourly.csv` | Per-participant table before merging |
+| `interim/COPS-X_issues.json` | That participant's diary issues, merged into `processed/label_issues.json` |
 | `reports/failed_participants.json` | Participants that could not be processed, with the error (empty means none) |
 | `reports/cleaning_summary.json` | Hours kept and removed, by reason |
 | `reports/schema_baseline.json` | Reference schema from the first run |
@@ -200,6 +201,7 @@ All in `data/`.
 | `reports/anomalies.json` | Critical anomalies and warnings |
 | `reports/bias_report.md` | Bias slicing results, to read |
 | `reports/bias_report.json` | The same, as data, with the participants the model was tested on |
+| `raw/Demographics.csv` | Demographics, downloaded from OSF |
 | `raw/manifest.json` | Files used in the run |
 
 Only `cleaning_summary.json` and `bias_report.md` are committed to Git; DVC versions the rest of `processed/` and `reports/`. Raw and interim data aren't versioned.
@@ -276,7 +278,7 @@ Data_Pipeline/
 ├── docs/                  DAG screenshots, gantt/ (Airflow Gantt charts), charts/ (results of the sample run)
 ├── logs/                  pipeline.log
 ├── dvc.yaml               the DVC stage
-├── Dockerfile, docker-compose.yaml   the Airflow setup
+├── Dockerfile, docker-compose.yaml   Airflow, plus the tests and pipeline services
 └── requirements.txt
 ```
 
@@ -305,7 +307,7 @@ git commit -m "Data version: <what changed>"
 dvc push             # uploads the data to the remote
 ```
 
-After an Airflow run, the `dvc_version` task does the same with `dvc commit -f build_dataset`.
+After an Airflow run, the `dvc_version` task updates `dvc.lock` with `dvc commit -f build_dataset` and tries `dvc push`. It doesn't commit to Git; do the `git add` and `git commit` above yourself.
 
 **Getting a version:** `git checkout <commit>` and then `dvc pull` restore exactly the data of that commit. Without access to the remote, `dvc repro` rebuilds it from OSF, and `dvc.lock` shows whether the result matches.
 
@@ -323,7 +325,7 @@ dvc remote add -d --local storage <path outside the repo>
 
 ## Speed
 
-Each participant has about 190 diary hours, and each hour is one CSV per wrist of 360,000 rows (100 a second). Profiling one full-size hour showed where the time went: reading the CSV (0.25 s) and converting its clock times to seconds (0.20 s), not the filtering (0.015 s). Two changes followed:
+A participant like COPS-7 has about 190 diary hours, and each hour is one CSV per wrist of 360,000 rows (100 a second). Profiling one full-size hour showed where the time went: reading the CSV (0.25 s) and converting its clock times to seconds (0.20 s), not the filtering (0.015 s). Two changes followed:
 
 | Change | Before | After |
 | --- | --- | --- |
@@ -344,7 +346,9 @@ Newest first.
 
 | Date | Who | What changed | PR |
 | --- | --- | --- | --- |
-| 2026-10-25 | Ayush Varma | Ran the pipeline on the 5 sample participants with `dvc repro` and with the Airflow DAG (same results), recorded the first data version (`dvc.lock`, pushed to a local DVC remote), committed the 5-participant summary reports, and documented the results, the bias findings, the Gantt chart, the Airflow steps and a `venv` setup, with DAG screenshots and charts in `docs/` | (this PR) |
-| 2026-10-24 | Sam Selvaraj | Set up DVC (every output versioned, participant-level reports kept out of Git, summaries kept in), made processing about 7× faster (pyarrow reading, parallel participants on the command line), fixed one failed participant failing the whole Airflow run, Windows-encoded and empty diaries, and unchecked download addresses, added CI for the pipeline (lint, tests with an 85% coverage floor, DVC, a stricter data guard), and added tests for downloads, alerts, the whole pipeline end to end, the DAG and robustness (coverage 73% to 92%) | — |
+| 2026-10-26 | Shaikh Basim | Made the pipeline run with only Docker: `tests` and `pipeline` services in `docker-compose.yaml`, Airflow's slim image (no clashing add-on pins, half the download), the Linux `AIRFLOW_UID` setup, and a front-page README that starts with the Docker commands | #9 |
+| 2026-10-26 | Sam Selvaraj | Corrected the DAG's task count to 12, and made Git check out text files with LF line endings everywhere, so DVC sees the same files on Windows | #7 |
+| 2026-10-25 | Ayush Varma | Ran the pipeline on the 5 sample participants with `dvc repro` and with the Airflow DAG (same results), recorded the first data version (`dvc.lock`, pushed to a local DVC remote), committed the 5-participant summary reports, and documented the results, the bias findings, the Gantt chart, the Airflow steps and a `venv` setup, with DAG screenshots and charts in `docs/` | #6 |
+| 2026-10-24 | Sam Selvaraj | Set up DVC (every output versioned, participant-level reports kept out of Git, summaries kept in), made processing about 7× faster (pyarrow reading, parallel participants on the command line), fixed one failed participant failing the whole Airflow run, Windows-encoded and empty diaries, and unchecked download addresses, added CI for the pipeline (lint, tests with an 85% coverage floor, DVC, a stricter data guard), and added tests for downloads, alerts, the whole pipeline end to end, the DAG and robustness (coverage 73% to 92%) | #5 |
 | 2026-10-22 | Shaikh Basim | Fixed the pipeline run: diaries with `Dosage` or `Dosage_1..N` columns are read, failed participants are listed in `failed_participants.json` with an alert, the Airflow DAG path in `docker-compose.yaml` is fixed, `.env` is optional, Airflow is pinned in the Dockerfile, and `airflow-init` creates the admin user | #4 |
 | 2026-10-21 | Tejaswini Sarikonda | Built the data pipeline: download from OSF, diary parsing, wrist features, cleaning, validation and statistics, anomaly alerts, bias slicing, the Airflow DAG, the DVC stage, the Docker setup and the tests | #3 |
