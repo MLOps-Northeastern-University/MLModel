@@ -64,7 +64,7 @@ pytest -v
 
 ## Tests
 
-`pytest` runs 116 tests in `tests/`, on synthetic participants made by `tests/helpers.py`. No test downloads anything or sends a real alert.
+`docker compose run --rm tests` runs 122 tests in `tests/`, on synthetic participants made by `tests/helpers.py`. Plain `pytest` outside Docker runs 116 of them: the 6 in `test_dag.py` need Airflow and skip. No test downloads anything or sends a real alert.
 
 | File | What it checks |
 | --- | --- |
@@ -78,7 +78,7 @@ pytest -v
 | `test_alerts.py` | Email and Slack alerts when set up, skipped when not, and a broken mail server or webhook never crashing the run |
 | `test_run_pipeline.py` | Failed participants reported, the failure limit, parallel runs matching sequential ones |
 | `test_end_to_end.py` | The whole pipeline on four synthetic participants: every output, exact row counts, a second run checked against the first, and stopping on too many failures or on critical anomalies |
-| `test_dag.py` | The Airflow DAG loads, its tasks run in order, failures retry and alert, and one failed participant doesn't fail the run. Needs Airflow, so it skips locally; run it in the Airflow image: `docker compose run --rm -w /opt/airflow/repo/Data_Pipeline airflow-scheduler python -m pytest tests/test_dag.py` |
+| `test_dag.py` | The Airflow DAG loads, its tasks run in order, failures retry and alert, and one failed participant doesn't fail the run. Needs Airflow, so it skips outside Docker. `docker compose run --rm tests` runs it; for this file alone, `docker compose run --rm tests python -m pytest tests/test_dag.py` |
 
 Coverage of `scripts/` is about 92%: `pytest --cov=scripts --cov-branch`. CI fails below 85%.
 

@@ -46,18 +46,18 @@ The options we considered for each technical choice and why we picked the one we
 
 ## Getting started
 
-Use Python 3.11. From `Data_Pipeline/`:
+Only Docker is needed. From `Data_Pipeline/`:
 
 ```bash
-pip install -r requirements.txt
-python -m scripts.run_pipeline --mode sample   # 5 participants, 1.08 GB download
+docker compose run --rm tests       # the tests (the first run builds the image)
+docker compose run --rm pipeline    # the pipeline on 5 participants, 1.08 GB download
 ```
 
-To run it in Airflow, see [Data_Pipeline/README.md](Data_Pipeline/README.md#airflow).
+On Linux, run `mkdir -p logs/airflow && echo "AIRFLOW_UID=$(id -u)" > .env` once first, so the containers can write to the folder. To run it in Airflow, or without Docker on Python 3.11, see the [quick start in Data_Pipeline/README.md](Data_Pipeline/README.md#quick-start-only-docker-needed).
 
 ## Running tests
 
-From `Data_Pipeline/`: `pytest -v`. The tests use small synthetic files, so they download nothing.
+From `Data_Pipeline/`: `docker compose run --rm tests`, or `pytest -v` with Python 3.11 (which skips the Airflow DAG tests). The tests use small synthetic files, so they download nothing.
 
 ## Data rules
 
