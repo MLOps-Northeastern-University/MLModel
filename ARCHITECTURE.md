@@ -51,14 +51,13 @@ Ruled out: BEAT-PD (no working download) and PD-BioStampRC21 (too few patients w
 **Decision:** PADS + MJFF Levodopa, with Parkinson@Home for home testing. Fall back to PADS + Parkinson@Home if MJFF access isn't granted in about 2 weeks.
 **Why:** It's the only combination with doctor-rated severity across a full medication dose cycle.
 
-_Update · 2026-11-05_
+_Note · 2026-11-05_
 
-**Decision:** While MJFF access is pending, we build and evaluate on **COPS** ([osf.io/5xvwn](https://osf.io/5xvwn/)): people with Parkinson's wearing wrist sensors at home, with an hourly patient diary of tremor and akinesia. The data pipeline in `Data_Pipeline/` processes COPS, and the model was evaluated on 10 COPS patients. PADS was used to choose the window encoder (section 3). MJFF is still the target for doctor-rated labels.
-**Why:** COPS is open and has the home recordings and symptom labels we need now. Waiting for MJFF would have blocked both pipelines.
+While MJFF access is pending, we build and evaluate on **COPS** ([osf.io/5xvwn](https://osf.io/5xvwn/)): people with Parkinson's wearing wrist sensors at home, with an hourly patient diary of tremor and akinesia. The data pipeline in `Data_Pipeline/` processes COPS, and the model was evaluated on 10 COPS patients. PADS was used to choose the window encoder (section 3). MJFF is still the target for doctor-rated labels. COPS is open and has the home recordings and symptom labels we need now, so waiting for MJFF would have blocked both pipelines.
 
 ## 2. Preprocessing
 
-_Decided · Owner: TBD · Date: 2026-10-20_
+_Owner: TBD · Decide by: TBD_
 
 The datasets use different devices and sampling rates, and none matches our watch, so everything goes through one shared preprocessing step.
 
@@ -68,13 +67,16 @@ The datasets use different devices and sampling rates, and none matches our watc
 | Window length | 10 s, or other | 10 s matches PADS task length, the planned per-window output, and harnet10's input |
 | Axes and units | Convert all to the same orientation and units | Needs each device's documentation |
 
-**Decision:** Resample to **30 Hz** and cut **10-second windows** (3 axes × 300 samples, so one hour is 360 windows). Use the more affected wrist, in g. Subtract each window's mean on every axis, which removes gravity and the watch's resting orientation.
-**Why:** The model uses the frozen harnet10 encoder (section 3), which was pretrained on 30 Hz, 10-second windows, so its input has to match. All our datasets record at 50 Hz or more, so 30 Hz only ever downsamples.
-**Not done yet:** `Data_Pipeline/` builds hourly features from the 100 Hz data. The 30 Hz window cache that the model trains on (raw windows plus harnet10 embeddings) is built by a script that isn't in this repo yet. Axes and units for MJFF are still to be checked once we have access.
+**What the prototype uses:** 30 Hz and 10-second windows (3 axes × 300 samples, so one hour is 360 windows), from the more affected wrist, in g. It subtracts each window's mean on every axis, which removes gravity and the watch's resting orientation. The reason is that the leading model candidate (section 3) uses the frozen harnet10 encoder, which was pretrained on 30 Hz, 10-second windows. All our datasets record at 50 Hz or more, so 30 Hz only ever downsamples.
+
+**Decision:** _TBD_
+**Why:** —
+
+**Not built yet:** `Data_Pipeline/` builds hourly features from the 100 Hz data. The 30 Hz window cache that the model trains on (raw windows plus harnet10 embeddings) is built by a script that isn't in this repo yet. Axes and units for MJFF are still to be checked once we have access.
 
 ## 3. Model approach
 
-_Decided, accuracy still being assessed · Owner: TBD · Date: 2026-10-20_
+_Owner: TBD · Decide by: TBD_
 
 | Option | Good | Bad |
 |---|---|---|
@@ -97,10 +99,9 @@ We started with feature baselines as planned (activity and signal features with 
 | **Hybrid (3-seed average)** | **0.754** | 0.731 [0.49–0.93] | **+0.19** | −0.08 | 0.614 |
 | Shuffled labels (leakage check) | 0.474 | 0.415 [0.23–0.63] | +0.10 | −0.05 | 0.519 |
 
-**Decision:** The hybrid encoder with attention pooling is the main model. harnet10 + logistic regression is the baseline every new model has to beat.
-**Why:**
+**What the results suggest so far:** the hybrid encoder with attention pooling is the leading candidate, and harnet10 + logistic regression is the baseline to beat.
 
-- It's the only model that tracks tremor within a patient's day. The PD Monitor timeline needs that.
+- The hybrid is the only model that tracks tremor within a patient's day. The PD Monitor timeline needs that.
 - The shuffled-label run still reaches +0.10 within-patient, so the real gain over chance is about +0.09.
 - On PADS (Parkinson's vs healthy) the hybrid scored AUC 0.790–0.795, against 0.774 for harnet10 alone and 0.774 for the trained branches alone.
 
@@ -113,6 +114,9 @@ We started with feature baselines as planned (activity and signal features with 
 - Attention pooling hasn't been compared with a plain average of the windows.
 
 The full design, training details and open questions are in `Model Architecture.md`, which will be added to this repo together with the training code.
+
+**Decision:** _TBD_
+**Why:** —
 
 ## 4. Pipeline orchestration
 
@@ -175,7 +179,7 @@ _Owner: TBD · Decide by: TBD_
 | On the server | Easy to monitor, update and roll back. Shows the MLOps work well. | Raw movement data must be uploaded, which costs battery and bandwidth |
 | On the phone or watch (TFLite) | Less data uploaded. More private. | Harder to update and monitor |
 
-Input for this decision: the chosen model (section 3) includes harnet10, an 11M-parameter encoder, and takes about 15 ms per 10-s window on a CPU, mostly in harnet10. That leans toward the server.
+Input for this decision: the leading model candidate (section 3) includes harnet10, an 11M-parameter encoder, and takes about 15 ms per 10-s window on a CPU, mostly in harnet10. That leans toward the server.
 
 **Decision:** _TBD_
 **Why:** —
