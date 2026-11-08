@@ -24,7 +24,18 @@ def test_process_participant_builds_table(processed):
     assert len(table) == 7
     assert table["updrs_off_total"].iloc[0] == 41
     assert table["levodopa_response"].iloc[0] == pytest.approx((41 - 20) / 41)
-    assert {"L_move_mean", "R_tremor_mean", "asym_move_mean"}.issubset(table.columns)
+    assert {"W_move_mean", "W_tremor_mean"}.issubset(table.columns)
+    assert not [c for c in table.columns if c.startswith(("L_", "R_", "asym_"))]
+
+
+def test_only_the_configured_wrist_is_used(tmp_path):
+    # The right wrist's file is corrupt: a left-wrist run never reads it, a right-wrist run does.
+    zip_path = make_participant_zip(tmp_path, corrupt="COPS-99_Day0_8h-9h_rightWrist.zip")
+    for side, other, status in [("left", "right", "ok"), ("right", "left", "corrupt_file")]:
+        cfg = make_config(tmp_path / side, features={"wrist": side})
+        table = read_table(process_participant(zip_path, cfg)["table"])
+        assert table.loc[table["hour_start"] == 8, "W_status"].iloc[0] == status
+        assert f"{side}_zip" in table.columns and f"{other}_zip" not in table.columns
 
 
 def test_numbered_dosage_columns_process_end_to_end(cfg, tmp_path):
@@ -34,7 +45,7 @@ def test_numbered_dosage_columns_process_end_to_end(cfg, tmp_path):
     assert len(table) == 7
     first = table.loc[table["hour_start"] == 8].iloc[0]
     assert first["dosage_mg"] == "50;50"
-    assert first["L_status"] == "ok"
+    assert first["W_status"] == "ok"
 
 
 def test_dosage_stays_text_when_merging_layouts(cfg, tmp_path):
@@ -55,9 +66,9 @@ def test_cleaning_keeps_only_labelled_worn_hours(cfg, processed):
 
 def test_low_valid_fraction_is_removed(cfg, processed):
     df = pd.read_csv(processed["table"])
-    df.loc[0, "L_valid_fraction"] = 0.5
+    df.loc[0, "W_valid_fraction"] = 0.5
     clean, summary = clean_hours(df, cfg)
-    assert summary["removed"].get("L_low_valid_fraction") == 1
+    assert summary["removed"].get("low_valid_fraction") == 1
 
 
 def test_missing_updrs_does_not_crash(cfg, tmp_path):

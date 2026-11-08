@@ -227,16 +227,3 @@ def wrist_features(archive, zip_name, csv_name, cfg):
     except (zipfile.BadZipFile, ValueError, pd.errors.ParserError) as exc:
         logger.warning("Corrupt accelerometry file %s: %s", zip_name, exc)
         return empty_features(0, "corrupt_file")
-
-
-def combine_wrists(left, right):
-    """Merge left and right wrist features into one row with asymmetry."""
-    row = {f"L_{k}": v for k, v in left.items()}
-    row.update({f"R_{k}": v for k, v in right.items()})
-    for name in ["move_mean", "tremor_mean"]:
-        l_val, r_val = left.get(name, np.nan), right.get(name, np.nan)
-        total = l_val + r_val
-        # +1 means all activity on the right, -1 all on the left.
-        row[f"asym_{name}"] = (r_val - l_val) / total if total and not np.isnan(total) else np.nan
-    row["asym_still_fraction"] = right.get("still_fraction", np.nan) - left.get("still_fraction", np.nan)
-    return row

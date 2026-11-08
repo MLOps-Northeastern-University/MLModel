@@ -13,7 +13,7 @@ from scripts.utils.logging_setup import get_logger
 
 logger = get_logger("anomalies")
 
-FEATURE_PREFIXES = ("L_move", "R_move", "L_tremor", "R_tremor", "L_still", "R_still", "asym_")
+FEATURE_PREFIXES = ("W_move", "W_tremor", "W_still")
 
 
 class DataAnomalyError(RuntimeError):

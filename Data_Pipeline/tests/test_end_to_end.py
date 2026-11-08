@@ -62,7 +62,7 @@ def test_the_whole_pipeline_runs_and_writes_every_output(tmp_path, monkeypatch, 
     assert len(features) == 16  # 4 usable hours x 4 participants
     assert sorted(features["participant_id"].unique()) == PIDS
     assert set(features["kinesia_class"]) == {"off", "on", "dyskinetic"}
-    assert features[["L_move_mean", "R_tremor_mean", "asym_move_mean"]].notna().all().all()
+    assert features[["W_move_mean", "W_tremor_mean"]].notna().all().all()
     assert features["age"].notna().all() and features["sex"].notna().all()  # demographics joined
     assert features["updrs_off_total"].eq(41).all()
 

@@ -10,7 +10,7 @@ from pathlib import Path
 import pandas as pd
 
 from scripts.diary import load_diary, parse_diary
-from scripts.features import ParticipantArchive, combine_wrists, wrist_features
+from scripts.features import ParticipantArchive, wrist_features
 from scripts.patient_info import load_updrs, summarise_updrs
 from scripts.utils.file_io import write_json, write_table
 from scripts.utils.logging_setup import get_logger
@@ -28,9 +28,11 @@ def participant_id_from_path(zip_path):
 def process_participant(zip_path, cfg):
     """Build the hourly feature table for one participant.
 
-    Only diary hours that point to accelerometry files are processed, so
-    hours with no sensor data are skipped cheaply. Filtering by label,
-    wear status and quality happens later in clean.py.
+    Only the wrist set in features.wrist is used; its features are named
+    W_* whichever side it is. Only diary hours that point to a file for
+    that wrist are processed, so hours with no sensor data are skipped
+    cheaply. Filtering by label, wear status and quality happens later in
+    clean.py.
 
     Returns:
         dict: Paths to the participant's feature table and issue report.
@@ -60,13 +62,16 @@ def process_participant(zip_path, cfg):
                 issues.append({"participant_id": pid, "field": f"updrs_{state.lower()}",
                                "issue": "file_unreadable"})
 
+        side = cfg["features"]["wrist"]
+        other = "right" if side == "left" else "left"
+        diary = diary.drop(columns=[f"{other}_zip", f"{other}_csv"])
+
         rows = []
-        has_files = diary[["left_zip", "left_csv", "right_zip", "right_csv"]].notna().any(axis=1)
+        has_files = diary[[f"{side}_zip", f"{side}_csv"]].notna().any(axis=1)
         hours = diary[has_files]
         for n, (_, hour) in enumerate(hours.iterrows(), start=1):
-            left = wrist_features(archive, hour["left_zip"], hour["left_csv"], cfg)
-            right = wrist_features(archive, hour["right_zip"], hour["right_csv"], cfg)
-            rows.append({"hour_index": hour["hour_index"], **combine_wrists(left, right)})
+            feats = wrist_features(archive, hour[f"{side}_zip"], hour[f"{side}_csv"], cfg)
+            rows.append({"hour_index": hour["hour_index"], **{f"W_{k}": v for k, v in feats.items()}})
             if n % 20 == 0 or n == len(hours):
                 logger.info("%s: %d/%d hours done", pid, n, len(hours))
 

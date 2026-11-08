@@ -5,7 +5,7 @@ import pandas as pd
 import pytest
 
 from scripts.features import (
-    ParticipantArchive, bandpass, combine_wrists, compute_hour_features, read_hour_csv, wrist_features,
+    ParticipantArchive, bandpass, compute_hour_features, read_hour_csv, wrist_features,
 )
 from tests.helpers import csv_bytes, make_config, make_participant_zip, signal
 
@@ -66,14 +66,6 @@ def test_corrupt_inner_zip_does_not_crash(cfg, tmp_path):
     with ParticipantArchive(path) as archive:
         f = wrist_features(archive, name, None, cfg)
     assert f["status"] == "corrupt_file"
-
-
-def test_combine_wrists_asymmetry():
-    row = combine_wrists({"move_mean": 1.0, "tremor_mean": 0.0, "still_fraction": 0.2},
-                         {"move_mean": 3.0, "tremor_mean": 0.0, "still_fraction": 0.1})
-    assert row["asym_move_mean"] == pytest.approx(0.5)
-    assert np.isnan(row["asym_tremor_mean"])
-    assert row["L_move_mean"] == 1.0 and row["R_move_mean"] == 3.0
 
 
 def test_time_parsing_fast_path_and_fallback():

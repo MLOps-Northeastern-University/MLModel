@@ -46,6 +46,9 @@ files:
   participant_zip_pattern: "^COPS-\\d+\\.zip$"
 
 features:
+  # Users wear one watch, so only this wrist's data is used: left or right.
+  # COPS recorded both wrists; the other one is ignored.
+  wrist: left
   sampling_rate_hz: 100
   expected_seconds_per_file: 3600
   movement_band_hz: [0.1, 3.0]
@@ -83,7 +86,6 @@ labels:
     "dyskinetic": [1, 2, 3]
 
 cleaning:
-  require_both_wrists: true
   # Minimum share of the hour with valid samples (applies to partially worn hours too).
   min_valid_fraction: 0.8
   # Sensor-based non-wear check, in addition to the diary flag.

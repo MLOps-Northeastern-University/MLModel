@@ -19,9 +19,9 @@ def good_df(n=40, seed=0):
         "hour_index": list(range(n // 2)) * 2,
         "kinesia_class": rng.choice(["off", "on", "dyskinetic"], n),
         "kinesia_score": rng.integers(-3, 4, n),
-        "L_move_mean": rng.uniform(0.01, 0.1, n),
-        "R_move_mean": rng.uniform(0.01, 0.1, n),
-        "L_still_fraction": rng.uniform(0, 1, n),
+        "W_move_mean": rng.uniform(0.01, 0.1, n),
+        "W_tremor_mean": rng.uniform(0.01, 0.1, n),
+        "W_still_fraction": rng.uniform(0, 1, n),
     })
 
 
@@ -32,18 +32,18 @@ def test_good_data_passes_expectations(cfg):
 def test_bad_label_and_fraction_fail(cfg):
     df = good_df()
     df.loc[0, "kinesia_class"] = "unknown"
-    df.loc[1, "L_still_fraction"] = 1.5
+    df.loc[1, "W_still_fraction"] = 1.5
     names = {f["expectation"] for f in check_expectations(df, cfg)}
-    assert {"kinesia_class_in_set", "L_still_fraction_between_0_and_1"} <= names
+    assert {"kinesia_class_in_set", "W_still_fraction_between_0_and_1"} <= names
 
 
 def test_schema_detects_missing_column_and_drift(cfg):
     schema = infer_schema(good_df(), cfg)
-    new = good_df(seed=1).drop(columns=["R_move_mean"])
-    new["L_move_mean"] = new["L_move_mean"] * 100
+    new = good_df(seed=1).drop(columns=["W_tremor_mean"])
+    new["W_move_mean"] = new["W_move_mean"] * 100
     types = {(v["type"], v["column"]) for v in validate_against_schema(new, schema, cfg)}
-    assert ("schema_violation", "R_move_mean") in types
-    assert ("schema_warning", "L_move_mean") in types
+    assert ("schema_violation", "W_tremor_mean") in types
+    assert ("schema_warning", "W_move_mean") in types
 
 
 def test_new_participants_are_not_schema_drift(cfg):
@@ -64,8 +64,8 @@ def test_run_validation_saves_baseline_and_history(cfg):
 
 def test_missing_values_and_outliers_detected(cfg):
     df = good_df(200)
-    df.loc[:20, "L_move_mean"] = np.nan
-    df.loc[30:40, "R_move_mean"] = 1000.0
+    df.loc[:20, "W_move_mean"] = np.nan
+    df.loc[30:40, "W_tremor_mean"] = 1000.0
     report = detect_anomalies(df, cfg)
     types = {a["type"] for a in report["warnings"]}
     assert {"missing_values", "outliers"} <= types

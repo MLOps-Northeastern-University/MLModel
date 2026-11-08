@@ -13,7 +13,7 @@ def clean_hours(df, cfg):
     Rules (in order):
         1. no kinesia label (Sleep, No Data)
         2. diary says the watch was not worn
-        3. missing or unusable sensor data on a required wrist
+        3. missing or unusable sensor data from the watch
         4. too little valid data in the hour (covers partially worn hours)
         5. sensor-based non-wear: cold watch that never moves
 
@@ -21,7 +21,6 @@ def clean_hours(df, cfg):
         (DataFrame, dict): The cleaned rows and the count removed per reason.
     """
     c = cfg["cleaning"]
-    wrists = ["L", "R"] if c["require_both_wrists"] else []
     reasons = pd.Series("", index=df.index, dtype=object)
 
     def mark(mask, reason):
@@ -29,15 +28,13 @@ def clean_hours(df, cfg):
 
     mark(df["kinesia_class"].isna(), "no_label")
     mark(df["wear_status"].eq("Wearable Not Worn"), "not_worn")
-    for w in wrists:
-        status = df.get(f"{w}_status", pd.Series(index=df.index, dtype=object))
-        mark(status.ne("ok"), f"{w}_no_sensor_data")
-        frac = pd.to_numeric(df.get(f"{w}_valid_fraction"), errors="coerce")
-        mark(frac < c["min_valid_fraction"], f"{w}_low_valid_fraction")
-        temp = pd.to_numeric(df.get(f"{w}_temp_mean"), errors="coerce")
-        still = pd.to_numeric(df.get(f"{w}_still_fraction"), errors="coerce")
-        mark((temp < c["nonwear_max_temp_c"]) & (still > c["nonwear_min_still_fraction"]),
-             f"{w}_sensor_nonwear")
+    status = df.get("W_status", pd.Series(index=df.index, dtype=object))
+    mark(status.ne("ok"), "no_sensor_data")
+    frac = pd.to_numeric(df.get("W_valid_fraction"), errors="coerce")
+    mark(frac < c["min_valid_fraction"], "low_valid_fraction")
+    temp = pd.to_numeric(df.get("W_temp_mean"), errors="coerce")
+    still = pd.to_numeric(df.get("W_still_fraction"), errors="coerce")
+    mark((temp < c["nonwear_max_temp_c"]) & (still > c["nonwear_min_still_fraction"]), "sensor_nonwear")
 
     removed = reasons[reasons != ""].value_counts().to_dict()
     clean = df[reasons == ""].copy()

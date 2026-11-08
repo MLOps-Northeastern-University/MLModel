@@ -20,10 +20,9 @@ from scripts.utils.logging_setup import get_logger
 
 logger = get_logger("validate")
 
-FRACTION_COLUMNS = ["L_still_fraction", "R_still_fraction", "L_valid_fraction", "R_valid_fraction"]
+FRACTION_COLUMNS = ["W_still_fraction", "W_valid_fraction"]
 NON_NEGATIVE_COLUMNS = [
-    f"{w}_{f}" for w in "LR"
-    for f in ["move_mean", "move_std", "move_p95", "tremor_mean", "tremor_p95", "tremor_ratio"]
+    f"W_{f}" for f in ["move_mean", "move_std", "move_p95", "tremor_mean", "tremor_p95", "tremor_ratio"]
 ]
 
 
@@ -175,7 +174,7 @@ def _append_history(stats, path, run_id):
     row = {"run_id": run_id, "generated_at": stats["generated_at"],
            "n_rows": stats["n_rows"], "n_participants": stats["n_participants"]}
     row.update({f"label_{k}": v for k, v in stats.get("label_distribution", {}).items()})
-    for col in ["L_move_mean", "R_move_mean", "L_tremor_mean", "R_tremor_mean"]:
+    for col in ["W_move_mean", "W_tremor_mean"]:
         if col in stats["columns"]:
             row[f"{col}_mean"] = stats["columns"][col].get("mean", np.nan)
     new = pd.DataFrame([row])

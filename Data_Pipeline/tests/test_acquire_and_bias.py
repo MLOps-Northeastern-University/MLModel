@@ -68,7 +68,7 @@ def test_bias_report_runs(cfg):
             rows.append({"participant_id": f"COPS-{p}", "hour_index": h,
                          "kinesia_class": "off" if h % 3 == 0 else "on",
                          "sex": "M" if p % 2 else "F",
-                         "L_move_mean": 0.01 if h % 3 == 0 else 0.08, "R_move_mean": 0.02})
+                         "W_move_mean": 0.01 if h % 3 == 0 else 0.08, "W_tremor_mean": 0.02})
     report = run_bias_analysis(pd.DataFrame(rows), cfg)
     assert "sex" in report["data_level"]
     assert "slices" in report["model_level"]

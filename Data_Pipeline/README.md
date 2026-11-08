@@ -15,7 +15,7 @@ Turns the COPS Parkinson's dataset ([osf.io/5xvwn](https://osf.io/5xvwn/)) into 
 **COPS** ([osf.io/5xvwn](https://osf.io/5xvwn/)), a public dataset of people with Parkinson's disease recorded at home. Check the OSF page for its licence, and cite it as the page asks.
 
 - **66 participants**, one zip each (47.9 GB in all; the 5 smallest, used by `sample` mode, are 1.1 GB).
-- **Wrist sensors** on both wrists: one CSV per wrist per hour, 100 samples a second, with acceleration `X`, `Y`, `Z` (in g), `Photo` (light) and `Temp` (temperature).
+- **Wrist sensors** on both wrists: one CSV per wrist per hour, 100 samples a second, with acceleration `X`, `Y`, `Z` (in g), `Photo` (light) and `Temp` (temperature). Users are expected to wear one watch, so the pipeline uses one wrist (`features.wrist` in the config, left by default) and ignores the other.
 - **An hourly symptom diary** filled in by the participant: kinesia (−3 to +3, the label), tremor, freezing, falls, medication and dose, and whether the watch was worn.
 - **Clinical exams:** MDS-UPDRS Part III, OFF and ON medication.
 - **`Demographics.csv`:** age, sex, handedness, Parkinson's subtype and dominant side, Hoehn & Yahr stage, years since diagnosis, and DBS.
@@ -166,12 +166,12 @@ Earlier runs used single participants: COPS-7 (192 diary hours, 105 usable) and 
 
 1. **Acquire:** list files on OSF, pick participants, and for each one download its zip (checked against OSF's SHA-256, with retries), process it, and delete it. Several participants run at once.
 2. **Parse the diary:** read the hourly diary, map `KinesiaScore` to off / on / dyskinetic, and flag rows where the text and score disagree (the text is trusted).
-3. **Extract features** for each hour and each wrist:
+3. **Extract features** for each hour from the wrist set in `features.wrist`:
     1. Magnitude per row: √(X² + Y² + Z²)
     2. Band-pass filter into 0.1–3 Hz (movement, also removes gravity) and 4–8 Hz (tremor)
     3. Absolute value, averaged per second
     4. Hourly summary: `move_mean`, `move_std`, `move_p95`, `still_fraction`, `tremor_mean`, `tremor_p95`, `tremor_ratio`
-4. **Combine wrists:** prefix features with `L_` and `R_`, and add left-right asymmetry (`asym_move_mean`, `asym_tremor_mean`, `asym_still_fraction`).
+4. **Name the features:** prefix them with `W_` (the watch), whichever wrist it is, so the column names don't depend on the side.
 5. **Add patient info:** UPDRS-III off and on scores, levodopa response, demographics, and hours since the last dose.
 6. **Clean:** remove hours with no label (sleep, no data), not worn, missing or low-quality sensor data, and duplicates.
 7. **Validate:** check fixed rules, compare with the baseline schema, and save statistics.
@@ -208,7 +208,7 @@ Only `cleaning_summary.json` and `bias_report.md` are committed to Git; DVC vers
 
 ## Data card
 
-`processed/hourly_features.csv`: one row per participant-hour that has a label and usable sensor data from both wrists.
+`processed/hourly_features.csv`: one row per participant-hour that has a label and usable sensor data from the watch wrist.
 
 | Group | Columns | What they are |
 | --- | --- | --- |
@@ -216,13 +216,12 @@ Only `cleaning_summary.json` and `bias_report.md` are committed to Git; DVC vers
 | **Label** | `kinesia_class` | `off`, `on` or `dyskinetic`, from `kinesia_score` |
 | Diary | `kinesia_text`, `kinesia_score`, `tremor_score`, `tremor_present`, `freezing`, `fall`, `wear_status` | The participant's own hourly entries; `kinesia_score` runs from −3 to +3 |
 | Medication | `medication_taken`, `medication`, `dosage_mg`, `hours_since_dose` | Doses logged in the diary, and hours since the last one |
-| Movement, per wrist (`L_`, `R_`) | `move_mean`, `move_std`, `move_p95`, `still_fraction` | Everyday movement (0.1–3 Hz), from the per-second averages over the hour |
-| Tremor, per wrist | `tremor_mean`, `tremor_p95`, `tremor_ratio` | Tremor-band movement (4–8 Hz), and its size relative to everyday movement |
-| Quality, per wrist | `n_samples`, `valid_fraction`, `n_gaps`, `n_clipped`, `temp_mean`, `photo_mean`, `status` | How much usable data the hour had, gaps and clipped values, and the sensor's temperature and light |
-| Asymmetry | `asym_move_mean`, `asym_tremor_mean`, `asym_still_fraction` | Right against left: +1 all on the right, −1 all on the left |
+| Movement (`W_`) | `move_mean`, `move_std`, `move_p95`, `still_fraction` | Everyday movement (0.1–3 Hz), from the per-second averages over the hour |
+| Tremor (`W_`) | `tremor_mean`, `tremor_p95`, `tremor_ratio` | Tremor-band movement (4–8 Hz), and its size relative to everyday movement |
+| Quality (`W_`) | `n_samples`, `valid_fraction`, `n_gaps`, `n_clipped`, `temp_mean`, `photo_mean`, `status` | How much usable data the hour had, gaps and clipped values, and the sensor's temperature and light |
 | Clinical | `updrs_off_total`, `updrs_on_total`, `levodopa_response`, `updrs_days_since_exam`, `has_updrs_off`, `has_updrs_on` | MDS-UPDRS Part III OFF and ON; `levodopa_response` is (OFF − ON) / OFF |
 | Demographics | `age`, `age_group`, `sex`, `handedness`, `pd_subtype`, `pd_dominantside`, `hoehn_yahr`, `pd_yearssincediagnosis`, `dbs` | From `Demographics.csv`; `age_group` is `<55`, `55-64` or `65+`. Also the slices for the bias report. |
-| Files | `left_zip`, `left_csv`, `right_zip`, `right_csv` | The sensor files each row was computed from, for tracing |
+| Files | `left_zip`, `left_csv` (`right_zip`, `right_csv` with `wrist: right`) | The sensor files each row was computed from, for tracing |
 
 ## Bias detection and mitigation
 
@@ -261,7 +260,7 @@ Data_Pipeline/
 ├── scripts/               the pipeline, one module per step
 │   ├── acquire.py         list OSF files, choose participants, download with retries and checksums
 │   ├── diary.py           read the hourly diary, map kinesia to classes, flag text/score mismatches
-│   ├── features.py        read the wrist CSVs, filter, and compute the hourly features per wrist
+│   ├── features.py        read the wrist CSVs, filter, and compute the hourly features for one wrist
 │   ├── patient_info.py    UPDRS exams and levodopa response
 │   ├── process_patient.py one participant zip -> one hourly table (the unit of parallel work)
 │   ├── join.py            merge participants and demographics
