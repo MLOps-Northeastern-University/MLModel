@@ -1,0 +1,19 @@
+# Secrets
+.env
+
+# Run outputs: predictions, reports and model bundles. Models go to the models
+# bucket and the registry, never to Git.
+artifacts/
+mlruns/
+mlartifacts/
+
+# Logs
+logs/
+
+# Python
+__pycache__/
+*.pyc
+.pytest_cache/
+.coverage
+htmlcov/
+.venv/

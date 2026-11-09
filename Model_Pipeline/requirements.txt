@@ -1,0 +1,24 @@
+# Shared libraries, with the same pins as the data pipeline
+pandas==2.2.3
+numpy==1.26.4
+scikit-learn==1.5.2
+PyYAML==6.0.2
+requests==2.32.3
+
+# Each owner adds their libraries under their own heading, pinned to an exact version,
+# so two people adding a library don't edit the same lines.
+
+# P1: data loading, splits and validation
+
+# P2: models, tuning and tracking
+
+# P3: bias and explainability
+
+# P4: selection, export and registry
+
+# P5: platform
+
+# Testing and style
+pytest==8.3.3
+pytest-cov==5.0.0
+flake8==7.1.1

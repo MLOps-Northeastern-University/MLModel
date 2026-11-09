@@ -1,0 +1,62 @@
+# Central configuration for the model pipeline.
+# Every tunable value lives here so scripts contain no hard-coded settings.
+# "Placeholder" values are set by their owner in Phase 0.
+
+data:
+  # The phone model's inputs, in the app's order (feature spec 3). The data
+  # pipeline's table names them W_<name>, for whichever wrist it used.
+  features: [move_mean, move_std, move_p95, still_fraction, tremor_mean, tremor_p95, tremor_ratio]
+  feature_prefix: W_
+  label_column: kinesia_class
+  # Binary target: off (1) against on or dyskinetic (0).
+  positive_class: "off"
+  group_column: participant_id
+  random_seed: 42
+
+paths:
+  # The data pipeline's output. Get it with `dvc pull` in ../Data_Pipeline.
+  features_csv: ../Data_Pipeline/data/processed/hourly_features.csv
+  # Everything a run writes: predictions, reports and the model bundle. Not in Git.
+  artifacts_dir: artifacts
+  log_file: logs/model_pipeline.log
+
+split:
+  # Held-out participants, never used for training or tuning.
+  test_fraction: 0.3
+  # Participant-grouped folds on the rest, so no one is in both train and validation.
+  cv_folds: 5
+
+mlflow:
+  # Local MLflow from docker-compose. CI sets MLFLOW_TRACKING_URI to the shared server.
+  tracking_uri: http://localhost:5001
+  experiment: parkinsons-risk
+
+selection:
+  # PR-AUC on the held-out participants picks the model.
+  metric: pr_auc
+  # Families that convert to TFLite. LightGBM is trained as a benchmark only.
+  deployable_families: [logistic, mlp]
+
+gates:
+  # Placeholder: the validation gate's lowest PR-AUC.
+  min_pr_auc: 0.0
+  # Placeholder: how much PR-AUC a new model may lose against the active one.
+  max_drop_vs_production: 0.0
+
+bias:
+  slice_columns: [sex, age_group, visit, dbs, hoehn_yahr, pd_subtype]
+  # A recall gap larger than this between slices fails the bias gate.
+  max_recall_gap: 0.10
+  # Slices with fewer rows are reported but not judged.
+  min_slice_rows: 20
+
+export:
+  # The phone model's entry in the Backend's model_versions table.
+  family: parkinsons-risk
+  feature_spec_version: 3
+  output_name: off_risk
+  nudge_above: 0.8
+
+alerts:
+  email_enabled: true
+  slack_enabled: true
