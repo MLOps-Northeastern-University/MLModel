@@ -9,9 +9,10 @@ called from here once it's merged (see "Who builds what" in the README).
 
 import argparse
 import sys
+import uuid
 
 from scripts.utils.config import load_config
-from scripts.utils.logging_setup import get_logger
+from scripts.utils.logging_setup import configure_logging, get_logger, log_context, log_run_start, log_step
 
 logger = get_logger("run_model_pipeline")
 
@@ -34,9 +35,14 @@ def main(argv=None):
     args = parser.parse_args(argv)
 
     cfg = load_config(args.config)
-    logger.info("Training data: %s", cfg["resolved_paths"]["features_csv"])
-    for name, owner in STEPS:
-        logger.info("Step '%s' (%s): not built yet", name, owner)
+    configure_logging(cfg)
+    # One id per run, on every log line, to find a run's lines in Cloud Logging.
+    with log_context(run_id=uuid.uuid4().hex[:12]):
+        log_run_start(logger, cfg)
+        logger.info("Training data: %s", cfg["resolved_paths"]["features_csv"])
+        for name, owner in STEPS:
+            with log_step(logger, name, owner=owner):
+                logger.info("not built yet")
     return 0
 
 

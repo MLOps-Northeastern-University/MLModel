@@ -20,6 +20,16 @@ paths:
   artifacts_dir: artifacts
   log_file: logs/model_pipeline.log
 
+logging:
+  level: INFO
+  # console: readable text (local runs, CI). json: one JSON object per line on stdout,
+  # which Cloud Logging and CloudWatch parse. Deployments set MODEL_LOG_FORMAT=json.
+  format: console
+  # How much MLflow, scikit-learn and other libraries may log.
+  third_party_level: WARNING
+  # The rotating file at paths.log_file. Containers set MODEL_LOG_FILE=0.
+  file: true
+
 split:
   # Held-out participants, never used for training or tuning.
   test_fraction: 0.3
