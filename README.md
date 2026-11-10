@@ -34,6 +34,8 @@ The dataset itself is **not** stored in this repo. DVC versions the pipeline's o
 
 The options we considered for each technical choice and why we picked the one we did: [ARCHITECTURE.md](ARCHITECTURE.md).
 
+What the model has to produce for the dashboard, the data and inputs it can use, and the decisions made about it: [MODEL.md](MODEL.md).
+
 ## Tools
 
 | Job | Tool |
