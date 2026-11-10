@@ -155,8 +155,8 @@ _Owner: Sam Selvaraj · Decide by: TBD_
 
 Akinesia (the labels) or tremor above a threshold (the dashboard today). Section 2.
 
-**Decision:** _TBD_
-**Why:** —
+**Decision (2026-11-10):** OFF is the diary's akinesia entries (kinesia score −3 to −1, `kinesia_class = off`), as in clinical practice. Tremor is a separate target, not the definition of OFF. Hours with no diary answer (asleep, no data) have no OFF label, not a 0. Defined in `Model_Pipeline/scripts/core/targets.py`.
+**Why:** Clinicians count OFF time with patient diaries (the Hauser diary, MDS-UPDRS Part IV), where OFF is the medicine wearing off, mainly slowness and stiffness. Many patients have little or no tremor, so a tremor threshold would miss their OFF time and count tremor while ON as OFF. Careportal's `offHours` (tremor above 2) will need to count from the OFF output instead.
 
 ### Inputs
 
