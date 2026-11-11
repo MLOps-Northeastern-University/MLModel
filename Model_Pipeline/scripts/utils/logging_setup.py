@@ -57,7 +57,9 @@ DEFAULT_LOG_FILE = PROJECT_ROOT / "logs" / "model_pipeline.log"
 
 # Attributes every LogRecord has; anything else on a record is an extra field.
 _STANDARD = set(vars(logging.LogRecord("", 0, "", 0, "", None, None))) | {"message", "asctime"}
+# Fields set by log_context. A ContextVar gives each thread its own copy.
 _context = contextvars.ContextVar("log_context", default={})
+# The handlers we added, so configure_logging can replace exactly these.
 _handlers = []
 
 
@@ -92,6 +94,7 @@ def configure_logging(cfg=None, log_file=None, stream=None):
         log_file: Overrides the log file path.
         stream: Where console or JSON lines go. Defaults to sys.stdout.
     """
+    # Defaults, then the config file, then environment variables (highest priority).
     settings = {**DEFAULTS, **((cfg or {}).get("logging") or {})}
     level = os.environ.get("MODEL_LOG_LEVEL", settings["level"]).upper()
     fmt = os.environ.get("MODEL_LOG_FORMAT", settings["format"]).lower()
@@ -99,6 +102,7 @@ def configure_logging(cfg=None, log_file=None, stream=None):
         raise ValueError(f"logging format must be console or json, not {fmt!r}")
     use_file = os.environ.get("MODEL_LOG_FILE", "1" if settings["file"] else "0") != "0"
 
+    # Remove our previous handlers first, or every line would print twice.
     root = logging.getLogger()
     for handler in _handlers:
         root.removeHandler(handler)
@@ -122,7 +126,8 @@ def configure_logging(cfg=None, log_file=None, stream=None):
         handler.addFilter(context_filter)
         root.addHandler(handler)
 
-    # Libraries log through the root logger at their own level; ours at ours.
+    # Handlers sit on the root logger, so library logs (MLflow, scikit-learn) use them too.
+    # Libraries are held to third_party_level; the pipeline's own "model.*" loggers to level.
     root.setLevel(settings["third_party_level"].upper())
     pipeline = logging.getLogger(ROOT)
     pipeline.setLevel(level)
@@ -146,7 +151,7 @@ def log_step(logger, step, **fields):
         logger.info("%s started", step, extra={"event": "step_started"})
         try:
             yield
-        except BaseException:
+        except BaseException:   # includes Ctrl+C, so an interrupted step is logged too
             logger.exception("%s failed", step, extra={
                 "event": "step_failed", "duration_s": round(time.perf_counter() - start, 3)})
             raise
@@ -161,6 +166,7 @@ def log_run_start(logger, cfg, packages=("numpy", "pandas", "scikit-learn", "mlf
     config_sha256 (of the config as loaded, paths excluded), python, the
     versions of the given packages that are installed, and host.
     """
+    # Leave out resolved_paths: they differ per machine, so the same config would hash differently.
     settings = {k: v for k, v in (cfg or {}).items() if k != "resolved_paths"}
     config_hash = hashlib.sha256(json.dumps(settings, sort_keys=True, default=str).encode()).hexdigest()
     versions = {}
@@ -181,6 +187,7 @@ def log_run_start(logger, cfg, packages=("numpy", "pandas", "scikit-learn", "mlf
 
 
 def _git(*args):
+    """Run a git command and return its output, or None if git isn't available (e.g. in a container)."""
     try:
         out = subprocess.run(["git", *args], cwd=PROJECT_ROOT, capture_output=True, text=True, timeout=5)
         return out.stdout.strip() if out.returncode == 0 else None
@@ -193,7 +200,7 @@ class _ContextFilter(logging.Filter):
 
     def filter(self, record):
         for key, value in _context.get().items():
-            if not hasattr(record, key):
+            if not hasattr(record, key):   # a field passed in extra= wins over the context
                 setattr(record, key, value)
         return True
 
@@ -215,6 +222,7 @@ class JsonFormatter(logging.Formatter):
         entry.update(_extra_fields(record))
         if record.exc_info:
             entry["stack_trace"] = self.formatException(record.exc_info)
+        # default=str: values JSON can't hold (paths, numpy numbers) are written as text.
         return json.dumps(entry, default=str, ensure_ascii=False)
 
 

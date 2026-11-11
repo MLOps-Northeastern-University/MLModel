@@ -104,6 +104,7 @@ class Tracker(ABC):
     """
 
     def __init__(self):
+        # The open runs, outermost first. A ContextVar gives each thread its own copy.
         self._stack = contextvars.ContextVar(f"tracker_runs_{id(self)}", default=())
 
     @property
@@ -126,11 +127,12 @@ class Tracker(ABC):
             raise TrackingError("a run needs a name")
         parent = self.active_run_id
         run_id = self._start_run(name, parent, dict(tags or {}))
-        token = self._stack.set(self._stack.get() + (run_id,))
+        token = self._stack.set(self._stack.get() + (run_id,))   # this run is now the active one
         logger.info("tracking run %s started", name, extra={
             "event": "tracking_run_started", "tracker_run_id": run_id, "tracker_parent_run_id": parent})
-        status = RunStatus.FAILED
+        status = RunStatus.FAILED   # assume failure; changed only if the block completes
         try:
+            # Every log line inside the block carries this run's id.
             with log_context(tracker_run_id=run_id):
                 yield run_id
             status = RunStatus.FINISHED
@@ -138,6 +140,7 @@ class Tracker(ABC):
             status = RunStatus.KILLED
             raise
         finally:
+            # Runs even on errors, so a run is never left open.
             self._stack.reset(token)
             self._end_run(run_id, status)
             logger.info("tracking run %s ended %s", name, status.value, extra={
@@ -169,9 +172,11 @@ class Tracker(ABC):
         """
         if step is not None and (isinstance(step, bool) or not isinstance(step, numbers.Integral) or step < 0):
             raise TrackingError(f"step must be a non-negative integer, not {step!r}")
+        # Check everything before recording anything, so a batch is all or nothing.
         clean = {}
         for name, value in metrics.items():
             validate_metric_name(name)
+            # bool counts as a number in Python, but True is never a real metric.
             if isinstance(value, bool) or not isinstance(value, numbers.Real):
                 raise TrackingError(f"metric {name!r} must be a number, not {type(value).__name__}")
             value = float(value)
