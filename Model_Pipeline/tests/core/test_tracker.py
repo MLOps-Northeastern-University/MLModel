@@ -48,23 +48,24 @@ def ends(tracker):
 
 # ---- metric names ----------------------------------------------------------------------
 
-@pytest.mark.parametrize("name", ["val/off/pr_auc", "test/tremor/mae", "cv/dyskinesia/recall", "run/duration_s"])
+@pytest.mark.parametrize("name", [
+    "val/state_now/off_auc", "test/tremor_ge1_now/brier", "cv/state_next_hour/recall", "run/duration_s"])
 def test_valid_metric_names(name):
     validate_metric_name(name)
 
 
 @pytest.mark.parametrize("name", [
-    "pr_auc", "val/off", "validation/off/pr_auc", "val/freezing/pr_auc", "cv/all/loss",
-    "val/off/PR-AUC", "val/off/pr_auc/x", "run/", "", None])
+    "pr_auc", "val/state_now", "validation/state_now/off_auc", "val/state/off_auc", "cv/all/loss",
+    "val/state_now/PR-AUC", "val/state_now/off_auc/x", "run/", "", None])
 def test_invalid_metric_names(name):
     with pytest.raises(TrackingError):
         validate_metric_name(name)
 
 
 def test_metric_name_builds_and_checks():
-    assert metric_name("val", "off", "pr_auc") == "val/off/pr_auc"
+    assert metric_name("val", "state_now", "off_auc") == "val/state_now/off_auc"
     with pytest.raises(TrackingError):
-        metric_name("dev", "off", "pr_auc")
+        metric_name("dev", "state_now", "off_auc")
 
 
 # ---- runs ------------------------------------------------------------------------------
@@ -124,7 +125,7 @@ def test_threads_have_their_own_runs(tracker):
 
 def test_nothing_logs_outside_a_run(tracker):
     for call in (lambda: tracker.log_params({"a": 1}),
-                 lambda: tracker.log_metric("val/off/pr_auc", 0.5),
+                 lambda: tracker.log_metric("val/state_now/off_auc", 0.5),
                  lambda: tracker.set_tags({"a": "b"})):
         with pytest.raises(TrackingError, match="no active run"):
             call()
@@ -142,21 +143,22 @@ def test_flatten():
 
 def test_metrics_accept_numpy_and_record_floats(tracker):
     with tracker.run("train") as run_id:
-        tracker.log_metrics({"val/off/pr_auc": np.float32(0.5), "val/off/n": np.int64(3)}, step=np.int64(2))
-    assert ("metrics", run_id, {"val/off/pr_auc": 0.5, "val/off/n": 3.0}, 2) in tracker.calls
+        tracker.log_metrics({"val/state_now/off_auc": np.float32(0.5), "val/state_now/n": np.int64(3)},
+                            step=np.int64(2))
+    assert ("metrics", run_id, {"val/state_now/off_auc": 0.5, "val/state_now/n": 3.0}, 2) in tracker.calls
 
 
 @pytest.mark.parametrize("value", [float("nan"), float("inf"), "0.5", True, None])
 def test_bad_metric_values_rejected(tracker, value):
     with tracker.run("train"):
         with pytest.raises(TrackingError):
-            tracker.log_metric("val/off/pr_auc", value)
+            tracker.log_metric("val/state_now/off_auc", value)
 
 
 def test_one_bad_metric_records_none(tracker):
     with tracker.run("train"):
         with pytest.raises(TrackingError):
-            tracker.log_metrics({"val/off/pr_auc": 0.5, "val/off/recall": float("nan")})
+            tracker.log_metrics({"val/state_now/off_auc": 0.5, "val/state_now/recall": float("nan")})
     assert not [c for c in tracker.calls if c[0] == "metrics"]
 
 
@@ -164,7 +166,7 @@ def test_one_bad_metric_records_none(tracker):
 def test_bad_steps_rejected(tracker, step):
     with tracker.run("train"):
         with pytest.raises(TrackingError, match="step"):
-            tracker.log_metric("val/off/pr_auc", 0.5, step=step)
+            tracker.log_metric("val/state_now/off_auc", 0.5, step=step)
 
 
 def test_artifacts_must_exist(tracker, tmp_path):

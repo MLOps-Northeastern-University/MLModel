@@ -8,7 +8,7 @@ without MLflow installed or running.
     tracker = MemoryTracker()
     train(..., tracker=tracker)
     run = tracker.find("fold-1")
-    assert run.metrics["val/off/pr_auc"] == [(None, 0.71)]
+    assert run.metrics["val/state_now/off_auc"] == [(None, 0.71)]
 """
 
 import itertools

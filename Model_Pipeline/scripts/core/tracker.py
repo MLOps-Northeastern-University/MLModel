@@ -5,14 +5,15 @@ Owner: P2.
 Steps and models log through a Tracker passed to them, never through MLflow
 directly, so tracking can be swapped (tracking/) and tested without a server.
 Runs nest: one pipeline run, then a child run per step, model part, fold or
-tuning trial. Metric names follow one scheme, {split}/{target}/{metric}, and a
-run always ends as finished or failed.
+tuning trial. Metric names follow one scheme, {split}/{label}/{metric}, where
+label is a target at a horizon (core/targets.py), and a run always ends as
+finished or failed.
 
     with tracker.run("train", tags={"owner": "P2"}):
         tracker.log_params({"model": {"family": "logistic", "C": 0.1}})
         for fold in folds:
             with tracker.run(f"fold-{fold}"):
-                tracker.log_metric(metric_name("val", "off", "pr_auc"), 0.71)
+                tracker.log_metric(metric_name("val", "state_now", "off_auc"), 0.71)
 
 The rules live here, in Tracker, so every implementation applies them the same
 way. An implementation (tracking/memory_tracker.py, tracking/mlflow_tracker.py)
@@ -29,7 +30,7 @@ from abc import ABC, abstractmethod
 from pathlib import Path
 
 from scripts.core.errors import TrackingError
-from scripts.core.targets import TARGETS
+from scripts.core.targets import LABEL_NAMES
 from scripts.utils.logging_setup import get_logger, log_context
 
 logger = get_logger(__name__)
@@ -49,24 +50,24 @@ class RunStatus(enum.Enum):
     KILLED = "KILLED"
 
 
-def metric_name(split, target, metric):
-    """Build a metric name, {split}/{target}/{metric}, checking each part.
+def metric_name(split, label, metric):
+    """Build a metric name, {split}/{label}/{metric}, checking each part.
 
     Args:
         split: One of SPLITS.
-        target: A target from core/targets.py.
-        metric: Lowercase letters, digits and underscores, such as pr_auc.
+        label: A label from core/targets.py (a target at a horizon), such as state_now.
+        metric: Lowercase letters, digits and underscores, such as off_auc.
 
     Raises:
         TrackingError: A part isn't allowed.
     """
-    name = f"{split}/{target}/{metric}"
+    name = f"{split}/{label}/{metric}"
     validate_metric_name(name)
     return name
 
 
 def validate_metric_name(name):
-    """Check a metric name: {split}/{target}/{metric} or run/{metric}.
+    """Check a metric name: {split}/{label}/{metric} or run/{metric}.
 
     Raises:
         TrackingError: The name doesn't follow the scheme.
@@ -75,12 +76,12 @@ def validate_metric_name(name):
     if len(parts) == 2 and parts[0] == RUN_NAMESPACE and _METRIC_PART.match(parts[1]):
         return
     if len(parts) == 3:
-        split, target, metric = parts
-        if split in SPLITS and target in TARGETS and _METRIC_PART.match(metric):
+        split, label, metric = parts
+        if split in SPLITS and label in LABEL_NAMES and _METRIC_PART.match(metric):
             return
     raise TrackingError(
-        f"metric name {name!r} must be {{split}}/{{target}}/{{metric}} with split in {SPLITS}, "
-        f"target in {sorted(TARGETS)} and metric of a-z, 0-9 and _; "
+        f"metric name {name!r} must be {{split}}/{{label}}/{{metric}} with split in {SPLITS}, "
+        f"label in {sorted(LABEL_NAMES)} and metric of a-z, 0-9 and _; "
         f"or {RUN_NAMESPACE}/{{metric}}")
 
 

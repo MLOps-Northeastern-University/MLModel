@@ -25,15 +25,15 @@ def test_records_params_metrics_tags_and_nesting(tracker):
     with tracker.run("train", tags={"owner": "P2"}) as parent:
         tracker.log_params({"model": {"family": "logistic", "C": 0.1}})
         with tracker.run("fold-1") as child:
-            tracker.log_metric("val/off/pr_auc", 0.6, step=0)
-            tracker.log_metric("val/off/pr_auc", 0.7, step=1)
+            tracker.log_metric("val/state_now/off_auc", 0.6, step=0)
+            tracker.log_metric("val/state_now/off_auc", 0.7, step=1)
             tracker.set_tags({"fold": 1})
 
     p, c = get_run(tracker, parent), get_run(tracker, child)
     assert p.data.params == {"model.family": "logistic", "model.C": "0.1"}
     assert p.data.tags["owner"] == "P2" and p.data.tags[MLFLOW_RUN_NAME] == "train"
     assert c.data.tags[MLFLOW_PARENT_RUN_ID] == parent and c.data.tags["fold"] == "1"
-    history = tracker.client.get_metric_history(child, "val/off/pr_auc")
+    history = tracker.client.get_metric_history(child, "val/state_now/off_auc")
     assert [(m.step, m.value) for m in history] == [(0, 0.6), (1, 0.7)]
     assert p.info.status == c.info.status == "FINISHED"
 
