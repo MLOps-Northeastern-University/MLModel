@@ -101,6 +101,12 @@ class Tracker(ABC):
 
     Not tied to one thread: each thread or async task has its own stack of
     active runs, so parallel tuning trials don't log into each other's runs.
+
+    A new thread starts with no active run. To nest its runs under the current
+    one, start it with a copy of the current context:
+
+        ctx = contextvars.copy_context()
+        threading.Thread(target=ctx.run, args=(trial, n))
     """
 
     def __init__(self):
