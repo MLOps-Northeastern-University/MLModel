@@ -159,15 +159,19 @@ _Owner: Sam Selvaraj · Decided: 2026-11-11_
 **Decision (2026-11-11):**
 
 - Two horizons: **now** (the state of the current window) and **in 1 hour**.
-- At each horizon, the **state** as 4 probabilities that add up to 1: P(asleep), P(OFF), P(ON), P(dyskinetic). They come from the diary's kinesia entries: Sleep; akinesia −3 to −1; good 0; dyskinesia +1 to +3.
-- At each horizon, **tremor** as P(tremor ≥ 1) and P(tremor ≥ 2), from the diary's 0 to 2 tremor score.
-- **Sleep hours are left out of the tremor targets.** The diary does record tremor in most sleep hours (almost always 0), but tremor while asleep is trivially none and the asleep state already covers it, so keeping them would inflate the tremor metrics without teaching anything.
-- **Expected tremor** for the timeline is P(≥ 1) + P(≥ 2), on the diary's 0 to 2 scale.
+- At each horizon, the **state** as 8 probabilities that add up to 1, one softmax: the diary's kinesia score −3 to +3 (severe akinesia … good … severe dyskinesia) and asleep.
+- At each horizon, **tremor** as 3 probabilities, one softmax over the diary's tremor score: 0 none, 1 weak or slight, 2 strong or severe.
+- **Everything else is worked out from those probabilities:**
+  - P(OFF) is the sum of scores −3 to −1, P(ON) is score 0, and P(dyskinetic) is the sum of +1 to +3;
+  - the expected kinesia score and expected tremor (Σ score × probability) are the timeline's lines;
+  - P(any tremor) is P(1) + P(2);
+  - daily OFF and dyskinesia time can be split by severity.
+- **Sleep hours are left out of the tremor target.** The diary does record tremor in most sleep hours (almost always 0), but tremor while asleep is trivially none and the asleep state already covers it, so keeping them would inflate the tremor metrics without teaching anything.
 - **A state every 10-second window.** Only the hourly scores (the window outputs pooled per diary hour) are trained and checked against the diary, so the window states show roughly when something happened, not exactly.
 - Daily OFF time is the number of hours whose pooled P(OFF) is above the OFF threshold.
 - Every score carries the version of the model that made it.
 
-**Why:** The diary is the only ground truth, and it labels whole hours with these answers, so the model predicts what the diary can check. One state with 4 classes keeps asleep, OFF, ON and dyskinetic mutually exclusive, as they are in the diary. Tremor is separate and ordinal, because it can happen in any waking state. The 1-hour horizon is the warning of an OFF period coming. Per-window states follow from the encoder: harnet10 is pretrained on 10-second windows.
+**Why:** The diary is the only ground truth, and it labels whole hours with these answers, so the model predicts what the diary can check. One state keeps asleep, OFF, ON and dyskinetic mutually exclusive, as they are in the diary. Predicting the score instead of the 4 broad states keeps the severity: in the sample, most waking hours are akinesia or dyskinesia of some severity, and only 23 of 127 are good, so an hour of slight akinesia and one of severe akinesia shouldn't count the same. The broad states can always be worked out from the score, but not the other way round. Tremor is a separate target, because it can happen in any waking state. Both are classification over ordered scores, so the training loss also counts how far a prediction is from the true score (see Training). The 1-hour horizon is the warning of an OFF period coming. Per-window states follow from the encoder: harnet10 is pretrained on 10-second windows.
 
 **Changes elsewhere:**
 
@@ -186,6 +190,8 @@ Akinesia (the labels) or tremor above a threshold (the dashboard today). Section
 **Why:** Clinicians count OFF time with patient diaries (the Hauser diary, MDS-UPDRS Part IV), where OFF is the medicine wearing off, mainly slowness and stiffness. Many patients have little or no tremor, so a tremor threshold would miss their OFF time and count tremor while ON as OFF. Careportal's `offHours` (tremor above 2) will need to count from the OFF output instead.
 
 **Update (2026-11-11):** Asleep is now one of the 4 states (see Outputs), so diary "Sleep" hours are labelled asleep instead of having no label. Hours with no diary answer still have no label. The definition of OFF is unchanged. `core/targets.py` changes to match.
+
+**Update (2026-11-11, later):** The state is now the kinesia score −3 to +3 plus asleep (see Outputs). OFF is still akinesia: the sum of the −3 to −1 classes.
 
 ### Inputs
 
@@ -248,7 +254,7 @@ _Owner: Sam Selvaraj, with Ayush for the AndroidApp · Decided: 2026-11-11_
 
 **Decision (2026-11-11):**
 
-- **Both diary questions,** with the diary's own answer options: how the patient is moving (akinesia, good, dyskinesia, with severity) and how much tremor (none, slight, strong).
+- **Both diary questions,** with the diary's own answer options: how the patient is moving (the 7 kinesia answers: akinesia and dyskinesia each slight, discomforting or severe, or good) and how much tremor (none, weak, slight, strong or severe, scored 0 to 2).
 - **3 to 5 a day,** mostly at random times, some just before a dose and about an hour after. Each records why it was asked.
 - **In the model,** the answers go in the event fields of the window where the patient answered, and are carried forward as the last check-in. The model's own past outputs are never fed back; check-ins are the only past labels it sees.
 - **In training,** check-ins are simulated at the live rate: a few random diary hours per day are revealed on one random window of the hour.
@@ -312,7 +318,7 @@ _Owner: Sam Selvaraj · Decided: 2026-11-11_
 
 1. **Run the whole model on a patient-day at once.** That's about 8,640 windows, with a causal mask limited to the last 4 hours. Every window gets its now and in-1-hour outputs with its full past, the same as live with the KV cache.
 2. **Pool per diary hour.** Gated attention pools the hour's 360 now-outputs into one hour prediction. Unworn and sleep windows get no weight.
-3. **Compare with the diary.** The hour prediction is compared with the hour's label, and the in-1-hour outputs are pooled the same way and compared with the next hour's label. No-data hours are never targets.
+3. **Compare with the diary.** The hour prediction is compared with the hour's label, and the in-1-hour outputs are pooled the same way and compared with the next hour's label. No-data hours are never targets. The loss for each target is cross-entropy + λ × expected distance, where the expected distance is Σ P(score) × |score − true score|, so a near miss costs less than a far one. Cross-entropy keeps the probabilities calibrated; the distance alone would push them onto one middle score. λ is tuned. Asleep has no score, so the distance term covers waking hours only.
 4. **Backpropagate** through the pooling, heads, attention, token projection and the trained encoder branches. harnet10 stays frozen.
 
 Also:
@@ -419,7 +425,7 @@ Which paper's factors, and how drug names in COPS map to them.
 
 ### Still open
 
-- **Asleep as a state:** keep 4 states, so sleep is caught before Health Connect syncs, or drop to 3 (OFF, ON, dyskinetic) and leave sleep to Health Connect.
+- **Asleep as a state:** keep asleep as the 8th class, so sleep is caught before Health Connect syncs, or drop it (the 7 scores only) and leave sleep to Health Connect.
 - **Model rate:** 30 Hz by default, which keeps harnet10's pretraining; or test 24 Hz as well.
 - **History length and attention size:** 4 h and 2 layers × 64 dimensions proposed; stage 2 tests 2, 4 and 8 h.
 - **Time encoding:** time-based RoPE or ALiBi.

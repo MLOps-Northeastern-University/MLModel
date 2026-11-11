@@ -6,9 +6,11 @@ import pytest
 
 from scripts.core.errors import ConfigError, SchemaError
 from scripts.core.targets import (
-    LABEL_NAMES, STATES, TARGETS, at_horizon, build_labels, get_target, label_name)
+    ASLEEP, KINESIA_SCORES, LABEL_NAMES, STATE_CLASSES, STATE_GROUPS, TARGETS, TREMOR_CLASSES,
+    TREMOR_SCORES, at_horizon, build_labels, get_target, label_name)
 
-ASLEEP, OFF, ON, DYSKINETIC = range(4)
+# State class indices for the fixture's answers: index = score + 3.
+SLIGHT_AKINESIA, GOOD, SEVERE_DYSKINESIA = 2, 3, 6
 NAN = np.nan
 
 
@@ -20,22 +22,28 @@ def table():
         "hour_index": [10, 11, 12, 13, 14, 10],
         "kinesia_text": ["Slight Akinesia", "Good Kinesia", "Severe Dyskinesia", "Sleep", "No Data",
                          "Good Kinesia"],
-        "kinesia_class": ["off", "on", "dyskinetic", None, None, "on"],
+        "kinesia_score": [-1, 0, 3, NAN, NAN, 0],
         "tremor_score": [2, 0, 1, 0, NAN, 1],
     })
-
-
-def values(series):
-    return series.tolist()
 
 
 def assert_values(series, expected):
     np.testing.assert_array_equal(series.to_numpy(), np.array(expected, dtype=float))
 
 
-def test_state_classes_come_from_the_diary(table):
-    assert_values(get_target("state").labels(table), [OFF, ON, DYSKINETIC, ASLEEP, NAN, ON])
-    assert get_target("state").classes == STATES
+def test_state_is_the_kinesia_score_or_asleep(table):
+    assert_values(get_target("state").labels(table),
+                  [SLIGHT_AKINESIA, GOOD, SEVERE_DYSKINESIA, ASLEEP, NAN, GOOD])
+    assert get_target("state").classes == STATE_CLASSES
+
+
+def test_classes_line_up_with_scores_and_groups():
+    assert [STATE_CLASSES[s + 3] for s in (-3, 0, 3)] == ["severe_akinesia", "good_kinesia", "severe_dyskinesia"]
+    assert len(KINESIA_SCORES) == ASLEEP == len(STATE_CLASSES) - 1
+    assert len(TREMOR_SCORES) == len(TREMOR_CLASSES)
+    # Every class belongs to exactly one broad state, and off is the akinesia scores.
+    assert sorted(i for group in STATE_GROUPS.values() for i in group) == list(range(len(STATE_CLASSES)))
+    assert [KINESIA_SCORES[i] for i in STATE_GROUPS["off"]] == [-3, -2, -1]
 
 
 def test_off_does_not_depend_on_tremor(table):
@@ -45,14 +53,13 @@ def test_off_does_not_depend_on_tremor(table):
 
 
 def test_tremor_thresholds(table):
-    assert_values(get_target("tremor_ge1").labels(table), [1, 0, 1, NAN, NAN, 1])
-    assert_values(get_target("tremor_ge2").labels(table), [1, 0, 0, NAN, NAN, 0])
+    assert_values(get_target("tremor").labels(table), [2, 0, 1, NAN, NAN, 1])
 
 
 def test_sleep_hours_have_a_state_but_no_tremor_label(table):
     sleep = table.index[table["kinesia_text"] == "Sleep"][0]
     assert get_target("state").labels(table)[sleep] == ASLEEP
-    assert np.isnan(get_target("tremor_ge1").labels(table)[sleep])
+    assert np.isnan(get_target("tremor").labels(table)[sleep])
 
 
 def test_no_data_is_nan_not_zero(table):
@@ -64,7 +71,7 @@ def test_no_data_is_nan_not_zero(table):
 def test_next_hour_stays_within_a_participant(table):
     y = get_target("state").labels(table)
     # P1's last hour has no next hour, and P2's hour 10 must not borrow P1's hour 11.
-    assert_values(at_horizon(table, y, "next_hour"), [ON, DYSKINETIC, ASLEEP, NAN, NAN, NAN])
+    assert_values(at_horizon(table, y, "next_hour"), [GOOD, SEVERE_DYSKINESIA, ASLEEP, NAN, NAN, NAN])
     assert at_horizon(table, y, "now") is y
 
 
@@ -75,19 +82,15 @@ def test_next_hour_skips_gaps(table):
 
 
 def test_build_labels_names_and_order(table):
-    labels = build_labels(table, ["state", "tremor_ge1"])
-    assert list(labels.columns) == ["state_now", "state_next_hour", "tremor_ge1_now", "tremor_ge1_next_hour"]
+    labels = build_labels(table, ["state", "tremor"])
+    assert list(labels.columns) == ["state_now", "state_next_hour", "tremor_now", "tremor_next_hour"]
     assert list(labels.index) == list(table.index)
     assert list(build_labels(table, ["state"], horizons=["now"]).columns) == ["state_now"]
 
 
 def test_label_names():
     assert label_name("state", "now") == "state_now"
-    assert LABEL_NAMES == {f"{t}_{h}" for t in ("state", "tremor_ge1", "tremor_ge2") for h in ("now", "next_hour")}
-
-
-def test_binary_and_multiclass():
-    assert get_target("tremor_ge1").is_binary and not get_target("state").is_binary
+    assert LABEL_NAMES == {f"{t}_{h}" for t in ("state", "tremor") for h in ("now", "next_hour")}
 
 
 def test_labels_keep_index_and_name(table):
@@ -97,7 +100,9 @@ def test_labels_keep_index_and_name(table):
 
 
 @pytest.mark.parametrize("change, match", [
-    ({"kinesia_class": ["off", "on", "dyskinetic", None, None, "unsure"]}, "unknown kinesia_class"),
+    ({"kinesia_score": [-4, 0, 3, NAN, NAN, 0]}, "-3 to 3"),
+    ({"kinesia_score": [-1, 0, 2.5, NAN, NAN, 0]}, "-3 to 3"),
+    ({"tremor_score": ["abc", 0, 1, 0, NAN, 1]}, "isn't a number"),
     ({"tremor_score": [3, 0, 1, 0, NAN, 1]}, "0 to 2"),
 ])
 def test_bad_values_raise(table, change, match):
@@ -135,6 +140,9 @@ def test_on_real_table_if_present():
     table = pd.read_csv(path, low_memory=False)
     labels = build_labels(table, list(TARGETS))
     assert (labels["state_now"] == ASLEEP).sum() == (table["kinesia_text"] == "Sleep").sum()
-    assert labels["state_now"].notna().sum() == table["kinesia_class"].notna().sum() + (
+    assert labels["state_now"].notna().sum() == table["kinesia_score"].notna().sum() + (
         table["kinesia_text"] == "Sleep").sum()
-    assert labels["tremor_ge1_now"].notna().sum() <= table["tremor_score"].notna().sum()
+    # The data pipeline's off class is the same hours as the score's off group.
+    off = labels["state_now"].isin(STATE_GROUPS["off"])
+    assert (off == (table["kinesia_class"] == "off")).all()
+    assert labels["tremor_now"].notna().sum() <= table["tremor_score"].notna().sum()

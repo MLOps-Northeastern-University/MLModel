@@ -49,7 +49,7 @@ def ends(tracker):
 # ---- metric names ----------------------------------------------------------------------
 
 @pytest.mark.parametrize("name", [
-    "val/state_now/off_auc", "test/tremor_ge1_now/brier", "cv/state_next_hour/recall", "run/duration_s"])
+    "val/state_now/off_auc", "test/tremor_now/brier", "cv/state_next_hour/recall", "run/duration_s"])
 def test_valid_metric_names(name):
     validate_metric_name(name)
 

@@ -2,93 +2,83 @@
 
 Owner: P2.
 
-Each target is defined once here: its classes, the diary columns it's read from,
-and how its hourly label is derived. Metrics, plots, bias checks and the export
-read targets from here, so a definition (such as what counts as OFF) changes in
-one place. See MODEL.md, Decisions: Outputs, and How OFF is defined.
+Each target is defined once here, so a definition (such as what counts as OFF)
+changes in one place. See MODEL.md, Decisions: Outputs, and How OFF is defined.
 
-    state        one of asleep, off, on, dyskinetic, from the diary's kinesia answer
-    tremor_ge1   tremor 1 or 2 (weak to severe), from the diary's tremor answer
-    tremor_ge2   tremor 2 (strong or severe)
+    state    the diary's kinesia score -3 to +3, or asleep: 8 classes
+    tremor   the diary's tremor score 0 to 2: 3 classes
 
-OFF follows clinical practice: the diary says akinesia (kinesia score -3 to -1,
-which the data pipeline maps to kinesia_class "off"). Tremor is its own target,
-not the definition of OFF.
+Both are classification over ordered scores, each predicted as one softmax.
+The rest is worked out from the class probabilities:
 
-Every target is predicted at each horizon, and a target at a horizon is a label:
-state_now is this hour's state, state_next_hour the next hour's. Metric names use
-the label: val/state_now/off_auc.
+    P(off)           sum of the STATE_GROUPS["off"] classes (scores -3 to -1, akinesia)
+    expected score   sum of score x probability, using KINESIA_SCORES or TREMOR_SCORES
+    P(any tremor)    P(1) + P(2)
 
-Labels are floats: the index of the class (0, 1, ...), or NaN where there's no
-usable answer. NaN rows are left out of that label's training and scoring, never
-counted as 0. There's no answer when the diary says "No Data" or the question
-wasn't answered; for tremor, also in sleep hours (tremor while asleep is
-trivially none, and the asleep state covers it); for next_hour, also when the
-participant's next hour isn't in the table.
+A label is a target at a horizon: state_now is this hour's state, state_next_hour
+the next hour's. Metric names use it: val/state_now/off_auc.
+
+Labels are floats: the class index, or NaN where there's no answer ("No Data",
+unanswered, tremor in a sleep hour, or no next hour in the table). NaN rows are
+left out of training and scoring, never counted as 0.
 """
 
 from dataclasses import dataclass
-from typing import Callable, Dict, Tuple
+from typing import Callable, Tuple
 
 import pandas as pd
 
 from scripts.core.errors import ConfigError, SchemaError
 
-STATES = ("asleep", "off", "on", "dyskinetic")
-NO_YES = ("no", "yes")
+# State classes: the 7 kinesia scores in order, then asleep. Index = score + 3.
+STATE_CLASSES = (
+    "severe_akinesia", "discomforting_akinesia", "slight_akinesia", "good_kinesia",
+    "slight_dyskinesia", "discomforting_dyskinesia", "severe_dyskinesia", "asleep")
+KINESIA_SCORES = (-3, -2, -1, 0, 1, 2, 3)
+ASLEEP = 7
+# The broad states, as the state classes whose probabilities add up to them.
+STATE_GROUPS = {"off": (0, 1, 2), "on": (3,), "dyskinetic": (4, 5, 6), "asleep": (ASLEEP,)}
+
+# Tremor classes. Index = score.
+TREMOR_CLASSES = ("none", "weak_or_slight", "strong_or_severe")
+TREMOR_SCORES = (0, 1, 2)
+
 # How many hours ahead each horizon's label is.
 HORIZONS = {"now": 0, "next_hour": 1}
 
+# Columns of the data pipeline's hourly table.
 KINESIA_TEXT = "kinesia_text"
-KINESIA_CLASS = "kinesia_class"
+KINESIA_SCORE = "kinesia_score"
 TREMOR_SCORE = "tremor_score"
 PARTICIPANT = "participant_id"
 HOUR_INDEX = "hour_index"   # hours since the participant's first diary day began
 SLEEP = "Sleep"             # the diary's kinesia answer for a sleep hour
-TREMOR_MAX = 2
 
 
 @dataclass(frozen=True)
 class Target:
-    """One thing the model predicts, as a choice between classes.
+    """One thing the model predicts.
 
     Attributes:
         name: Used in label names, configs and outputs.
         classes: The class names; a label is the index of one of them.
-        source_columns: Columns of the data pipeline's table the label is read from.
-        description: What the classes mean, in plain words.
-        derive: Turns the table's source columns into class indices (NaN for no label).
+        source_columns: The hourly table's columns the label is read from.
+        derive: Turns the table into class indices (NaN for no label).
     """
 
     name: str
     classes: Tuple[str, ...]
     source_columns: Tuple[str, ...]
-    description: str
     derive: Callable[[pd.DataFrame], pd.Series]
 
-    @property
-    def is_binary(self):
-        return len(self.classes) == 2
-
     def labels(self, table):
-        """Return this target's label for every row of the table, for the hour itself.
-
-        Args:
-            table: The data pipeline's hourly table, or any DataFrame with
-                this target's source columns.
-
-        Returns:
-            pd.Series of floats on the table's index: class indices, NaN for no label.
+        """This target's label for every row of the table, for the hour itself.
 
         Raises:
-            SchemaError: A source column is missing, or a value can't be a label.
+            SchemaError: A source column is missing, or a score isn't valid.
         """
         _require(table, self.source_columns, f"target {self.name!r}")
-        y = self.derive(table).astype(float).rename(self.name)
-        bad = y.notna() & ~y.isin(range(len(self.classes)))
-        if bad.any():   # a derive bug, not bad data: derive raises on bad data itself
-            raise SchemaError(f"target {self.name!r}: {y[bad].iloc[0]} isn't a class index")
-        return y
+        return self.derive(table).astype(float).rename(self.name)
 
 
 def _require(table, columns, needed_by):
@@ -97,54 +87,35 @@ def _require(table, columns, needed_by):
         raise SchemaError(f"{needed_by} needs column(s) {missing}")
 
 
+def _read_scores(table, column, allowed):
+    """The column as numbers, checking every score is one of allowed (NaN is fine)."""
+    try:
+        score = pd.to_numeric(table[column])
+    except (ValueError, TypeError):
+        raise SchemaError(f"{column} has a value that isn't a number") from None
+    bad = score.notna() & ~score.isin(allowed)
+    if bad.any():
+        raise SchemaError(f"{column} must be a whole number from {allowed[0]} to {allowed[-1]}, "
+                          f"not {score[bad].iloc[0]}")
+    return score
+
+
 def _state(table):
-    # Sleep hours have no kinesia_class (the data pipeline maps only the 7 kinesia
-    # scores), so they're read from the diary's answer.
-    state = table[KINESIA_CLASS].where(table[KINESIA_TEXT] != SLEEP, "asleep")
-    unknown = state.notna() & ~state.isin(STATES)
-    if unknown.any():
-        raise SchemaError(f"unknown {KINESIA_CLASS} {state[unknown].iloc[0]!r}; known: {STATES[1:]}")
-    return state.map({name: i for i, name in enumerate(STATES)})
+    score = _read_scores(table, KINESIA_SCORE, KINESIA_SCORES)
+    state = score + 3   # score -3..+3 -> class 0..6
+    # Sleep hours have no score; they're read from the diary's answer.
+    return state.mask(table[KINESIA_TEXT] == SLEEP, ASLEEP)
 
 
-def _tremor_at_least(level):
-    """1 where the tremor score is level or more, 0 below it; NaN in sleep hours or with no score."""
-    def derive(table):
-        score = pd.to_numeric(table[TREMOR_SCORE], errors="coerce")
-        bad = score.notna() & ~score.between(0, TREMOR_MAX)
-        if bad.any():
-            raise SchemaError(f"{TREMOR_SCORE} must be 0 to {TREMOR_MAX}, not {score[bad].iloc[0]}")
-        score = score.mask(table[KINESIA_TEXT] == SLEEP)
-        return (score >= level).astype(float).where(score.notna())
-    return derive
+def _tremor(table):
+    score = _read_scores(table, TREMOR_SCORE, TREMOR_SCORES)
+    # Not labelled in sleep hours: tremor while asleep is trivially none.
+    return score.mask(table[KINESIA_TEXT] == SLEEP)
 
 
-TARGETS: Dict[str, Target] = {
-    t.name: t for t in (
-        Target(
-            name="state",
-            classes=STATES,
-            source_columns=(KINESIA_TEXT, KINESIA_CLASS),
-            description="asleep: the diary says Sleep. off: akinesia (slight, discomforting "
-                        "or severe), the medicine isn't working. on: good kinesia. dyskinetic: "
-                        "dyskinesia (slight, discomforting or severe), extra involuntary movement.",
-            derive=_state,
-        ),
-        Target(
-            name="tremor_ge1",
-            classes=NO_YES,
-            source_columns=(KINESIA_TEXT, TREMOR_SCORE),
-            description="yes: the diary's tremor score is 1 or 2 (weak, slight, strong or severe).",
-            derive=_tremor_at_least(1),
-        ),
-        Target(
-            name="tremor_ge2",
-            classes=NO_YES,
-            source_columns=(KINESIA_TEXT, TREMOR_SCORE),
-            description="yes: the diary's tremor score is 2 (strong or severe).",
-            derive=_tremor_at_least(2),
-        ),
-    )
+TARGETS = {
+    "state": Target("state", STATE_CLASSES, (KINESIA_TEXT, KINESIA_SCORE), _state),
+    "tremor": Target("tremor", TREMOR_CLASSES, (KINESIA_TEXT, TREMOR_SCORE), _tremor),
 }
 
 
@@ -163,14 +134,13 @@ def get_target(name):
     Raises:
         ConfigError: No target has that name.
     """
-    try:
-        return TARGETS[name]
-    except KeyError:
-        raise ConfigError(f"unknown target {name!r}; known: {sorted(TARGETS)}") from None
+    if name not in TARGETS:
+        raise ConfigError(f"unknown target {name!r}; known: {sorted(TARGETS)}")
+    return TARGETS[name]
 
 
 def at_horizon(table, y, horizon):
-    """Line each row up with the label `horizon` ahead, for the same participant.
+    """Give each row the label from `horizon` hours later, for the same participant.
 
     Args:
         table: The table y was derived from, with participant_id and hour_index.
@@ -178,9 +148,8 @@ def at_horizon(table, y, horizon):
         horizon: A key of HORIZONS.
 
     Returns:
-        pd.Series on the table's index. NaN where the participant's hour ahead
-        isn't in the table, so a gap or the end of a recording never borrows
-        another hour's label.
+        pd.Series on the table's index. NaN where that later hour isn't in the
+        table, so a gap or the end of a recording never borrows another hour's label.
 
     Raises:
         ConfigError: Unknown horizon.
@@ -192,20 +161,22 @@ def at_horizon(table, y, horizon):
     if hours == 0:
         return y
     _require(table, (PARTICIPANT, HOUR_INDEX), f"horizon {horizon!r}")
-    here = pd.MultiIndex.from_arrays([table[PARTICIPANT], table[HOUR_INDEX]])
-    if here.duplicated().any():
-        raise SchemaError(f"a participant has the same {HOUR_INDEX} twice, e.g. {here[here.duplicated()][0]}")
-    ahead = pd.MultiIndex.from_arrays([table[PARTICIPANT], table[HOUR_INDEX] + hours])
-    by_hour = pd.Series(y.to_numpy(), index=here)
-    return pd.Series(by_hour.reindex(ahead).to_numpy(), index=table.index, dtype=float)
+
+    # Every label, looked up by (participant, hour).
+    by_hour = pd.Series(y.to_numpy(), index=pd.MultiIndex.from_arrays([table[PARTICIPANT], table[HOUR_INDEX]]))
+    if by_hour.index.duplicated().any():
+        raise SchemaError(f"a participant has the same {HOUR_INDEX} twice")
+    # For each row, fetch (same participant, hour + hours); missing ones become NaN.
+    later = by_hour.reindex(pd.MultiIndex.from_arrays([table[PARTICIPANT], table[HOUR_INDEX] + hours]))
+    return pd.Series(later.to_numpy(), index=table.index, dtype=float)
 
 
 def build_labels(table, targets, horizons=tuple(HORIZONS)):
-    """Return one label column per target and horizon, named as label_name gives.
+    """One label column per target and horizon, such as state_now and state_next_hour.
 
     Args:
         table: The data pipeline's hourly table.
-        targets: Target names, such as ["state", "tremor_ge1"].
+        targets: Target names, such as ["state", "tremor"].
         horizons: Keys of HORIZONS. Defaults to all of them.
 
     Returns:
