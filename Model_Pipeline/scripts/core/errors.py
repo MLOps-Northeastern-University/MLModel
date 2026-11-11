@@ -38,5 +38,9 @@ class GateError(PipelineError):
         self.gate = gate
 
 
+class TrackingError(PipelineError):
+    """Tracking was used wrongly: no active run, a bad metric name or value."""
+
+
 class ExportError(PipelineError):
     """A model couldn't be exported for the phone."""
