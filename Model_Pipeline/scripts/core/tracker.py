@@ -36,8 +36,6 @@ logger = get_logger(__name__)
 
 # The splits a metric can belong to. "cv" is a summary across folds.
 SPLITS = ("train", "val", "test", "cv")
-# Metrics that span every target, such as a combined loss.
-ALL_TARGETS = "all"
 # Run-level metrics with no split or target: run/<metric>, such as run/duration_s.
 RUN_NAMESPACE = "run"
 _METRIC_PART = re.compile(r"^[a-z0-9_]+$")
@@ -56,7 +54,7 @@ def metric_name(split, target, metric):
 
     Args:
         split: One of SPLITS.
-        target: A target from core/targets.py, or ALL_TARGETS.
+        target: A target from core/targets.py.
         metric: Lowercase letters, digits and underscores, such as pr_auc.
 
     Raises:
@@ -78,11 +76,11 @@ def validate_metric_name(name):
         return
     if len(parts) == 3:
         split, target, metric = parts
-        if split in SPLITS and (target in TARGETS or target == ALL_TARGETS) and _METRIC_PART.match(metric):
+        if split in SPLITS and target in TARGETS and _METRIC_PART.match(metric):
             return
     raise TrackingError(
         f"metric name {name!r} must be {{split}}/{{target}}/{{metric}} with split in {SPLITS}, "
-        f"target in {sorted(TARGETS) + [ALL_TARGETS]} and metric of a-z, 0-9 and _; "
+        f"target in {sorted(TARGETS)} and metric of a-z, 0-9 and _; "
         f"or {RUN_NAMESPACE}/{{metric}}")
 
 
@@ -129,31 +127,27 @@ class Tracker(ABC):
         parent = self.active_run_id
         run_id = self._start_run(name, parent, dict(tags or {}))
         token = self._stack.set(self._stack.get() + (run_id,))
+        logger.info("tracking run %s started", name, extra={
+            "event": "tracking_run_started", "tracker_run_id": run_id, "tracker_parent_run_id": parent})
         status = RunStatus.FAILED
         try:
             with log_context(tracker_run_id=run_id):
-                logger.info("tracking run %s started", name, extra={
-                    "event": "tracking_run_started", "tracker_parent_run_id": parent})
-                try:
-                    yield run_id
-                    status = RunStatus.FINISHED
-                except (KeyboardInterrupt, SystemExit):
-                    status = RunStatus.KILLED
-                    raise
-                finally:
-                    logger.info("tracking run %s ended %s", name, status.value, extra={
-                        "event": "tracking_run_ended", "status": status.value})
+                yield run_id
+            status = RunStatus.FINISHED
+        except (KeyboardInterrupt, SystemExit):
+            status = RunStatus.KILLED
+            raise
         finally:
             self._stack.reset(token)
             self._end_run(run_id, status)
+            logger.info("tracking run %s ended %s", name, status.value, extra={
+                "event": "tracking_run_ended", "tracker_run_id": run_id, "status": status.value})
 
     def log_params(self, params):
         """Record parameters. Nested dicts are flattened to dotted keys."""
         if not isinstance(params, dict):
             raise TrackingError(f"params must be a dict, not {type(params).__name__}")
         flat = flatten(params)
-        if any(not k for k in flat):
-            raise TrackingError("parameter names can't be empty")
         if flat:
             self._log_params(self._require_run(), flat)
 

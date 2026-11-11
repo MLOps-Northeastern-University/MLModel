@@ -48,13 +48,13 @@ def ends(tracker):
 
 # ---- metric names ----------------------------------------------------------------------
 
-@pytest.mark.parametrize("name", ["val/off/pr_auc", "test/tremor/mae", "cv/all/loss", "run/duration_s"])
+@pytest.mark.parametrize("name", ["val/off/pr_auc", "test/tremor/mae", "cv/dyskinesia/recall", "run/duration_s"])
 def test_valid_metric_names(name):
     validate_metric_name(name)
 
 
 @pytest.mark.parametrize("name", [
-    "pr_auc", "val/off", "validation/off/pr_auc", "val/freezing/pr_auc",
+    "pr_auc", "val/off", "validation/off/pr_auc", "val/freezing/pr_auc", "cv/all/loss",
     "val/off/PR-AUC", "val/off/pr_auc/x", "run/", "", None])
 def test_invalid_metric_names(name):
     with pytest.raises(TrackingError):

@@ -83,13 +83,14 @@ def log_context(**fields):
         _context.reset(token)
 
 
-def configure_logging(cfg=None, log_file=None):
+def configure_logging(cfg=None, log_file=None, stream=None):
     """Set up the handlers once; calling again replaces them (no duplicate lines).
 
     Args:
         cfg: The pipeline config. Uses its "logging" section and, for the file,
             resolved_paths["log_file"].
         log_file: Overrides the log file path.
+        stream: Where console or JSON lines go. Defaults to sys.stdout.
     """
     settings = {**DEFAULTS, **((cfg or {}).get("logging") or {})}
     level = os.environ.get("MODEL_LOG_LEVEL", settings["level"]).upper()
@@ -105,8 +106,7 @@ def configure_logging(cfg=None, log_file=None):
     _handlers.clear()
 
     formatter = JsonFormatter() if fmt == "json" else ConsoleFormatter()
-    stream = _StdoutHandler()
-    _handlers.append(stream)
+    _handlers.append(logging.StreamHandler(stream or sys.stdout))
     file_error = None
     if use_file:
         path = Path(log_file or (cfg or {}).get("resolved_paths", {}).get("log_file") or DEFAULT_LOG_FILE)
@@ -186,21 +186,6 @@ def _git(*args):
         return out.stdout.strip() if out.returncode == 0 else None
     except (OSError, subprocess.SubprocessError):
         return None
-
-
-class _StdoutHandler(logging.StreamHandler):
-    """Writes to whatever sys.stdout is when the line is written, not when set up."""
-
-    def __init__(self):
-        super().__init__(sys.stdout)
-
-    @property
-    def stream(self):
-        return sys.stdout
-
-    @stream.setter
-    def stream(self, value):
-        pass
 
 
 class _ContextFilter(logging.Filter):
