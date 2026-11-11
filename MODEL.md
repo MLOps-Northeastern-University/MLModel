@@ -278,11 +278,14 @@ _Owner: Sam Selvaraj, with Dhruv for the data pipeline · Decided: 2026-11-11_
 **Decision (2026-11-11):**
 
 - **One model rate.** Every device is converted to it where data enters: measure the true rate from timestamps, low-pass filter, then resample.
-- **Watch-like training copies.** Training also uses copies of each window passed through 24 Hz (100 → 24 → 30 Hz), so they look like the CMF watch.
+- **Training copies at lower watch rates (updated 2026-11-11).** Besides COPS as recorded, training uses copies of each window as a 25 Hz and a 20 Hz watch would record it: band-limited to that rate, then converted back to 30 Hz (100 → 25 → 30, 100 → 20 → 30). The rates are a config list.
+  - **No copies above 30 Hz:** converting to 30 Hz keeps movement up to 15 Hz, so a 50 or 100 Hz recording gives the same signal as COPS (100 Hz) already does. Only slower watches lose information.
+  - **None below 20 Hz:** a 20 Hz watch keeps movement up to 10 Hz, enough for tremor (3 to 8 Hz). Below that, tremor itself starts to disappear.
+  - **Made once, in training,** not stored by the data pipeline: the copies are a cheap resample of each 30 Hz window, so no extra files. harnet10's cache holds each copy, so each rate is encoded once, which is why it's a fixed list and not a random rate every epoch.
 - **Masking.** Windows when the watch wasn't worn are masked, never scored.
 - **One preprocessing spec,** versioned, with golden test values. The data pipeline and the app run the same steps.
 
-**Why:** The model never sees a device's native rate, so supporting a new watch needs only its converter. The CMF watch samples at about 22 to 24 Hz, so it carries nothing above about 12 Hz, which COPS at 30 Hz does.
+**Why:** The model never sees a device's native rate, so supporting a new watch needs only its converter. The CMF watch samples at about 22 to 24 Hz, so it carries nothing above about 12 Hz, which COPS at 30 Hz does. Copies at 25 and 20 Hz cover the CMF watch with room either side, for its rate drifting and for other or future watches.
 
 ### Architecture
 
@@ -420,7 +423,7 @@ _Owner: Sam Selvaraj · Decided: 2026-11-11_
 | 2. History | history attention over 8 h, then 4 h · against the fixed-summary baseline | how much the past helps, and whether a shorter history does as well |
 | 3. Heads | shared trunk vs a separate copy for the in-1-hour head | one model or two for the two horizons |
 | 4. Medication | with vs without the dose LEDD · dose-time error sizes · with vs without the source flag · with vs without an explicit time since the last dose | whether doses help, and how much timing error the model tolerates |
-| 5. Watch realism | with vs without the 24 Hz copies | whether the model survives the watch's lower rate |
+| 5. Watch realism | COPS only vs with the 25 and 20 Hz copies, judged on the test patients' copies at each rate | whether the model survives a watch's lower rate |
 
 ### LEDD conversion table
 
