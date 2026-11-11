@@ -214,7 +214,8 @@ Movement features, raw accelerometer, medication values, LEDD. Section 4.
   - a dose taken in that window: drug class, mg (LEDD), source flag;
   - a check-in made in that window: the patient's two answers.
 - **No dose known yet** (before the first logged dose): minutes since dose is set to a cap meaning "long ago", with a "no dose known" flag. It is never 0, which would mean "just taken".
-- **Unworn and sleep windows** aren't scored and aren't added to the history. A dose or check-in during them goes on the next window that is added.
+- **Sleep windows are scored and added to the history,** like any other window; the model learns asleep from them.
+- **Unworn windows** carry no movement, so they aren't scored and aren't added to the history. A dose or check-in during them goes on the next window that is added.
 - **Not inputs:**
   - diary answers, which are the targets (check-ins are the patient's own live answers, not diary labels);
   - age, sex and disease stage, which are used for bias checks only.
@@ -225,6 +226,12 @@ Movement features, raw accelerometer, medication values, LEDD. Section 4.
 - Doses, waking and side help interpret movement but don't describe it, so they join after the encoder.
 - The dose window is marked so attention can find the moment of the dose and compare movement before and after it. The carried-forward values keep working once the dose window has left the history.
 - Demographics are left out so the model can't take shortcuts that don't hold from one patient to the next.
+- **Sleep stays in the history (2026-11-11):**
+  - it costs nothing extra, because the history is capped at about 4 hours either way;
+  - leaving it out would need a "this is sleep" rule, and none works the same in training and live: in training the only marker is the diary's Sleep hours, which are the labels, while live it would be Health Connect or the model's own P(asleep);
+  - attention can learn to ignore it, and sometimes it matters: a restless night, an early waking, or the early-morning OFF before the first dose.
+
+  The cost: in the morning the history is mostly sleep, so the previous evening's movement has dropped out. The context still carries the last dose and the time since waking.
 
 ### Dose times
 
@@ -293,7 +300,7 @@ _Owner: Sam Selvaraj · Decided: 2026-11-11_
   - a small causal transformer (2 layers, 2 to 4 heads, about 64 dimensions) over the tokens of the last ~4 hours;
   - the new token is the query, and the cached tokens are the keys and values;
   - each token's keys and values are computed once and kept in a KV cache;
-  - positions come from each token's real timestamp (time-based RoPE or ALiBi), because the cache skips sleep and unworn time, so neighbouring tokens can be hours apart.
+  - positions come from each token's real timestamp (time-based RoPE or ALiBi), because the cache skips unworn time, so neighbouring tokens can be hours apart.
 - **Two heads:**
   - **now:** the state of this window;
   - **in 1 hour:** the state an hour from now.
@@ -317,7 +324,7 @@ _Owner: Sam Selvaraj · Decided: 2026-11-11_
 **Decision (2026-11-11):** multiple-instance learning (MIL), with each diary hour as a bag of 360 windows.
 
 1. **Run the whole model on a patient-day at once.** That's about 8,640 windows, with a causal mask limited to the last 4 hours. Every window gets its now and in-1-hour outputs with its full past, the same as live with the KV cache.
-2. **Pool per diary hour.** Gated attention pools the hour's 360 now-outputs into one hour prediction. Unworn and sleep windows get no weight.
+2. **Pool per diary hour.** Gated attention pools the hour's 360 now-outputs into one hour prediction. Unworn windows get no weight.
 3. **Compare with the diary.** The hour prediction is compared with the hour's label, and the in-1-hour outputs are pooled the same way and compared with the next hour's label. No-data hours are never targets. The loss for each target is cross-entropy + λ × expected distance, where the expected distance is Σ P(score) × |score − true score|, so a near miss costs less than a far one. Cross-entropy keeps the probabilities calibrated; the distance alone would push them onto one middle score. λ is tuned. Asleep has no score, so the distance term covers waking hours only.
 4. **Backpropagate** through the pooling, heads, attention, token projection and the trained encoder branches. harnet10 stays frozen.
 
@@ -350,7 +357,7 @@ _Owner: Sam Selvaraj, with Ayush for the AndroidApp · Decided: 2026-11-11_
 - **Runtime:** chosen by a conversion spike that tries ExecuTorch, ONNX Runtime and LiteRT. The spike tests the KV cache specifically, because a stateful model is the hard part of the export.
 - **One `ModelRunner` interface** in the app, with a runner per format.
 - **A manifest with each model** names its format, its input and output shapes, and a reference input with expected outputs. The app checks it before scoring a patient.
-- **At night,** Health Connect sleep sessions are the main signal: those windows aren't scored or added to the history, and they set "time since waking". The model's asleep output covers the time before they sync, and acts as a cross-check.
+- **At night,** the model scores every worn window, asleep included. Health Connect sleep sessions set "time since waking" and are a cross-check on the model's asleep output.
 
 **Why:**
 
@@ -425,7 +432,7 @@ Which paper's factors, and how drug names in COPS map to them.
 
 ### Still open
 
-- **Asleep as a state:** keep asleep as the 8th class, so sleep is caught before Health Connect syncs, or drop it (the 7 scores only) and leave sleep to Health Connect.
+- **Time since waking in training:** COPS has no sleep sessions, so it would come from the diary's Sleep hours, which are labels. Find another source, or check how much it leaks.
 - **Model rate:** 30 Hz by default, which keeps harnet10's pretraining; or test 24 Hz as well.
 - **History length and attention size:** 4 h and 2 layers × 64 dimensions proposed; stage 2 tests 2, 4 and 8 h.
 - **Time encoding:** time-based RoPE or ALiBi.
