@@ -147,7 +147,7 @@ The 3 outputs can come from one model with an output per symptom, or from separa
 Terms used below:
 
 - **Window:** 10 seconds of accelerometer data. The unit the model classifies.
-- **Token:** one window as the history attention sees it: the window's embedding, its context and its event fields.
+- **Token:** one window as the history attention sees it: the window's embedding, the patient fields (side, DBS) and its event fields (a dose's LEDD and source flag, a check-in's answers).
 - **Diary hour:** the unit the COPS diary labels, so 360 windows.
 
 The design was drafted on 2026-11-11 around 10-minute blocks and revised the same day to the per-window model below, before any code depended on it. The entries below replace that draft.
@@ -203,16 +203,11 @@ Movement features, raw accelerometer, medication values, LEDD. Section 4.
 
 - **Movement:** the raw accelerometer, converted to the model rate (30 Hz by default) and cut into windows of 3 axes × 300 samples, with each axis's mean removed.
 - **The 7 hourly features aren't model inputs.** They stay for the baselines and for drift monitoring.
-- **Context, on every window's token:**
-  - minutes since the last dose, exact (in seconds), so only the dose window itself is 0;
-  - the last dose's LEDD and source flag, carried forward until the next dose;
-  - today's LEDD so far;
-  - watch on the more affected side or not; DBS or not;
-  - the last check-in's answers and the minutes since it, carried forward like the dose.
+- **Patient fields, on every window's token:** watch on the more affected side or not; DBS or not.
 - **Event fields, filled only on the window where something happened, 0 everywhere else:**
-  - a dose taken in that window: drug class, mg (LEDD), source flag;
+  - a dose taken in that window: its LEDD (doses in the same window add up) and its source flag;
   - a check-in made in that window: the patient's two answers.
-- **No dose known yet** (before the first logged dose): minutes since dose is set to a cap meaning "long ago", with a "no dose known" flag. It is never 0, which would mean "just taken".
+- **Nothing is carried forward.** No time since the dose, no last dose, no daily total. Attention reads every dose and check-in in the 8-hour history, with their timing from the time-based positions.
 - **Sleep windows are scored and added to the history,** like any other window; the model learns asleep from them.
 - **Unworn windows** carry no movement, so they aren't scored and aren't added to the history. A dose or check-in during them goes on the next window that is added.
 - **Not inputs:**
@@ -223,14 +218,20 @@ Movement features, raw accelerometer, medication values, LEDD. Section 4.
 
 - The 7 features summarise an hour in 7 hand-made numbers. Raw windows let the encoder learn its own features and start from harnet10, which was pretrained on 10-second windows at 30 Hz.
 - Doses and side help interpret movement but don't describe it, so they join after the encoder.
-- The dose window is marked so attention can find the moment of the dose and compare movement before and after it. The carried-forward values keep working once the dose window has left the history.
+- **Doses as LEDD only, read from the history (2026-11-11):**
+  - LEDD already puts every drug on one scale, so the drug class is dropped;
+  - with 8 hours of history, a typical day's doses are all in view together, so attention learns both each dose's own effect and how overlapping doses add up;
+  - carried-forward values (time since dose, last dose, today's LEDD) were dropped: they handled one dose at a time, today's total gave away the time of day and reset at midnight, and the history already holds the same information.
+
+  If the experiments show the model can't use dose timing from the positions alone, add back one number: time since the last dose.
+- **Source flag:** on time, logged late, or none logged (see Dose times), so the model can trust a guessed dose time less.
 - Demographics are left out so the model can't take shortcuts that don't hold from one patient to the next.
 - **Sleep stays in the history (2026-11-11):**
-  - it costs nothing extra, because the history is capped at about 4 hours either way;
+  - it costs nothing extra, because the history is capped at 8 hours either way;
   - leaving it out would need a "this is sleep" rule, and none works the same in training and live: in training the only marker is the diary's Sleep hours, which are the labels, while live it would be Health Connect or the model's own P(asleep);
   - attention can learn to ignore it, and sometimes it matters: a restless night, an early waking, or the early-morning OFF before the first dose.
 
-  The cost: in the morning the history is mostly sleep, so the previous evening's movement has dropped out. The context still carries the last dose.
+  The cost: in the morning the history is mostly sleep, so the previous evening's movement and doses have dropped out.
 - **No time since waking or time of day (2026-11-11):** with sleep in the history, the model can see when the patient woke and roughly where in the day it is. A clock input could also teach shortcuts ("8 am means OFF") that fail for patients with other routines. Add time of day only if the errors show a time-of-day pattern, such as missed early-morning OFF.
 
 ### Dose times
@@ -263,7 +264,7 @@ _Owner: Sam Selvaraj, with Ayush for the AndroidApp · Decided: 2026-11-11_
 
 - **Both diary questions,** with the diary's own answer options: how the patient is moving (the 7 kinesia answers: akinesia and dyskinesia each slight, discomforting or severe, or good) and how much tremor (none, weak, slight, strong or severe, scored 0 to 2).
 - **3 to 5 a day,** mostly at random times, some just before a dose and about an hour after. Each records why it was asked.
-- **In the model,** the answers go in the event fields of the window where the patient answered, and are carried forward as the last check-in. The model's own past outputs are never fed back; check-ins are the only past labels it sees.
+- **In the model,** the answers go in the event fields of the window where the patient answered, and attention reads them from the history; they aren't carried forward. The model's own past outputs are never fed back; check-ins are the only past labels it sees.
 - **In training,** check-ins are simulated at the live rate: a few random diary hours per day are revealed on one random window of the hour.
 - **Hours with a check-in are scored separately,** because they're easy. The gate is judged on hours without one.
 - **When the model and a check-in disagree,** the disagreement feeds monitoring (agreement with check-ins), and the app may show the patient's own answer for that moment.
@@ -295,9 +296,9 @@ _Owner: Sam Selvaraj · Decided: 2026-11-11_
   - a trained 2D CNN on the spectrogram (0 to 15 Hz): frequency, where tremor shows.
 
   Each branch is a config switch. Experiment stage 1 decides which to keep, starting from harnet10 alone.
-- **Token:** the embedding projected from 256 to 64 numbers (tunable), joined with the window's context and event fields. One token per window.
+- **Token:** the embedding projected from 256 to 64 numbers (tunable), joined with the patient fields and the window's event fields. One token per window.
 - **History attention:**
-  - a small causal transformer (2 layers, 2 to 4 heads, about 64 dimensions) over the tokens of the last ~4 hours;
+  - a small causal transformer (2 layers, 2 to 4 heads, about 64 dimensions) over the tokens of the last 8 hours;
   - the new token is the query, and the cached tokens are the keys and values;
   - each token's keys and values are computed once and kept in a KV cache;
   - positions come from each token's real timestamp (time-based RoPE or ALiBi), because the cache skips unworn time, so neighbouring tokens can be hours apart.
@@ -312,7 +313,7 @@ _Owner: Sam Selvaraj · Decided: 2026-11-11_
 
 - **Per window:** harnet10 is built for 10-second windows, and per-window states are what the app shows.
 - **Attention over hours of past:** a dose takes 20 to 40 minutes to work, peaks around an hour and wears off over 2 to 4 hours. Judging "this dose is wearing off early" needs the baseline before the dose and the path since, and attention learns what in the past matters instead of us picking spans.
-- **KV cache:** each new window costs one attention step, about 0.4 M multiply-adds over 1,440 cached tokens, with a cache of about 1.5 MB. The past is never recomputed.
+- **KV cache:** each new window costs one attention step, about 0.8 M multiply-adds over 2,880 cached tokens (8 hours), with a cache of about 3 MB. The past is never recomputed.
 - **256 → 64:** a smaller attention model overfits less with 66 patients, and the cache stays small.
 - **Direct forecast:** rolling forward window by window would take 360 steps to reach an hour, with errors compounding.
 - **No 10-minute blocks:** with attention and a KV cache, compressing windows into blocks isn't needed to keep the past cheap.
@@ -323,7 +324,7 @@ _Owner: Sam Selvaraj · Decided: 2026-11-11_
 
 **Decision (2026-11-11):** multiple-instance learning (MIL), with each diary hour as a bag of 360 windows.
 
-1. **Run the whole model on a patient-day at once.** That's about 8,640 windows, with a causal mask limited to the last 4 hours. Every window gets its now and in-1-hour outputs with its full past, the same as live with the KV cache.
+1. **Run the whole model on a patient-day at once.** That's about 8,640 windows, with a causal mask limited to the last 8 hours. Every window gets its now and in-1-hour outputs with its full past, the same as live with the KV cache.
 2. **Pool per diary hour.** Gated attention pools the hour's 360 now-outputs into one hour prediction. Unworn windows get no weight.
 3. **Compare with the diary.** The hour prediction is compared with the hour's label, and the in-1-hour outputs are pooled the same way and compared with the next hour's label. No-data hours are never targets. The loss for each target is cross-entropy + λ × expected distance, where the expected distance is Σ P(score) × |score − true score|, so a near miss costs less than a far one. Cross-entropy keeps the probabilities calibrated; the distance alone would push them onto one middle score. λ is tuned. Asleep has no score, so the distance term covers waking hours only.
 4. **Backpropagate** through the pooling, heads, attention, token projection and the trained encoder branches. harnet10 stays frozen.
@@ -350,7 +351,7 @@ _Owner: Sam Selvaraj, with Ayush for the AndroidApp · Decided: 2026-11-11_
 - **On the phone, not the server.** The model runs on the phone, quantised to int8, over each new window, in batches whenever the app wakes.
 - **Cost per window:**
   - the encoder, about 15 ms on CPU (about 5 s of CPU per hour of data);
-  - one attention step against the KV cache (about 1.5 MB for 4 hours);
+  - one attention step against the KV cache (about 3 MB for 8 hours);
   - the heads.
 - **The KV cache comes back after a restart.** If Android kills the app, the cache is rebuilt from the stored window embeddings by rerunning only the attention layers.
 - **Raw movement never leaves the phone.** The uploads are the window states, the hourly scores and the 7 features.
@@ -416,9 +417,9 @@ _Owner: Sam Selvaraj · Decided: 2026-11-11_
 |---|---|---|
 | 0. Baselines | training average · logistic regression on the 7 features · shuffled labels | the floor, and that the pipeline works end to end |
 | 1. Encoder | harnet10 alone · + spectrogram CNN · + raw-signal CNN · all three · MIL vs the hour's label on every window | which branches earn their place, and whether MIL helps |
-| 2. History | history attention over 2, 4 and 8 h · against the fixed-summary baseline | how much the past helps, and how far back is worth caching |
+| 2. History | history attention over 8 h, then 4 h · against the fixed-summary baseline | how much the past helps, and whether a shorter history does as well |
 | 3. Heads | shared trunk vs a separate copy for the in-1-hour head | one model or two for the two horizons |
-| 4. Medication | with vs without the dose fields and dose context · dose-time error sizes · with vs without the source flag | whether doses help, and how much timing error the model tolerates |
+| 4. Medication | with vs without the dose LEDD · dose-time error sizes · with vs without the source flag · with vs without an explicit time since the last dose | whether doses help, and how much timing error the model tolerates |
 | 5. Watch realism | with vs without the 24 Hz copies | whether the model survives the watch's lower rate |
 
 ### LEDD conversion table
@@ -433,7 +434,7 @@ Which paper's factors, and how drug names in COPS map to them.
 ### Still open
 
 - **Model rate:** 30 Hz by default, which keeps harnet10's pretraining; or test 24 Hz as well.
-- **History length and attention size:** 4 h and 2 layers × 64 dimensions proposed; stage 2 tests 2, 4 and 8 h.
+- **Attention size:** 2 layers × 64 dimensions proposed. The history is 8 h; stage 2 checks whether 4 h does as well.
 - **Time encoding:** time-based RoPE or ALiBi.
 - **Token size:** 64 proposed; 32, 128 or the full 256 to try.
 - **Dose-time error sizes:** ±60 min proposed; how often to drop or add a dose. Tuned in stage 4.
