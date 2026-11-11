@@ -146,9 +146,11 @@ The 3 outputs can come from one model with an output per symptom, or from separa
 
 Terms used below:
 
-- **Window:** 10 seconds of accelerometer data, the unit the encoder reads.
-- **Block:** 10 minutes, so 60 windows. The unit the history part steps through.
-- **Hour:** 6 blocks, so 360 windows. The unit the diary labels.
+- **Window:** 10 seconds of accelerometer data. The unit the model classifies.
+- **Token:** one window as the history attention sees it: the window's embedding, its context and its event fields.
+- **Diary hour:** the unit the COPS diary labels, so 360 windows.
+
+The design was drafted on 2026-11-11 around 10-minute blocks and revised the same day to the per-window model below, before any code depended on it. The entries below replace that draft.
 
 ### Outputs and how often
 
@@ -156,19 +158,20 @@ _Owner: Sam Selvaraj · Decided: 2026-11-11_
 
 **Decision (2026-11-11):**
 
-- Two horizons: **now** (the last 60 minutes) and **next hour** (the 60 minutes after).
+- Two horizons: **now** (the state of the current window) and **in 1 hour**.
 - At each horizon, the **state** as 4 probabilities that add up to 1: P(asleep), P(OFF), P(ON), P(dyskinetic). They come from the diary's kinesia entries: Sleep; akinesia −3 to −1; good 0; dyskinesia +1 to +3.
-- At each horizon, **tremor** as P(tremor ≥ 1) and P(tremor ≥ 2), from the diary's 0 to 2 tremor score. Tremor is labelled on waking hours only.
+- At each horizon, **tremor** as P(tremor ≥ 1) and P(tremor ≥ 2), from the diary's 0 to 2 tremor score.
+- **Sleep hours are left out of the tremor targets.** The diary does record tremor in most sleep hours (almost always 0), but tremor while asleep is trivially none and the asleep state already covers it, so keeping them would inflate the tremor metrics without teaching anything.
 - **Expected tremor** for the timeline is P(≥ 1) + P(≥ 2), on the diary's 0 to 2 scale.
-- Scores are made per block, with a per-window timeline inside each block. Only the hourly scores are trained and checked against the diary; the window timeline shows roughly when something happened, not exactly.
-- Daily OFF time is the number of hours whose P(OFF) is above the OFF threshold.
+- **A state every 10-second window.** Only the hourly scores (the window outputs pooled per diary hour) are trained and checked against the diary, so the window states show roughly when something happened, not exactly.
+- Daily OFF time is the number of hours whose pooled P(OFF) is above the OFF threshold.
 - Every score carries the version of the model that made it.
 
-**Why:** The diary is the only ground truth, and it labels whole hours with these answers, so the model predicts what the diary can check. One state with 4 classes keeps asleep, OFF, ON and dyskinetic mutually exclusive, as they are in the diary. Tremor is separate and ordinal, because it can happen in any waking state. The next-hour horizon is the warning of an OFF period coming.
+**Why:** The diary is the only ground truth, and it labels whole hours with these answers, so the model predicts what the diary can check. One state with 4 classes keeps asleep, OFF, ON and dyskinetic mutually exclusive, as they are in the diary. Tremor is separate and ordinal, because it can happen in any waking state. The 1-hour horizon is the warning of an OFF period coming. Per-window states follow from the encoder: harnet10 is pretrained on 10-second windows.
 
 **Changes elsewhere:**
 
-- Careportal's tremor line moves from MDS-UPDRS 0 to 4 to the diary's 0 to 2.
+- Careportal's tremor line moves from MDS-UPDRS 0 to 4 to the diary's 0 to 2, and the timeline shows per-window states.
 - `offHours` counts from P(OFF), not from tremor.
 - The dyskinesia likelihood is P(dyskinetic).
 - Backend's monitoring endpoints stop deriving tremor from OFF risk.
@@ -194,21 +197,27 @@ Movement features, raw accelerometer, medication values, LEDD. Section 4.
 
 - **Movement:** the raw accelerometer, converted to the model rate (30 Hz by default) and cut into windows of 3 axes × 300 samples, with each axis's mean removed.
 - **The 7 hourly features aren't model inputs.** They stay for the baselines and for drift monitoring.
-- **Context, per block:**
-  - minutes since the last dose, and that dose's source flag (see Dose times);
-  - last-dose LEDD, and today's LEDD so far;
+- **Context, on every window's token:**
+  - minutes since the last dose, exact (in seconds), so only the dose window itself is 0;
+  - the last dose's LEDD and source flag, carried forward until the next dose;
+  - today's LEDD so far;
   - time since waking;
-  - worn or not;
-  - a check-in if there is one, with a flag saying whether there is.
-- **Per patient:** watch on the more affected side or not; DBS or not.
+  - watch on the more affected side or not; DBS or not;
+  - the last check-in's answers and the minutes since it, carried forward like the dose.
+- **Event fields, filled only on the window where something happened, 0 everywhere else:**
+  - a dose taken in that window: drug class, mg (LEDD), source flag;
+  - a check-in made in that window: the patient's two answers.
+- **No dose known yet** (before the first logged dose): minutes since dose is set to a cap meaning "long ago", with a "no dose known" flag. It is never 0, which would mean "just taken".
+- **Unworn and sleep windows** aren't scored and aren't added to the history. A dose or check-in during them goes on the next window that is added.
 - **Not inputs:**
-  - diary answers, which are the targets;
+  - diary answers, which are the targets (check-ins are the patient's own live answers, not diary labels);
   - age, sex and disease stage, which are used for bias checks only.
 
 **Why:**
 
 - The 7 features summarise an hour in 7 hand-made numbers. Raw windows let the encoder learn its own features and start from harnet10, which was pretrained on 10-second windows at 30 Hz.
-- Doses, waking and side help interpret movement, but don't describe it, so they enter after the encoder.
+- Doses, waking and side help interpret movement but don't describe it, so they join after the encoder.
+- The dose window is marked so attention can find the moment of the dose and compare movement before and after it. The carried-forward values keep working once the dose window has left the history.
 - Demographics are left out so the model can't take shortcuts that don't hold from one patient to the next.
 
 ### Dose times
@@ -233,6 +242,21 @@ _Owner: Sam Selvaraj · Decided: 2026-11-11_
 
 **Why:** Live dose times are only as exact as the patient's logging: late, forgotten, or now and then logged but not taken. Training on imprecise times keeps the model from depending on exact times, so the movement stays the main evidence.
 
+### Check-ins
+
+_Owner: Sam Selvaraj, with Ayush for the AndroidApp · Decided: 2026-11-11_
+
+**Decision (2026-11-11):**
+
+- **Both diary questions,** with the diary's own answer options: how the patient is moving (akinesia, good, dyskinesia, with severity) and how much tremor (none, slight, strong).
+- **3 to 5 a day,** mostly at random times, some just before a dose and about an hour after. Each records why it was asked.
+- **In the model,** the answers go in the event fields of the window where the patient answered, and are carried forward as the last check-in. The model's own past outputs are never fed back; check-ins are the only past labels it sees.
+- **In training,** check-ins are simulated at the live rate: a few random diary hours per day are revealed on one random window of the hour.
+- **Hours with a check-in are scored separately,** because they're easy. The gate is judged on hours without one.
+- **When the model and a check-in disagree,** the disagreement feeds monitoring (agreement with check-ins), and the app may show the patient's own answer for that moment.
+
+**Why:** The answers line up with what the model is trained on only if they use the diary's scale. Simulating them at the live rate teaches the model to use them without waiting for them. Check-ins are also the first labels from real MedNova users, for retraining later.
+
 ### Preparing the signal
 
 _Owner: Sam Selvaraj, with Dhruv for the data pipeline · Decided: 2026-11-11_
@@ -252,47 +276,57 @@ _Owner: Sam Selvaraj · Decided: 2026-11-11_
 
 **Decision (2026-11-11):**
 
-- **Window encoder:** reads one window, movement only. The starting point is the hybrid from the architecture PDF:
-  - frozen harnet10;
-  - a trained 1D CNN on the raw signal;
-  - a trained 2D CNN on the spectrogram (0 to 15 Hz).
+- **Window encoder:** reads one window, movement only, and gives 256 numbers. The starting point is the hybrid from the architecture PDF:
+  - frozen harnet10: general wrist movement, from about 700,000 days of UK Biobank data;
+  - a trained 1D CNN on the raw signal: Parkinson's-specific movement shapes;
+  - a trained 2D CNN on the spectrogram (0 to 15 Hz): frequency, where tremor shows.
 
-  They're joined into a 256-number window embedding, plus window scores. Nothing else in the design depends on which encoder is used.
-- **Block summary:** a block's 60 window embeddings are pooled with gated attention into one summary. Unworn windows get no weight.
-- **History part:**
-  - reads one step per block, in order. A step is the block summary joined with that block's context, with side and DBS added to every step;
-  - variants to test: average, GRU, attention;
-  - history of 2, 4 or 8 hours (12, 24 or 48 blocks).
-- **Two heads, now and next hour:** the same inputs and architecture, with the label shifted by an hour. Sharing one encoder or training two copies is a config switch.
-- **The model's own past outputs are not an input.**
+  Each branch is a config switch. Experiment stage 1 decides which to keep, starting from harnet10 alone.
+- **Token:** the embedding projected from 256 to 64 numbers (tunable), joined with the window's context and event fields. One token per window.
+- **History attention:**
+  - a small causal transformer (2 layers, 2 to 4 heads, about 64 dimensions) over the tokens of the last ~4 hours;
+  - the new token is the query, and the cached tokens are the keys and values;
+  - each token's keys and values are computed once and kept in a KV cache;
+  - positions come from each token's real timestamp (time-based RoPE or ALiBi), because the cache skips sleep and unworn time, so neighbouring tokens can be hours apart.
+- **Two heads:**
+  - **now:** the state of this window;
+  - **in 1 hour:** the state an hour from now.
+
+  Both read the same attention output; only the label differs. The forecast is a direct head, not a step-by-step rollout.
+- **Baseline for experiment stage 2:** the same model with the attention replaced by fixed summaries of the past (movement over the last 5, 30 and 60 minutes, and since the last dose), each read by a small MLP.
 
 **Why:**
 
-- **Medication enters after the encoder,** so the encoder's reading of the body doesn't depend on dose timing.
-- **Blocks rather than hours or windows.** Hourly steps would round "time since dose" to the hour. Steps per window would mean 1,440 steps for 4 hours, trained from one label per 360 steps. Blocks keep dose timing to 10 minutes while keeping sequences short enough to train from hourly labels with 66 patients.
-- **Past outputs aren't fed back** because, live, there are no labels to correct them, so a wrong output would feed the next. The history part already sees the block summaries those outputs would come from.
+- **Per window:** harnet10 is built for 10-second windows, and per-window states are what the app shows.
+- **Attention over hours of past:** a dose takes 20 to 40 minutes to work, peaks around an hour and wears off over 2 to 4 hours. Judging "this dose is wearing off early" needs the baseline before the dose and the path since, and attention learns what in the past matters instead of us picking spans.
+- **KV cache:** each new window costs one attention step, about 0.4 M multiply-adds over 1,440 cached tokens, with a cache of about 1.5 MB. The past is never recomputed.
+- **256 → 64:** a smaller attention model overfits less with 66 patients, and the cache stays small.
+- **Direct forecast:** rolling forward window by window would take 360 steps to reach an hour, with errors compounding.
+- **No 10-minute blocks:** with attention and a KV cache, compressing windows into blocks isn't needed to keep the past cheap.
 
 ### Training
 
 _Owner: Sam Selvaraj · Decided: 2026-11-11_
 
-**Decision (2026-11-11):**
+**Decision (2026-11-11):** multiple-instance learning (MIL), with each diary hour as a bag of 360 windows.
 
-- **Phase 1, the encoder:**
-  - train the encoder and a simple head on single hours: 360 windows in, the hour's diary label out. The attention pooling combines the window scores, so the hourly label trains the window scorer (multiple-instance learning);
-  - then freeze the encoder and store one summary per block.
-- **Phase 2, the history part and the heads:**
-  - examples slide along each patient's blocks and end on each hour. Each example has two labels: that hour, and the next;
-  - no-data blocks stay in the history but are never targets;
-  - check-ins are simulated by revealing a few random past diary hours;
-  - dose-time errors are added as in Dose times.
+1. **Run the whole model on a patient-day at once.** That's about 8,640 windows, with a causal mask limited to the last 4 hours. Every window gets its now and in-1-hour outputs with its full past, the same as live with the KV cache.
+2. **Pool per diary hour.** Gated attention pools the hour's 360 now-outputs into one hour prediction. Unworn and sleep windows get no weight.
+3. **Compare with the diary.** The hour prediction is compared with the hour's label, and the in-1-hour outputs are pooled the same way and compared with the next hour's label. No-data hours are never targets.
+4. **Backpropagate** through the pooling, heads, attention, token projection and the trained encoder branches. harnet10 stays frozen.
+
+Also:
+
+- **Caching:** harnet10's outputs are computed once and cached.
+- **Baseline:** giving every window its hour's label, to show what MIL adds.
+- **Noise and simulated check-ins:** the dose-time errors and simulated check-ins above.
 - **Splits:**
   - folds are by patient;
   - the test patients are fixed and never used for training, tuning or any choice;
   - 3 seeds.
-- **Later variant:** fine-tune the encoder and history part together, end to end, if the experiments show the frozen encoder holds the history part back.
+- **Later variant:** fine-tune harnet10's last layers, if the experiments show the frozen encoder limits the model.
 
-**Why:** All the heavy 30 Hz work happens once, in phase 1. Phase 2 is small and fast, so many history lengths, variants and seeds can be run, which is what the hyperparameter sensitivity analysis needs.
+**Why:** The diary labels hours, not windows. MIL lets the model decide which windows explain an hour's label. That matters for tremor and dyskinesia, which come and go within an hour, while OFF usually lasts all of it. The per-window outputs become meaningful because the hour prediction is built only from them. Running whole days with a causal mask gives every window its full past in one pass.
 
 ### On the phone
 
@@ -300,18 +334,23 @@ _Owner: Sam Selvaraj, with Ayush for the AndroidApp · Decided: 2026-11-11_
 
 **Decision (2026-11-11):**
 
-- **On the phone, not the server.** The model runs on the phone, quantised to int8, each time a block completes.
-- **Raw movement never leaves the phone.** The uploads are the scores, the timeline, the 7 features and an embedding summary.
-- **Runtime:** chosen by a conversion spike that tries ExecuTorch, ONNX Runtime and LiteRT. The winner is the one that converts with matching outputs and the least rewriting.
+- **On the phone, not the server.** The model runs on the phone, quantised to int8, over each new window, in batches whenever the app wakes.
+- **Cost per window:**
+  - the encoder, about 15 ms on CPU (about 5 s of CPU per hour of data);
+  - one attention step against the KV cache (about 1.5 MB for 4 hours);
+  - the heads.
+- **The KV cache comes back after a restart.** If Android kills the app, the cache is rebuilt from the stored window embeddings by rerunning only the attention layers.
+- **Raw movement never leaves the phone.** The uploads are the window states, the hourly scores and the 7 features.
+- **Runtime:** chosen by a conversion spike that tries ExecuTorch, ONNX Runtime and LiteRT. The spike tests the KV cache specifically, because a stateful model is the hard part of the export.
 - **One `ModelRunner` interface** in the app, with a runner per format.
 - **A manifest with each model** names its format, its input and output shapes, and a reference input with expected outputs. The app checks it before scoring a patient.
-- **At night,** Health Connect sleep sessions are the main signal. The model's asleep output covers the time before they sync, and acts as a cross-check.
+- **At night,** Health Connect sleep sessions are the main signal: those windows aren't scored or added to the history, and they set "time since waking". The model's asleep output covers the time before they sync, and acts as a cross-check.
 
 **Why:**
 
 - **Privacy:** raw movement is the most sensitive data.
 - **Offline:** scoring works without a connection.
-- **Cost:** only new blocks are encoded.
+- **Cost:** only new windows are encoded, and the past is never recomputed.
 
 ### One model or separate models
 
@@ -319,18 +358,18 @@ _Owner: Sam Selvaraj · Decided: 2026-11-11_
 
 Section 5.
 
-**Decision (2026-11-11):** One architecture, with the now head and the next-hour head each giving the state and tremor. Whether the two heads share one encoder or use two trained copies is decided by experiment stage 3. The tiebreak is still open.
-**Why:** The state and tremor are read from the same movement, so they share what the encoder learns. The two horizons differ only in their label, so they can share the encoder too, unless the experiments show otherwise.
+**Decision (2026-11-11):** One model, with the now head and the in-1-hour head each giving the state and tremor. Whether the in-1-hour head shares the trunk or uses a separate trained copy is decided by experiment stage 3. The tiebreak is still open.
+**Why:** The state and tremor are read from the same movement, so they share what the encoder learns. The two horizons differ only in their label, so they can share the trunk too, unless the experiments show otherwise.
 
 ### Release gate and retraining
 
 _Owner: Sam Selvaraj · Decided: 2026-11-11_
 
-**Decision (2026-11-11):** A new model may replace the current one only if:
+**Decision (2026-11-11):** A new model may replace the current one only if, judged on hours without a check-in:
 
 - **it improves** OFF-now fold AUC across the patient folds;
 - **it improves or holds** OFF for non-DBS patients;
-- **it doesn't get worse** for tremor, dyskinesia, asleep or next-hour OFF.
+- **it doesn't get worse** for tremor, dyskinesia, asleep or in-1-hour OFF.
 
 Every run also reports these, without gating:
 
@@ -340,6 +379,7 @@ Every run also reports these, without gating:
 - OFF in the hours shortly after a dose;
 - accuracy with doses hidden and with doses shifted;
 - how often a still OFF hour is scored asleep;
+- hours with a check-in, separately;
 - shuffled labels, which must fall to chance;
 - bias by sex, age group, DBS and stage.
 
@@ -362,10 +402,10 @@ _Owner: Sam Selvaraj · Decided: 2026-11-11_
 | Stage | Runs | Answers |
 |---|---|---|
 | 0. Baselines | training average · logistic regression on the 7 features · shuffled labels | the floor, and that the pipeline works end to end |
-| 1. Encoder | phase 1 on single hours (harnet10 alone as the bar to beat) | how well movement alone reads the state |
-| 2. History | 2, 4 and 8 hours · average vs GRU vs attention | how much the past helps |
-| 3. Heads | shared encoder vs two trained copies | one model or two for the two horizons |
-| 4. Medication | with vs without dose inputs · dose-time error sizes · with vs without the source flag | whether doses help, and how much timing error the model tolerates |
+| 1. Encoder | harnet10 alone · + spectrogram CNN · + raw-signal CNN · all three · MIL vs the hour's label on every window | which branches earn their place, and whether MIL helps |
+| 2. History | history attention over 2, 4 and 8 h · against the fixed-summary baseline | how much the past helps, and how far back is worth caching |
+| 3. Heads | shared trunk vs a separate copy for the in-1-hour head | one model or two for the two horizons |
+| 4. Medication | with vs without the dose fields and dose context · dose-time error sizes · with vs without the source flag | whether doses help, and how much timing error the model tolerates |
 | 5. Watch realism | with vs without the 24 Hz copies | whether the model survives the watch's lower rate |
 
 ### LEDD conversion table
@@ -379,12 +419,13 @@ Which paper's factors, and how drug names in COPS map to them.
 
 ### Still open
 
+- **Asleep as a state:** keep 4 states, so sleep is caught before Health Connect syncs, or drop to 3 (OFF, ON, dyskinetic) and leave sleep to Health Connect.
 - **Model rate:** 30 Hz by default, which keeps harnet10's pretraining; or test 24 Hz as well.
-- **How often to score live:** every 10 minutes, one block, which fits the design; or once an hour.
-- **A live state between block ends:** pool the windows so far into a partial block, or smooth the window timeline (the architecture PDF's causal 15 minutes), or both.
-- **History variants beyond the sliding window:** a GRU that carries its memory forward block to block; a memory per window for the last 10 to 30 minutes; label-free pretraining that predicts the next block.
+- **History length and attention size:** 4 h and 2 layers × 64 dimensions proposed; stage 2 tests 2, 4 and 8 h.
+- **Time encoding:** time-based RoPE or ALiBi.
+- **Token size:** 64 proposed; 32, 128 or the full 256 to try.
 - **Dose-time error sizes:** ±60 min proposed; how often to drop or add a dose. Tuned in stage 4.
-- **Tiebreak** if shared and separate heads score the same.
+- **Tiebreak** if a shared trunk and a separate in-1-hour copy score the same.
 - **OFF threshold** for counting daily OFF hours.
-- **Runtime,** until the conversion spike runs.
+- **Runtime,** including the KV cache, until the conversion spike runs.
 - **Tremor uncertainty band** on Careportal's timeline, from the predicted 0, 1, 2 probabilities.
