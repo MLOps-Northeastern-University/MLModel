@@ -11,6 +11,7 @@ requests==2.32.3
 # P1: data loading, splits and validation
 
 # P2: models, tuning and tracking
+mlflow==3.17.2
 
 # P3: bias and explainability
 

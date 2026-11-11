@@ -55,6 +55,12 @@ ROOT = "model"
 DEFAULTS = {"level": "INFO", "format": "console", "third_party_level": "WARNING", "file": True}
 DEFAULT_LOG_FILE = PROJECT_ROOT / "logs" / "model_pipeline.log"
 
+# Libraries that attach their own handlers on import, which would bypass ours.
+# configure_logging removes those handlers so their lines use our format too.
+LIBRARIES_WITH_OWN_HANDLERS = ("mlflow",)
+# MLflow's documented switch to leave logging alone; only works if set before mlflow is imported.
+os.environ.setdefault("MLFLOW_CONFIGURE_LOGGING", "false")
+
 # Attributes every LogRecord has; anything else on a record is an extra field.
 _STANDARD = set(vars(logging.LogRecord("", 0, "", 0, "", None, None))) | {"message", "asctime"}
 # Fields set by log_context. A ContextVar gives each thread its own copy.
@@ -129,6 +135,11 @@ def configure_logging(cfg=None, log_file=None, stream=None):
     # Handlers sit on the root logger, so library logs (MLflow, scikit-learn) use them too.
     # Libraries are held to third_party_level; the pipeline's own "model.*" loggers to level.
     root.setLevel(settings["third_party_level"].upper())
+    for name in LIBRARIES_WITH_OWN_HANDLERS:   # in case the library was imported first
+        library = logging.getLogger(name)
+        library.handlers.clear()
+        library.setLevel(logging.NOTSET)       # follow third_party_level
+        library.propagate = True
     pipeline = logging.getLogger(ROOT)
     pipeline.setLevel(level)
     pipeline.propagate = True
