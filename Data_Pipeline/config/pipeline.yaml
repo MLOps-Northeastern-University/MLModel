@@ -64,6 +64,14 @@ features:
   # Hours with less than this much valid data are not used for features.
   min_valid_seconds: 60
 
+medication:
+  # The LEDD conversion table (Jost et al. 2023) and how each source writes drug names.
+  ledd_table: config/ledd.yaml
+  # Which name map in the table this data uses.
+  name_source: cops
+  # COPS only ticks the hour a dose was taken, so doses go at mid-hour.
+  dose_offset_minutes: 30
+
 labels:
   kinesia_text_to_score:
     Severe Akinesia: -3

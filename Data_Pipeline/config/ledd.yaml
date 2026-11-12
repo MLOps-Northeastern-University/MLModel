@@ -1,0 +1,134 @@
+# Levodopa equivalent dose (LEDD): how many mg of levodopa each Parkinson's drug is worth.
+# Read by scripts/ledd.py. One table for every data source: COPS now, the app's dose log later.
+#
+# Every value comes from the reference named in its cite, so it can be cited in a paper.
+# ledd.py refuses a drug without a cite, or a cite to a reference not listed here.
+references:
+  jost2023: >-
+    Jost ST, Kaldenbach MA, Antonini A, et al. Levodopa Dose Equivalency in Parkinson's Disease:
+    Updated Systematic Review and Proposals. Movement Disorders. 2023;38(7):1236-1252.
+    doi:10.1002/mds.29410
+
+# Checked row by row against Jost 2023, Table 1 and its footnotes, on 2026-11-11.
+checked_against_paper: true
+
+# How a drug's LEDD is worked out (Table 1 writes DD for the drug's dose, LD for levodopa's):
+#   dose            LEDD = mg taken x factor                                    (DD x factor)
+#   fixed           LEDD = factor, once per day, whatever the dose              (LED = ... mg)
+#   levodopa_boost  adds factor x the LEDD of the levodopa doses it covers      (LD x factor)
+#                   boost: whole_day  -> every levodopa dose that day
+#                   boost: <hours>    -> levodopa doses taken in that many hours after it
+#                   of: levodopa            the levodopa LEDD (COMT inhibitors)
+#                   of: levodopa_and_comt   the levodopa LEDD with the COMT boosts (istradefylline)
+#                   A booster adds no event of its own: the model sees the levodopa it strengthens.
+#   none            counted as no LEDD, no event (see the drug's note for why)
+drugs:
+  # ---- levodopa (Table 1, "Levodopa") -------------------------------------------------------
+  levodopa_ir:
+    {rule: dose, factor: 1, levodopa: true, cite: "jost2023 Table 1: Levodopa"}
+  levodopa_dual_release:
+    {rule: dose, factor: 0.85, levodopa: true, cite: "jost2023 Table 1: Dual-release levodopa (Madopar DR)"}
+  levodopa_cr:
+    {rule: dose, factor: 0.75, levodopa: true, cite: "jost2023 Table 1: Controlled-release levodopa",
+     note: "Sinemet CR, Madopar HBS / Depot"}
+  levodopa_er_capsule:
+    {rule: dose, factor: 0.5, levodopa: true, cite: "jost2023 Table 1: Extended-release levodopa (IPX066, Rytary)"}
+  levodopa_inhaled:
+    {rule: dose, factor: 0.69, levodopa: true, cite: "jost2023 Table 1: Inhaled levodopa (capsules)"}
+  levodopa_carbidopa_entacapone:
+    {rule: dose, factor: 1.33, levodopa: true,
+     cite: "jost2023 Table 1: Levodopa (DD x 1) and Entacapone (LD x 0.33), footnote a",
+     note: "one tablet (Stalevo): its levodopa plus entacapone's boost on that same intake"}
+  levodopa_intestinal_gel:
+    {rule: dose, factor: 1.11, levodopa: true, cite: "jost2023 Table 1: Intrajejunal levodopa/carbidopa infusion"}
+  levodopa_entacapone_intestinal_gel_morning:
+    {rule: dose, factor: 1.11, levodopa: true,
+     cite: "jost2023 Table 1: Intrajejunal levodopa/carbidopa/entacapone infusion (morning dose)"}
+  levodopa_entacapone_intestinal_gel_maintenance:
+    {rule: dose, factor: 1.46, levodopa: true,
+     cite: "jost2023 Table 1: Intrajejunal levodopa/carbidopa/entacapone infusion (maintenance and extra doses)"}
+  foslevodopa_foscarbidopa:
+    {rule: dose, factor: 0.75, levodopa: true, cite: "jost2023 Table 1: Subcutaneous foslevodopa/foscarbidopa"}
+
+  # ---- COMT inhibitors (Table 1, footnote a: durations of effect) -------------------------
+  entacapone:
+    {rule: levodopa_boost, factor: 0.33, boost: 4, of: levodopa,
+     cite: "jost2023 Table 1: Entacapone; footnote a (200 mg acts for 4 hours)"}
+  tolcapone:
+    {rule: levodopa_boost, factor: 0.5, boost: 8, of: levodopa,
+     cite: "jost2023 Table 1: Tolcapone; footnote a (100 mg acts for 8 hours)"}
+  opicapone:
+    {rule: levodopa_boost, factor: 0.5, boost: whole_day, of: levodopa,
+     cite: "jost2023 Table 1: Opicapone; footnote a (once daily, all levodopa intakes for the whole day)"}
+
+  # ---- MAO-B inhibitors ------------------------------------------------------------------------
+  selegiline_oral: {rule: dose, factor: 10, cite: "jost2023 Table 1: Selegiline (oral)"}
+  selegiline_sublingual: {rule: dose, factor: 80, cite: "jost2023 Table 1: Selegiline (sublingual)"}
+  rasagiline: {rule: dose, factor: 100, cite: "jost2023 Table 1: Rasagiline"}
+  safinamide:
+    {rule: fixed, factor: 150, cite: "jost2023 Table 1: Safinamide; footnote b",
+     note: "one value for 50 mg/d and 100 mg/d"}
+
+  # ---- dopamine agonists -----------------------------------------------------------------------
+  pramipexole_salt:
+    {rule: dose, factor: 100, cite: "jost2023 Table 1: Pramipexole (extended- or immediate-release), salt",
+     note: "doses written as the salt (US labels)"}
+  pramipexole_base:
+    {rule: dose, factor: 142.86, cite: "jost2023 Table 1: Pramipexole (extended- or immediate-release), base",
+     note: "doses written as the base (EU labels)"}
+  ropinirole: {rule: dose, factor: 20, cite: "jost2023 Table 1: Ropinirole"}
+  rotigotine: {rule: dose, factor: 30.3, cite: "jost2023 Table 1: Rotigotine"}
+  piribedil: {rule: dose, factor: 1, cite: "jost2023 Table 1: Piribedil"}
+  apomorphine_subcutaneous: {rule: dose, factor: 10, cite: "jost2023 Table 1: Apomorphine hydrochloride (subcutaneous)"}
+  apomorphine_sublingual: {rule: dose, factor: 1.5, cite: "jost2023 Table 1: Apomorphine hydrochloride (sublingual)"}
+  lisuride: {rule: dose, factor: 100, cite: "jost2023 Table 1: Lisuride"}
+  bromocriptine: {rule: dose, factor: 10, cite: "jost2023 Table 1: Bromocriptine"}
+  pergolide: {rule: dose, factor: 100, cite: "jost2023 Table 1: Pergolide"}
+  cabergoline: {rule: dose, factor: 66.67, cite: "jost2023 Table 1: Cabergoline"}
+  dihydroergocryptine: {rule: dose, factor: 5, cite: "jost2023 Table 1: Dihydroergocryptine (DHEC)"}
+
+  # ---- others ------------------------------------------------------------------------------------
+  amantadine:
+    {rule: dose, factor: 1, cite: "jost2023 Table 1: Amantadine hydrochloride (immediate-release)"}
+  amantadine_er:
+    {rule: dose, factor: 1.25, cite: "jost2023 Table 1: Amantadine hydrochloride (extended-release, ADS-5102, Gocovri)"}
+  amantadine_ir_er:
+    {rule: dose, factor: 1, cite: "jost2023 Table 1: Amantadine hydrochloride (immediate-/extended-release, OS320, Osmolex ER)"}
+  zonisamide:
+    {rule: fixed, factor: 100, cite: "jost2023 Table 1: Zonisamide; footnote b",
+     note: "one value for 25 mg/d and 50 mg/d; footnote b says not to use it outside Japan"}
+  istradefylline:
+    {rule: levodopa_boost, factor: 0.2, boost: whole_day, of: levodopa_and_comt,
+     cite: "jost2023 Table 1: Istradefylline; footnote d",
+     note: "footnote d gives no duration; it's taken once a day, so it covers the whole day like opicapone"}
+  trihexyphenidyl:
+    {rule: none, cite: "jost2023 Table 1: Trihexyphenidyl; footnote c",
+     note: "Table 1 gives 100 per dose, but only for a patient whose single dose improves UPDRS-III by 5 or more
+       points (footnote c). Our data can't show that, so it isn't counted."}
+  biperiden:
+    {rule: none, cite: "jost2023 Table 1: Trihexyphenidyl; footnote c (other anticholinergics)",
+     note: "same rule as trihexyphenidyl"}
+  benztropine:
+    {rule: none, cite: "jost2023 Table 1: Trihexyphenidyl; footnote c (other anticholinergics)",
+     note: "same rule as trihexyphenidyl"}
+
+# How each data source writes drug names, mapped to the drug ids above. Names are matched
+# after lower-casing and tidying spaces, so "Levodopa / Benserazid" and "Levodopa/Benserazid"
+# are the same. A name that isn't listed stops the run: add it here, never guess in code.
+# These are readings of the source's names, not values: each one says why it maps where it does.
+names:
+  cops:
+    levodopa/benserazid: levodopa_ir
+    levodopa/benserazid fa: levodopa_ir             # fast-acting dispersible tablet: immediate-release levodopa
+    levodopa/benserazid re: levodopa_cr             # "retard" (Madopar Depot): controlled release
+    levodopa/benserazid er: levodopa_cr             # extended Madopar tablet (HBS/Depot): controlled release; Rytary has no benserazide form
+    levodopa/carbidopa: levodopa_ir
+    levodopa/carbidopa/entacapone: levodopa_carbidopa_entacapone
+    opicapone: opicapone
+    amantadine: amantadine
+    ropinirole: ropinirole
+    ropinirole er: ropinirole                       # Table 1 has one ropinirole row
+    pramipexole re: pramipexole_base                # COPS is a German cohort: EU labels give the base
+    piribedil er: piribedil                         # Table 1 has one piribedil row
+    rasagiline: rasagiline
+    safinamide: safinamide
