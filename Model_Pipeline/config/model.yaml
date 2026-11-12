@@ -13,12 +13,32 @@ data:
   group_column: participant_id
   random_seed: 42
 
+windows:
+  # How the signal is cut into windows: the preprocessing spec the data pipeline
+  # and the app must follow too. Bump spec_version whenever any value changes;
+  # a Dataset cut with another version is refused. harnet10 was pretrained on
+  # 10-s windows at 30 Hz, so changing these also means retraining the encoder.
+  spec_version: 1
+  seconds: 10
+  rate_hz: 30
+  axes: 3
+
 paths:
   # The data pipeline's output. Get it with `dvc pull` in ../Data_Pipeline.
   features_csv: ../Data_Pipeline/data/processed/hourly_features.csv
   # Everything a run writes: predictions, reports and the model bundle. Not in Git.
   artifacts_dir: artifacts
   log_file: logs/model_pipeline.log
+
+logging:
+  level: INFO
+  # console: readable text (local runs, CI). json: one JSON object per line on stdout,
+  # which Cloud Logging and CloudWatch parse. Deployments set MODEL_LOG_FORMAT=json.
+  format: console
+  # How much MLflow, scikit-learn and other libraries may log.
+  third_party_level: WARNING
+  # The rotating file at paths.log_file. Containers set MODEL_LOG_FILE=0.
+  file: true
 
 split:
   # Held-out participants, never used for training or tuning.

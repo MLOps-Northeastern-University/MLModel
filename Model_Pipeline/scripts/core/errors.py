@@ -8,3 +8,39 @@ right message: bad configuration, data that doesn't match its schema, a model
 used before it's fitted, a failed gate (validation, bias, comparison with
 production), or an export that can't be made.
 """
+
+
+class PipelineError(Exception):
+    """Base class: every failure the pipeline raises on purpose."""
+
+
+class ConfigError(PipelineError):
+    """The configuration is missing a value or has one that can't be used."""
+
+
+class SchemaError(PipelineError):
+    """Data doesn't have the columns, types or values it should."""
+
+
+class NotFittedError(PipelineError):
+    """A model was used to predict, save or export before it was fitted."""
+
+
+class GateError(PipelineError):
+    """A gate failed: validation, bias, or comparison with production.
+
+    Attributes:
+        gate: Which gate failed, such as "validation" or "bias".
+    """
+
+    def __init__(self, gate, message):
+        super().__init__(f"{gate} gate failed: {message}")
+        self.gate = gate
+
+
+class TrackingError(PipelineError):
+    """Tracking was used wrongly: no active run, a bad metric name or value."""
+
+
+class ExportError(PipelineError):
+    """A model couldn't be exported for the phone."""
