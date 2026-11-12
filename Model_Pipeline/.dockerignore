@@ -1,0 +1,11 @@
+# Keep run outputs, secrets and local environments out of the image.
+.env
+artifacts/
+mlruns/
+mlartifacts/
+logs/
+.venv/
+__pycache__/
+.pytest_cache/
+.coverage
+htmlcov/
