@@ -180,21 +180,21 @@ def log_run_start(logger, cfg, packages=("numpy", "pandas", "scikit-learn", "mlf
     # Leave out resolved_paths: they differ per machine, so the same config would hash differently.
     settings = {k: v for k, v in (cfg or {}).items() if k != "resolved_paths"}
     config_hash = hashlib.sha256(json.dumps(settings, sort_keys=True, default=str).encode()).hexdigest()
+    logger.info("run started", extra={
+        "event": "run_started", **environment(packages),
+        "config_sha256": config_hash[:16], "host": platform.node()})
+
+
+def environment(packages=("numpy", "pandas", "scikit-learn", "mlflow")):
+    """The code and library versions a result came from: git commit, uncommitted changes, Python, packages."""
     versions = {}
     for name in packages:
         try:
             versions[name] = importlib.metadata.version(name)
         except importlib.metadata.PackageNotFoundError:
             pass
-    logger.info("run started", extra={
-        "event": "run_started",
-        "git_commit": _git("rev-parse", "HEAD"),
-        "git_dirty": bool(_git("status", "--porcelain")),
-        "config_sha256": config_hash[:16],
-        "python": platform.python_version(),
-        "packages": versions,
-        "host": platform.node(),
-    })
+    return {"git_commit": _git("rev-parse", "HEAD"), "git_dirty": bool(_git("status", "--porcelain")),
+            "python": platform.python_version(), "packages": versions}
 
 
 def _git(*args):

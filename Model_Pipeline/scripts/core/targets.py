@@ -24,7 +24,7 @@ left out of training and scoring, never counted as 0.
 """
 
 from dataclasses import dataclass
-from typing import Callable, Tuple
+from typing import Callable, Optional, Tuple
 
 import pandas as pd
 
@@ -62,14 +62,21 @@ class Target:
     Attributes:
         name: Used in label names, configs and outputs.
         classes: The class names; a label is the index of one of them.
+        scores: The diary score of each class, in class order; None for a class with
+            no score (asleep). Used for the expected score.
         source_columns: The hourly table's columns the label is read from.
         derive: Turns the table into class indices (NaN for no label).
     """
 
     name: str
     classes: Tuple[str, ...]
+    scores: Tuple[Optional[int], ...]
     source_columns: Tuple[str, ...]
     derive: Callable[[pd.DataFrame], pd.Series]
+
+    def __post_init__(self):
+        if len(self.scores) != len(self.classes):
+            raise ConfigError(f"target {self.name!r}: one score per class needed")
 
     def labels(self, table):
         """This target's label for every row of the table, for the hour itself.
@@ -114,8 +121,8 @@ def _tremor(table):
 
 
 TARGETS = {
-    "state": Target("state", STATE_CLASSES, (KINESIA_TEXT, KINESIA_SCORE), _state),
-    "tremor": Target("tremor", TREMOR_CLASSES, (KINESIA_TEXT, TREMOR_SCORE), _tremor),
+    "state": Target("state", STATE_CLASSES, KINESIA_SCORES + (None,), (KINESIA_TEXT, KINESIA_SCORE), _state),
+    "tremor": Target("tremor", TREMOR_CLASSES, TREMOR_SCORES, (KINESIA_TEXT, TREMOR_SCORE), _tremor),
 }
 
 
@@ -126,6 +133,19 @@ def label_name(target, horizon):
 
 # Every label the pipeline can train, score and log metrics for.
 LABEL_NAMES = frozenset(label_name(t, h) for t in TARGETS for h in HORIZONS)
+
+
+def parse_label(label):
+    """Split a label into its target and horizon: "state_next_hour" -> ("state", "next_hour").
+
+    Raises:
+        ConfigError: Not a known label.
+    """
+    for target in TARGETS:
+        horizon = label[len(target) + 1:] if isinstance(label, str) and label.startswith(target + "_") else None
+        if horizon in HORIZONS:
+            return target, horizon
+    raise ConfigError(f"unknown label {label!r}; known: {sorted(LABEL_NAMES)}")
 
 
 def get_target(name):
