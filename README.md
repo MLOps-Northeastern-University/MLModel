@@ -98,6 +98,7 @@ Newest first. One row per milestone, not per small change.
 
 | Date | Who | What changed | PR |
 |---|---|---|---|
+| 2026-11-11 | Sam Selvaraj | Model: the design decisions in MODEL.md. Model pipeline core: targets (kinesia score and tremor, now and next hour), the Dataset contract with a versioned window spec, the tracker contract with in-memory and MLflow trackers, and production logging. Data pipeline: dose events with LEDD from Jost et al. 2023. Fixed the Dependabot alerts | (this PR) |
 | 2026-10-25 | Ayush Varma | Data pipeline run on 5 sample participants with `dvc repro` and Airflow, first DVC data version, results, bias findings, Gantt chart and screenshots in the docs, and this README updated | (this PR) |
 | 2026-10-24 | Sam Selvaraj | Data pipeline: DVC, 7× faster processing, robustness fixes, CI, and tests (coverage 92%) | #5 |
 | 2026-10-22 | Shaikh Basim | Data pipeline: fixed the run and the Airflow setup | #4 |
