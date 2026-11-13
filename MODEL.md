@@ -173,6 +173,16 @@ _Owner: Sam Selvaraj · Decided: 2026-11-11_
 
 **Why:** The diary is the only ground truth, and it labels whole hours with these answers, so the model predicts what the diary can check. One state keeps asleep, OFF, ON and dyskinetic mutually exclusive, as they are in the diary. Predicting the score instead of the 4 broad states keeps the severity: in the sample, most waking hours are akinesia or dyskinesia of some severity, and only 23 of 127 are good, so an hour of slight akinesia and one of severe akinesia shouldn't count the same. The broad states can always be worked out from the score, but not the other way round. Tremor is a separate target, because it can happen in any waking state. Both are classification over ordered scores, so the training loss also counts how far a prediction is from the true score (see Training). The 1-hour horizon is the warning of an OFF period coming. Per-window states follow from the encoder: harnet10 is pretrained on 10-second windows.
 
+**Update (2026-11-12): sleep is its own output.** At each horizon the model now gives three softmaxes instead of two:
+
+- **sleep:** 2 probabilities, awake or asleep (the diary's "Sleep" against any kinesia answer);
+- **waking state:** 7 probabilities, the kinesia score −3 to +3; sleep hours have no waking-state label;
+- **tremor:** 3 probabilities, as before; sleep hours still have no tremor label.
+
+P(OFF), P(ON) and P(dyskinetic) are now sums over the waking state, so they mean "given awake"; P(asleep) is the sleep output's. `core/targets.py` and `core/model.py` (`p_asleep`, `p_state`) change to match.
+
+**Why:** As one of 8 state classes, asleep swallowed OFF: a still OFF hour and a sleeping hour look alike in the movement, and the shared softmax made them compete. In the prototype's cross-validation (13 patients, `team-hub/exploration/EXPERIMENTS.md`), OFF ranked within each patient went from 0.35 AUC with asleep as a state class to 0.75 with sleep as its own output; asleep itself stayed at about 0.9.
+
 **Changes elsewhere:**
 
 - Careportal's tremor line moves from MDS-UPDRS 0 to 4 to the diary's 0 to 2, and the timeline shows per-window states.
@@ -192,6 +202,8 @@ Akinesia (the labels) or tremor above a threshold (the dashboard today). Section
 **Update (2026-11-11):** Asleep is now one of the 4 states (see Outputs), so diary "Sleep" hours are labelled asleep instead of having no label. Hours with no diary answer still have no label. The definition of OFF is unchanged. `core/targets.py` changes to match.
 
 **Update (2026-11-11, later):** The state is now the kinesia score −3 to +3 plus asleep (see Outputs). OFF is still akinesia: the sum of the −3 to −1 classes.
+
+**Update (2026-11-12):** Asleep moved to its own sleep output (see Outputs), so the state is the waking kinesia score only and sleep hours have no state label. OFF is unchanged: the sum of the −3 to −1 classes, now of the waking state.
 
 ### Inputs
 
@@ -234,6 +246,13 @@ Movement features, raw accelerometer, medication values, LEDD. Section 4.
   The cost: in the morning the history is mostly sleep, so the previous evening's movement and doses have dropped out.
 - **No time since waking or time of day (2026-11-11):** with sleep in the history, the model can see when the patient woke and roughly where in the day it is. A clock input could also teach shortcuts ("8 am means OFF") that fail for patients with other routines. Add time of day only if the errors show a time-of-day pattern, such as missed early-morning OFF.
 
+**Update (2026-11-12): a dose marks 30 minutes, not one window.**
+
+- **A dose's fields go on its own window and every window for 30 minutes after it** (the dose span), never before. Check-ins still go on their own window only.
+- Everything else above stands: LEDD only, nothing carried forward, no time of day.
+
+**Why:** In the prototype a dose on one 10-second window out of 2,880 in the history was ignored. With every dose removed, every score stayed the same to 3 decimals (run 164507). With the span, hiding the doses costs a little: out of fold, dyskinesia within 0.696 against 0.681, OFF within 0.743 against 0.735 (run 175258). The effect is small, but the model now uses the doses.
+
 ### Dose times
 
 _Owner: Sam Selvaraj · Decided: 2026-11-11_
@@ -256,6 +275,14 @@ _Owner: Sam Selvaraj · Decided: 2026-11-11_
 
 **Why:** Live dose times are only as exact as the patient's logging: late, forgotten, or now and then logged but not taken. Training on imprecise times keeps the model from depending on exact times, so the movement stays the main evidence.
 
+**Update (2026-11-12): no dose noise.**
+
+- **Training adds no errors to the doses:** no shifts, no drops and no extra doses. Every COPS dose is kept exactly as recorded (checked on real data).
+- The rest stands: mid-hour times, the source flag, the app's dose-time question, and reporting accuracy with doses hidden.
+- ±60 min shifts, drops and extras stay listed in Still open, to try later for robustness to bad logs.
+
+**Why:** COPS dose times are only known to the hour already, so adding more error on top only blurs a weak signal. The model barely used doses before the 30-minute span (see Inputs).
+
 ### Check-ins
 
 _Owner: Sam Selvaraj, with Ayush for the AndroidApp · Decided: 2026-11-11_
@@ -270,6 +297,17 @@ _Owner: Sam Selvaraj, with Ayush for the AndroidApp · Decided: 2026-11-11_
 - **When the model and a check-in disagree,** the disagreement feeds monitoring (agreement with check-ins), and the app may show the patient's own answer for that moment.
 
 **Why:** The answers line up with what the model is trained on only if they use the diary's scale. Simulating them at the live rate teaches the model to use them without waiting for them. Check-ins are also the first labels from real MedNova users, for retraining later.
+
+**Update (2026-11-13): check-ins are an ordinary input, everywhere.**
+
+- **A check-in is a sparse extra signal:** a few true answers scattered through the past, about states the model may have got right or wrong. It is treated like any other event field, in both training steps (see Training):
+  - in pretraining, as well as the diary step;
+  - in the past the model reads, as well as the hours it is graded on.
+- **Simulated from the diary at the live rate.** Each answered waking hour gets one with probability 4/16 (about 4 a day over about 16 waking hours). It goes on a random worn window of the hour and carries that hour's answer: kinesia = state − 3, and the tremor score. Sleep hours get none.
+- **The answers come only from the training patients** of each fold, so validation patients' answers never leak in.
+- **Validation is scored with and without check-ins.** Without is the headline, because a check-in inside a graded hour gives that hour's answer away. The gate still judges hours without one.
+
+**Why:** Live, a patient's earlier check-ins are in the past the model reads. In the prototype (team-hub/exploration), check-ins were simulated only on graded hours: never in the past in front of a chunk, and never in pretraining. The diary step also froze the parts that read them. So the model never learned to use them, and a live check-in would have been input it had never seen.
 
 ### Preparing the signal
 
@@ -321,6 +359,20 @@ _Owner: Sam Selvaraj · Decided: 2026-11-11_
 - **Direct forecast:** rolling forward window by window would take 360 steps to reach an hour, with errors compounding.
 - **No 10-minute blocks:** with attention and a KV cache, compressing windows into blocks isn't needed to keep the past cheap.
 
+**Update (2026-11-13): as built, the motor causal transformer** (`Model_Pipeline/scripts/models/motor_causal_transformer/`, family `motor_causal_transformer`). The design is from the prototype's final runs (team-hub/exploration). About 301,000 weights:
+
+| Part | What it is | Weights |
+|---|---|---|
+| Movement encoder | **harnet10 alone,** frozen. Its 1,024 features per worn window are computed once and cached. They are standardised by the training windows' mean and SD, then Dropout 0.5 → Linear 1024→128 → ReLU → Dropout 0.2 → Linear 128→256 → LayerNorm | 164,736 |
+| Token | Three parts of 64 numbers each, added: movement (Linear 256→64, LayerNorm), patient fields (Linear 2→64, LayerNorm), event fields (Linear 8→64 with no bias, so "nothing happened" adds exactly 0). Dropout 0.3 | 17,408 |
+| Decoder | A causal transformer: 2 pre-norm layers, 4 heads, 64 dimensions, feed-forward ×4, dropout 0.3, plain softmax attention, no gating. **Each layer sees 8 h back by real time,** so 2 layers reach 16 h. Positions are time-based RoPE (10-s step, base 10,000, wavelengths 63 s to 55 h) | 100,096 |
+| Heads | Now and next hour. Each is Linear 64→64, GELU and dropout, then one output layer for sleep (2), state (7) and tremor (3) | 9,880 |
+| Pooling | Gated attention (Ilse et al. 2018) over each hour's window probabilities, with a learned temperature per output | 8,716 |
+
+- **The event fields:** dose, LEDD ÷ 100, the source (on time, late, none logged), check-in, kinesia ÷ 3, tremor ÷ 2. **A dose marks its own window and every window for 30 minutes after it** (the dose span), not only its own window. The fields are worked out once per recording and sliced, so a dose from before a chunk is marked as it would be live.
+- **The raw-signal and spectrogram CNN branches aren't built.** harnet10 alone is the starting point experiment stage 1 named. The encoder can be swapped: encoders are registered by name, and config picks one.
+- **The KV cache isn't built.** Training and scoring run whole sequences with a causal mask, so live scoring on the server (see On the phone) needs none.
+
 ### Training
 
 _Owner: Sam Selvaraj · Decided: 2026-11-11_
@@ -345,6 +397,34 @@ Also:
 
 **Why:** The diary labels hours, not windows. MIL lets the model decide which windows explain an hour's label. That matters for tremor and dyskinesia, which come and go within an hour, while OFF usually lasts all of it. The per-window outputs become meaningful because the hour prediction is built only from them. Running whole days with a causal mask gives every window its full past in one pass.
 
+**Update (2026-11-13): two training steps, as built.** This replaces steps 1 and 4 above; the MIL pooling and the loss stay. It is the recipe of the prototype's final runs, with the 3 changes listed below. Each fold uses its training patients only.
+
+1. **Pretraining, without diary grading.** The movement encoder, token builder and decoder learn to predict the movement ahead. The targets are the standardised harnet10 features of the window 20 s, 2 min and 10 min ahead, and the mean of the worn windows 30–90 min and 90–150 min ahead. The loss is the mean of their squared errors. Check-ins are in the input (see Check-ins).
+2. **The diary step.** The pretrained parts are frozen and only the heads and pooling learn.
+   - **The heads start at** the training hours' class mix.
+   - **Classes are weighted by rarity** (balanced, capped at 10×).
+   - **The loss** is the hour term + 0.2 × the per-window term, each cross-entropy + 0.3 × expected distance.
+   - **Early stopping** keeps the epoch with the best mean within-patient AUC on the fold's validation patients. That is the mean of the OFF, dyskinetic and any-tremor AUCs, each worked out within every patient and averaged over patients.
+   - **The final fit,** with no validation patients, trains the number of epochs cross-validation chose.
+
+| | Pretraining | Diary step |
+|---|---|---|
+| Chunks | 8 h, tiled over each recording from a random offset every epoch, each with 1 h of ungraded past in front | the same, only chunks with an answered hour |
+| Epochs | 20 | up to 15, stopping after 3 without a better one |
+| Optimiser | AdamW, lr 3e-4, weight decay 0.01 | AdamW, lr 3e-4, weight decay 0.1 |
+| Also | | Gaussian noise of 0.1 SD on harnet10's features |
+
+Both steps use: batch 4, gradient clip 1, bf16 on a GPU, weight decay on weight matrices only, and simulated check-ins at 4 a day.
+
+- **Validation** scores every answered hour on its own, with exactly 1, 2, 4 and 8 h of past in front of it, and averages over the four. There are no check-ins unless asked.
+- **Dose noise is off.** COPS dose times are only known to the hour already.
+- **Three changes from the prototype's final runs,** to validate:
+  - check-ins everywhere (see Check-ins);
+  - **frozen parts don't use dropout**: dropout in a part that doesn't learn regularises nothing, and only trains the heads on noisier features than they are judged on;
+  - pretraining no longer loses short-range targets on padded rows. In the prototype it found none for about 43% of those windows that had one.
+
+**Why:** Pretraining learns from every worn hour, not only the answered ones. In one fold that is 370,000 worn windows, against 1,140 answered hours. Freezing what it learned keeps a few patients' diaries from overfitting it. In the prototype (team-hub/exploration, EXPERIMENTS.md), pretraining was the only thing that beat the floor on pooled OFF AUC (0.61–0.62, against 0.48 trained end to end on the diary), with within-patient OFF about level (0.76) and some cost in tremor.
+
 ### On the phone
 
 _Owner: Sam Selvaraj, with Ayush for the AndroidApp · Decided: 2026-11-11_
@@ -368,6 +448,23 @@ _Owner: Sam Selvaraj, with Ayush for the AndroidApp · Decided: 2026-11-11_
 - **Privacy:** raw movement is the most sensitive data.
 - **Offline:** scoring works without a connection.
 - **Cost:** only new windows are encoded, and the past is never recomputed.
+
+**Update (2026-11-13): on the server, not the phone.** This replaces the decision above.
+
+- **The model runs on our server.** The phone uploads the worn 10-s windows. The server computes harnet10's features, scores them with `MotorCausalTransformer.predict`, and sends back the window and hourly scores.
+- **Scoring:** each diary hour is scored with exactly `score_past_h` hours of past in front of it (8 h, the longest validation tests). An hour's windows get their probabilities from that pass, and the hour its pooled prediction.
+- **No phone conversion:** no int8, no KV cache, no `ModelRunner` and no runtime spike. The release bundle is the saved model folder plus the pinned harnet10 copy. A saved model records harnet10's weights fingerprint and refuses to score with other weights.
+- **What this changes:**
+  - **Raw movement leaves the phone,** so its upload, storage and consent need covering.
+  - **Scores need a connection;** there is no offline scoring.
+  - **Export and selection change.** `export.py` and the "exportable" filter in `select.py` assume a phone file and the old one-output phone model (`feature_spec_version` 3, `off_risk`). They change to match (Ayush).
+- **harnet10's licence is academic, non-commercial** (Oxford, section 1.1(b): not "to provide a service" to third parties). This holds on a phone or a server alike.
+
+**Why:**
+
+- The model is built and checked in Python as it is, and the server runs that exact code.
+- The phone would need the ResNet and the transformer converted. The transformer's state (the KV cache) is the hard part of that export.
+- Server scoring is cheap: in the cross-validation, all of a fold's validation hours took about 2 s on a laptop GPU.
 
 ### One model or separate models
 
@@ -425,6 +522,19 @@ _Owner: Sam Selvaraj · Decided: 2026-11-11_
 | 4. Medication | with vs without the dose LEDD · dose-time error sizes · with vs without the source flag · with vs without an explicit time since the last dose | whether doses help, and how much timing error the model tolerates |
 | 5. Watch realism | COPS only vs with the 25 and 20 Hz copies, judged on the test patients' copies at each rate | whether the model survives a watch's lower rate |
 
+**Update (2026-11-13): what the prototype already answered.** The prototype (team-hub/exploration, EXPERIMENTS.md) ran most of these stages on its own folds. These are its findings, which the pipeline hasn't rerun as MLflow runs yet:
+
+| Stage | Status | What the prototype found |
+|---|---|---|
+| 0. Baselines | Floor done; the rest not yet in the pipeline | harnet10 hour means into logistic regression: OFF pooled 0.61, OFF within 0.62 |
+| 1. Encoder | CNN branches dropped for now | 13 frequency features added nothing over harnet10, so no spectrogram or raw-signal CNN was built. harnet10 alone is the encoder. MIL against the hour's label on every window wasn't compared directly |
+| 2. History | Attention kept, 8 h | Attention gave OFF within 0.76–0.79, against 0.67 for the same features without it. But predictions moved by only about 0.005 between 1 h and 8 h of past, so a shorter history is worth testing |
+| 3. Heads | Shared trunk kept | The next-hour heads scored the same as reusing the "now" estimate. Two separate copies weren't tried |
+| 4. Medication | 30-min dose span, no dose noise | See Inputs and Dose times. The source flag and an explicit time since the last dose weren't tried |
+| 5. Watch realism | Not started | — |
+
+Still to do before the one-time test on COPS-38 and COPS-45: 3 seeds of the final recipe, and the stages above rerun as MLflow runs in the pipeline.
+
 ### LEDD conversion table
 
 _Owner: Sam Selvaraj · Decide by: TBD_
@@ -436,12 +546,41 @@ Which paper's factors, and how drug names in COPS map to them.
 
 ### Still open
 
-- **Model rate:** 30 Hz by default, which keeps harnet10's pretraining; or test 24 Hz as well.
-- **Attention size:** 2 layers × 64 dimensions proposed. The history is 8 h; stage 2 checks whether 4 h does as well.
-- **Time encoding:** time-based RoPE or ALiBi.
-- **Token size:** 64 proposed; 32, 128 or the full 256 to try.
-- **Dose-time error sizes:** ±60 min proposed; how often to drop or add a dose. Tuned in stage 4.
+- **Model rate:** 30 Hz by default, which keeps harnet10's pretraining; or test 24 Hz as well. The built model refuses any other rate, because harnet10 reads 30 Hz.
+- **Attention size:** built as 2 layers × 64 dimensions × 4 heads, 8 h per layer (2026-11-13). Stage 2 checks whether 4 h does as well.
+- ~~**Time encoding:** time-based RoPE or ALiBi.~~ Time-based RoPE (2026-11-13, see Architecture).
+- **Token size:** 64 built; 32, 128 or the full 256 to try.
+- **Dose-time error sizes:** dose noise is off in the built model (COPS doses are only known to the hour). ±60 min, drops and extras stay to try for robustness to bad logs.
 - **Tiebreak** if a shared trunk and a separate in-1-hour copy score the same.
 - **OFF threshold** for counting daily OFF hours.
-- **Runtime,** including the KV cache, until the conversion spike runs.
+- ~~**Runtime,** including the KV cache, until the conversion spike runs.~~ No phone runtime: the model runs on the server (2026-11-13, see On the phone).
+- **Server details:** where it runs (Cloud Run, for example), what exactly the phone uploads, and how the uploads are kept private.
+- **`score_past_h`:** how much past each scored hour sees live (8 h for now).
+- **Check-in scoring:** the "with check-ins" validation score isn't run yet.
 - **Tremor uncertainty band** on Careportal's timeline, from the predicted 0, 1, 2 probabilities.
+
+## Results
+
+### 5-fold cross-validation, 2026-11-13
+
+The built model (see Architecture and Training, updates of 2026-11-13) on the 13 development patients, using `split.json`'s folds. These are the same folds as the prototype's final run. The 2 test patients weren't loaded.
+
+The metric is within-patient AUC on hours without check-ins: each patient's own AUC, averaged over patients. Out of fold, over all 13 patients:
+
+| | OFF | Dyskinetic | Any tremor | Mean |
+|---|---|---|---|---|
+| **Now** | **0.779** | 0.692 | 0.588 | 0.686 |
+| Next hour | 0.724 | 0.585 | 0.493 | 0.601 |
+| Prototype's final run, now | 0.749 | 0.698 | 0.573 | |
+
+- **OFF is higher in every fold.** Dyskinetic is level, and tremor about the same; tremor is near chance in 2 of the 5 folds, in both.
+- **Two folds stopped at their second diary epoch** (the prototype's: 14 and 8), and scored as well or better.
+- **The run took 8.7 min on a laptop GPU:** about 100 s per fold to fit, and 2 s to score a fold's hours.
+
+**Caveats:**
+
+- It is one seed, on 13 patients, so differences of a few hundredths may be noise. The plan is 3 seeds.
+- Three changes are bundled (see Training), so the gain can't yet be put down to any one of them.
+- There is no test score yet: the test patients are scored once, after the final fit.
+
+The run is `20261113-032117-repo-cv`; its out-of-fold rows stay on the training machine.
