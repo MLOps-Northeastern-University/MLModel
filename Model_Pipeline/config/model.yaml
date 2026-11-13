@@ -52,10 +52,8 @@ mlflow:
   experiment: parkinsons-risk
 
 selection:
-  # PR-AUC on the held-out participants picks the model.
-  metric: pr_auc
-  # Families that convert to TFLite. LightGBM is trained as a benchmark only.
-  deployable_families: [logistic, mlp]
+  # The metric that picks the best candidate: the release gate's main rule.
+  metric: cv/state_now/off_auc
 
 gates:
   # Placeholder: the validation gate's lowest PR-AUC.
