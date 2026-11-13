@@ -122,13 +122,18 @@ names:
     levodopa/benserazid fa: levodopa_ir             # fast-acting dispersible tablet: immediate-release levodopa
     levodopa/benserazid re: levodopa_cr             # "retard" (Madopar Depot): controlled release
     levodopa/benserazid er: levodopa_cr             # extended Madopar tablet (HBS/Depot): controlled release; Rytary has no benserazide form
+    levodopa/benserazid (fa): levodopa_ir           # the same fast-acting tablet, written with brackets
     levodopa/carbidopa: levodopa_ir
+    levodopa/carbidopa er: levodopa_cr              # a German cohort: the retard tablet (Nacom retard, Sinemet CR); Rytary-type capsules (x 0.5) are rare in the EU
     levodopa/carbidopa/entacapone: levodopa_carbidopa_entacapone
     opicapone: opicapone
     amantadine: amantadine
     ropinirole: ropinirole
     ropinirole er: ropinirole                       # Table 1 has one ropinirole row
     pramipexole re: pramipexole_base                # COPS is a German cohort: EU labels give the base
+    pramipexole er: pramipexole_base                # the same, written ER
+    piribedil: piribedil
     piribedil er: piribedil                         # Table 1 has one piribedil row
+    rotigotine: rotigotine                          # the patch, mg per 24 h
     rasagiline: rasagiline
     safinamide: safinamide
