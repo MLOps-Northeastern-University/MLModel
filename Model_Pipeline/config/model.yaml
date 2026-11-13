@@ -63,6 +63,17 @@ gates:
   # Placeholder: how much PR-AUC a new model may lose against the active one.
   max_drop_vs_production: 0.0
 
+release_gate:
+  # MODEL.md, "Release gate and retraining". Each metric is a cross-validation
+  # summary; must_improve true means strictly better, false means not worse.
+  rules:
+    - {metric: cv/state_now/off_auc, must_improve: true}
+    - {metric: cv/state_now/off_auc_no_dbs, must_improve: false}
+    - {metric: cv/tremor_now/auc, must_improve: false}
+    - {metric: cv/state_now/dyskinetic_auc, must_improve: false}
+    - {metric: cv/state_now/asleep_auc, must_improve: false}
+    - {metric: cv/state_next_hour/off_auc, must_improve: false}
+
 bias:
   slice_columns: [sex, age_group, visit, dbs, hoehn_yahr, pd_subtype]
   # A recall gap larger than this between slices fails the bias gate.
