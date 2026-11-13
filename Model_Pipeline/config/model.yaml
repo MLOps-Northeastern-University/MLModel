@@ -29,6 +29,10 @@ paths:
   # Everything a run writes: predictions, reports and the model bundle. Not in Git.
   artifacts_dir: artifacts
   log_file: logs/model_pipeline.log
+  # PLACEHOLDER: the released bundles, one folder per version. A local folder until
+  # the team picks gs://team17-mlops-neu-models/parkinsons-risk or the Artifact
+  # Registry bundles repository (infra/registry.tf).
+  registry_dir: artifacts/registry
 
 logging:
   level: INFO
@@ -88,6 +92,11 @@ export:
   # PLACEHOLDER: the phone runtime, set once the conversion spike picks one of
   # executorch, onnx or litert (MODEL.md, "On the phone").
   format: null
+
+registry:
+  # PLACEHOLDER: the Backend's endpoint for registering a model version. None exists
+  # yet (models are added with Backend's scripts/seed_models.py), so it's skipped.
+  backend_url: null
 
 alerts:
   email_enabled: true
