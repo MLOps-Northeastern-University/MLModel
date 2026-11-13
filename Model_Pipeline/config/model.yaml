@@ -85,6 +85,9 @@ export:
   feature_spec_version: 3
   output_name: off_risk
   nudge_above: 0.8
+  # PLACEHOLDER: the phone runtime, set once the conversion spike picks one of
+  # executorch, onnx or litert (MODEL.md, "On the phone").
+  format: null
 
 alerts:
   email_enabled: true
