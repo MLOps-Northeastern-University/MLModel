@@ -18,13 +18,14 @@ library. The base class owns the rules, so no model can skip them:
       from another family or format.
 
 A model family writes only the hooks at the bottom (_fit, _predict, _save_weights,
-_load_weights), plus default_params and search_space if it has settings. Heavy
+_load_weights), plus default_params if it has settings. Heavy
 libraries (scikit-learn, PyTorch) are imported in the family's own file, never here.
 
-    model = SomeFamily(targets=["state", "tremor"], params={"C": 0.1}, spec=spec)
+    model = SomeFamily(targets=["sleep", "state", "tremor"], params={"C": 0.1}, spec=spec)
     model.fit(train, val=val, seed=0)
     predictions = model.predict(test)
-    predictions.p_state("state_now", "off")      # P(OFF) per hour
+    predictions.p_asleep("sleep_now")            # P(asleep) per hour
+    predictions.p_state("state_now", "off")      # P(OFF) per hour, if awake
     model.save(folder)
     model = SomeFamily.load(folder)
 """
@@ -45,7 +46,7 @@ import pandas as pd
 from scripts.core.data import GROUPS, Dataset, WindowSpec
 from scripts.core.errors import ConfigError, ModelError, NotFittedError, SchemaError
 from scripts.core.targets import (
-    HORIZONS, HOUR_INDEX, PARTICIPANT, STATE_GROUPS, get_target, label_name, parse_label)
+    ASLEEP, HORIZONS, HOUR_INDEX, PARTICIPANT, STATE_GROUPS, get_target, label_name, parse_label)
 from scripts.utils.file_io import read_json, write_json
 from scripts.utils.logging_setup import environment, get_logger, log_step
 
@@ -80,7 +81,7 @@ class Predictions:
     Attributes:
         hours: participant_id and hour_index, one row per diary hour scored.
         probs: {label: (n_hours, n_classes)} class probabilities, such as
-            {"state_now": (n, 8), "tremor_now": (n, 3)}.
+            {"sleep_now": (n, 2), "state_now": (n, 7), "tremor_now": (n, 3)}.
         windows: {participant: WindowPredictions}, for models that score windows.
 
     Raises:
@@ -123,8 +124,16 @@ class Predictions:
         """The most likely class index per hour."""
         return self._probs(label).argmax(axis=1)
 
+    def p_asleep(self, label):
+        """P(asleep) per hour for a sleep label, such as sleep_now."""
+        target, _ = parse_label(label)
+        if target != "sleep":
+            raise ConfigError("p_asleep needs a sleep label, such as sleep_now")
+        return self._probs(label)[:, ASLEEP]
+
     def p_state(self, label, group):
-        """P(group) per hour for a state label: the sum of the group's classes, such as "off"."""
+        """P(group) per hour for a state label: the sum of the group's classes, such as "off".
+        The waking state, so it's P(group | awake); P(asleep) is the sleep output's."""
         target, _ = parse_label(label)
         if target != "state" or group not in STATE_GROUPS:
             raise ConfigError(f"p_state needs a state label and one of {sorted(STATE_GROUPS)}")
@@ -133,9 +142,9 @@ class Predictions:
     def expected_score(self, label):
         """The expected diary score per hour: the sum of score x probability.
 
-        Classes without a score (asleep) are left out and the rest renormalised, so for
-        the state it's the expected kinesia score if awake. NaN where every scored class
-        has probability 0.
+        Classes without a score are left out and the rest renormalised. For the state it's the
+        expected kinesia score if awake; the sleep output has no score, so it's NaN there, as it
+        is wherever every scored class has probability 0.
         """
         target, _ = parse_label(label)
         scores = get_target(target).scores
@@ -251,12 +260,8 @@ class Model(ABC):
 
     @classmethod
     def default_params(cls):
-        """The family's settings and their defaults. Override if it has any."""
-        return {}
-
-    @classmethod
-    def search_space(cls):
-        """What tuning searches: {setting: spec} as config/model.yaml describes. Override to tune."""
+        """The family's settings and their defaults. Override if it has any. What tuning searches
+        among them is config, not code (config/model.yaml, tune:; steps/tune.py)."""
         return {}
 
     # ---- the public lifecycle ---------------------------------------------------------------

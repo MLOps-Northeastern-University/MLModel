@@ -63,20 +63,29 @@ def state_probs(*rows):
 
 # ---- predictions ------------------------------------------------------------------------------
 
-def test_p_off_and_expected_score_come_from_the_probabilities():
-    # Hour 0: all slight akinesia (-1). Hour 1: half good (0), half asleep.
-    p = state_probs([0, 0, 1, 0, 0, 0, 0, 0], [0, 0, 0, 0.5, 0, 0, 0, 0.5])
-    preds = Predictions(hours(), {"state_now": p})
+def test_p_off_p_asleep_and_expected_score_come_from_the_probabilities():
+    # Hour 0: all slight akinesia (-1). Hour 1: half good (0), half slight dyskinesia (+1).
+    p = state_probs([0, 0, 1, 0, 0, 0, 0], [0, 0, 0, 0.5, 0.5, 0, 0])
+    preds = Predictions(hours(), {"state_now": p, "sleep_now": [[1, 0], [0.4, 0.6]]})
     np.testing.assert_allclose(preds.p_state("state_now", "off"), [1, 0])
-    np.testing.assert_allclose(preds.p_state("state_now", "asleep"), [0, 0.5])
-    np.testing.assert_allclose(preds.expected_score("state_now"), [-1, 0])   # asleep left out
+    np.testing.assert_allclose(preds.p_state("state_now", "dyskinetic"), [0, 0.5])
+    np.testing.assert_allclose(preds.p_asleep("sleep_now"), [0, 0.6])
+    np.testing.assert_allclose(preds.expected_score("state_now"), [-1, 0.5])
     assert preds.predicted("state_now").tolist() == [2, 3]
 
 
-def test_expected_tremor_and_all_asleep():
-    preds = Predictions(hours(1), {"tremor_now": [[0.5, 0.25, 0.25]], "state_now": [[0] * 7 + [1]]})
+def test_expected_tremor_and_no_score_for_sleep():
+    preds = Predictions(hours(1), {"tremor_now": [[0.5, 0.25, 0.25]], "sleep_now": [[0, 1]]})
     np.testing.assert_allclose(preds.expected_score("tremor_now"), [0.75])
-    assert np.isnan(preds.expected_score("state_now")[0])   # no score when certainly asleep
+    assert np.isnan(preds.expected_score("sleep_now")[0])   # sleep has no diary score
+
+
+def test_p_asleep_and_p_state_refuse_the_wrong_label():
+    preds = Predictions(hours(1), {"sleep_now": [[0.5, 0.5]], "state_now": [[1] + [0] * 6]})
+    with pytest.raises(ConfigError, match="sleep label"):
+        preds.p_asleep("state_now")
+    with pytest.raises(ConfigError):
+        preds.p_state("state_now", "asleep")   # asleep is the sleep output's now
 
 
 def test_frame_has_a_column_per_class():
@@ -210,7 +219,7 @@ def test_bad_sample_weights_are_refused(split, weights):
     (lambda self, data: Predictions(data.hours, {"tremor_now": np.full((len(data.hours), 3), 1 / 3)}),
      "but its labels are"),
     (lambda self, data: Predictions(data.hours.iloc[::-1],
-                                    {"state_now": np.full((len(data.hours), 8), 1 / 8)}), "same order"),
+                                    {"state_now": np.full((len(data.hours), 7), 1 / 7)}), "same order"),
 ])
 def test_a_family_that_breaks_the_contract_is_caught(split, bad_output, match):
     class Broken(Prior):

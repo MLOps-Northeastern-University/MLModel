@@ -1,17 +1,21 @@
-"""What the model predicts: the patient's state and their tremor, now and in the next hour.
+"""What the model predicts: asleep or awake, the waking state and tremor, now and in the next hour.
 
 Owner: P2.
 
 Each target is defined once here, so a definition (such as what counts as OFF)
 changes in one place. See MODEL.md, Decisions: Outputs, and How OFF is defined.
 
-    state    the diary's kinesia score -3 to +3, or asleep: 8 classes
-    tremor   the diary's tremor score 0 to 2: 3 classes
+    sleep    asleep or awake: 2 classes (the diary's "Sleep" against any kinesia answer)
+    state    the waking state, the diary's kinesia score -3 to +3: 7 classes; no label in sleep hours
+    tremor   the diary's tremor score 0 to 2: 3 classes; no label in sleep hours
 
-Both are classification over ordered scores, each predicted as one softmax.
+Each is predicted as one softmax. Sleep is its own output rather than an eighth state class: as a
+state class it swallowed OFF (a still OFF hour and a sleeping hour look alike), and on its own OFF
+within patients went from 0.35 to 0.75 AUC (team-hub/exploration/EXPERIMENTS.md).
 The rest is worked out from the class probabilities:
 
-    P(off)           sum of the STATE_GROUPS["off"] classes (scores -3 to -1, akinesia)
+    P(asleep)        the sleep output's "asleep" class
+    P(off)           sum of the STATE_GROUPS["off"] classes (scores -3 to -1, akinesia), if awake
     expected score   sum of score x probability, using KINESIA_SCORES or TREMOR_SCORES
     P(any tremor)    P(1) + P(2)
 
@@ -19,8 +23,8 @@ A label is a target at a horizon: state_now is this hour's state, state_next_hou
 the next hour's. Metric names use it: val/state_now/off_auc.
 
 Labels are floats: the class index, or NaN where there's no answer ("No Data",
-unanswered, tremor in a sleep hour, or no next hour in the table). NaN rows are
-left out of training and scoring, never counted as 0.
+unanswered, the state or tremor in a sleep hour, or no next hour in the table). NaN rows
+are left out of training and scoring, never counted as 0.
 """
 
 from dataclasses import dataclass
@@ -30,14 +34,17 @@ import pandas as pd
 
 from scripts.core.errors import ConfigError, SchemaError
 
-# State classes: the 7 kinesia scores in order, then asleep. Index = score + 3.
+# Sleep classes. Index 1 = asleep.
+SLEEP_CLASSES = ("awake", "asleep")
+AWAKE, ASLEEP = 0, 1
+
+# Waking-state classes: the 7 kinesia scores in order. Index = score + 3.
 STATE_CLASSES = (
     "severe_akinesia", "discomforting_akinesia", "slight_akinesia", "good_kinesia",
-    "slight_dyskinesia", "discomforting_dyskinesia", "severe_dyskinesia", "asleep")
+    "slight_dyskinesia", "discomforting_dyskinesia", "severe_dyskinesia")
 KINESIA_SCORES = (-3, -2, -1, 0, 1, 2, 3)
-ASLEEP = 7
-# The broad states, as the state classes whose probabilities add up to them.
-STATE_GROUPS = {"off": (0, 1, 2), "on": (3,), "dyskinetic": (4, 5, 6), "asleep": (ASLEEP,)}
+# The broad waking states, as the state classes whose probabilities add up to them.
+STATE_GROUPS = {"off": (0, 1, 2), "on": (3,), "dyskinetic": (4, 5, 6)}
 
 # Tremor classes. Index = score.
 TREMOR_CLASSES = ("none", "weak_or_slight", "strong_or_severe")
@@ -63,7 +70,7 @@ class Target:
         name: Used in label names, configs and outputs.
         classes: The class names; a label is the index of one of them.
         scores: The diary score of each class, in class order; None for a class with
-            no score (asleep). Used for the expected score.
+            no score (both sleep classes). Used for the expected score.
         source_columns: The hourly table's columns the label is read from.
         derive: Turns the table into class indices (NaN for no label).
     """
@@ -107,11 +114,17 @@ def _read_scores(table, column, allowed):
     return score
 
 
+def _sleep(table):
+    # Asleep where the diary says "Sleep", awake where it gives a kinesia score, else no label.
+    score = _read_scores(table, KINESIA_SCORE, KINESIA_SCORES)
+    asleep = table[KINESIA_TEXT] == SLEEP
+    return pd.Series(float("nan"), index=table.index).mask(score.notna(), AWAKE).mask(asleep, ASLEEP)
+
+
 def _state(table):
     score = _read_scores(table, KINESIA_SCORE, KINESIA_SCORES)
-    state = score + 3   # score -3..+3 -> class 0..6
-    # Sleep hours have no score; they're read from the diary's answer.
-    return state.mask(table[KINESIA_TEXT] == SLEEP, ASLEEP)
+    # score -3..+3 -> class 0..6; a sleep hour has no waking state.
+    return (score + 3).mask(table[KINESIA_TEXT] == SLEEP)
 
 
 def _tremor(table):
@@ -121,7 +134,8 @@ def _tremor(table):
 
 
 TARGETS = {
-    "state": Target("state", STATE_CLASSES, KINESIA_SCORES + (None,), (KINESIA_TEXT, KINESIA_SCORE), _state),
+    "sleep": Target("sleep", SLEEP_CLASSES, (None, None), (KINESIA_TEXT, KINESIA_SCORE), _sleep),
+    "state": Target("state", STATE_CLASSES, KINESIA_SCORES, (KINESIA_TEXT, KINESIA_SCORE), _state),
     "tremor": Target("tremor", TREMOR_CLASSES, TREMOR_SCORES, (KINESIA_TEXT, TREMOR_SCORE), _tremor),
 }
 
@@ -196,7 +210,7 @@ def build_labels(table, targets, horizons=tuple(HORIZONS)):
 
     Args:
         table: The data pipeline's hourly table.
-        targets: Target names, such as ["state", "tremor"].
+        targets: Target names, such as ["sleep", "state", "tremor"].
         horizons: Keys of HORIZONS. Defaults to all of them.
 
     Returns:
