@@ -181,7 +181,7 @@ _Owner: Sam Selvaraj · Decided: 2026-11-11_
 
 P(OFF), P(ON) and P(dyskinetic) are now sums over the waking state, so they mean "given awake"; P(asleep) is the sleep output's. `core/targets.py` and `core/model.py` (`p_asleep`, `p_state`) change to match.
 
-**Why:** As one of 8 state classes, asleep swallowed OFF: a still OFF hour and a sleeping hour look alike in the movement, and the shared softmax made them compete. In the prototype's cross-validation (13 patients, `team-hub/exploration/EXPERIMENTS.md`), OFF ranked within each patient went from 0.35 AUC with asleep as a state class to 0.75 with sleep as its own output; asleep itself stayed at about 0.9.
+**Why:** As one of 8 state classes, asleep swallowed OFF: a still OFF hour and a sleeping hour look alike in the movement, and the shared softmax made them compete. In the prototype's cross-validation (13 patients; the prototype is the team's exploratory code, kept outside this repository, and its results are quoted in this file), OFF ranked within each patient went from 0.35 AUC with asleep as a state class to 0.75 with sleep as its own output; asleep itself stayed at about 0.9.
 
 **Changes elsewhere:**
 
@@ -307,7 +307,7 @@ _Owner: Sam Selvaraj, with Ayush for the AndroidApp · Decided: 2026-11-11_
 - **The answers come only from the training patients** of each fold, so validation patients' answers never leak in.
 - **Validation is scored with and without check-ins.** Without is the headline, because a check-in inside a graded hour gives that hour's answer away. The gate still judges hours without one.
 
-**Why:** Live, a patient's earlier check-ins are in the past the model reads. In the prototype (team-hub/exploration), check-ins were simulated only on graded hours: never in the past in front of a chunk, and never in pretraining. The diary step also froze the parts that read them. So the model never learned to use them, and a live check-in would have been input it had never seen.
+**Why:** Live, a patient's earlier check-ins are in the past the model reads. In the prototype, check-ins were simulated only on graded hours: never in the past in front of a chunk, and never in pretraining. The diary step also froze the parts that read them. So the model never learned to use them, and a live check-in would have been input it had never seen.
 
 ### Preparing the signal
 
@@ -359,7 +359,7 @@ _Owner: Sam Selvaraj · Decided: 2026-11-11_
 - **Direct forecast:** rolling forward window by window would take 360 steps to reach an hour, with errors compounding.
 - **No 10-minute blocks:** with attention and a KV cache, compressing windows into blocks isn't needed to keep the past cheap.
 
-**Update (2026-11-13): as built, the motor causal transformer** (`Model_Pipeline/scripts/models/motor_causal_transformer/`, family `motor_causal_transformer`). The design is from the prototype's final runs (team-hub/exploration). About 301,000 weights:
+**Update (2026-11-13): as built, the motor causal transformer** (`Model_Pipeline/scripts/models/motor_causal_transformer/`, family `motor_causal_transformer`). The design is from the prototype's final runs. About 301,000 weights:
 
 | Part | What it is | Weights |
 |---|---|---|
@@ -423,7 +423,7 @@ Both steps use: batch 4, gradient clip 1, bf16 on a GPU, weight decay on weight 
   - **frozen parts don't use dropout**: dropout in a part that doesn't learn regularises nothing, and only trains the heads on noisier features than they are judged on;
   - pretraining no longer loses short-range targets on padded rows. In the prototype it found none for about 43% of those windows that had one.
 
-**Why:** Pretraining learns from every worn hour, not only the answered ones. In one fold that is 370,000 worn windows, against 1,140 answered hours. Freezing what it learned keeps a few patients' diaries from overfitting it. In the prototype (team-hub/exploration, EXPERIMENTS.md), pretraining was the only thing that beat the floor on pooled OFF AUC (0.61–0.62, against 0.48 trained end to end on the diary), with within-patient OFF about level (0.76) and some cost in tremor.
+**Why:** Pretraining learns from every worn hour, not only the answered ones. In one fold that is 370,000 worn windows, against 1,140 answered hours. Freezing what it learned keeps a few patients' diaries from overfitting it. In the prototype, pretraining was the only thing that beat the floor on pooled OFF AUC (0.61–0.62, against 0.48 trained end to end on the diary), with within-patient OFF about level (0.76) and some cost in tremor.
 
 ### On the phone
 
@@ -522,7 +522,7 @@ _Owner: Sam Selvaraj · Decided: 2026-11-11_
 | 4. Medication | with vs without the dose LEDD · dose-time error sizes · with vs without the source flag · with vs without an explicit time since the last dose | whether doses help, and how much timing error the model tolerates |
 | 5. Watch realism | COPS only vs with the 25 and 20 Hz copies, judged on the test patients' copies at each rate | whether the model survives a watch's lower rate |
 
-**Update (2026-11-13): what the prototype already answered.** The prototype (team-hub/exploration, EXPERIMENTS.md) ran most of these stages on its own folds. These are its findings, which the pipeline hasn't rerun as MLflow runs yet:
+**Update (2026-11-13): what the prototype already answered.** The prototype ran most of these stages on its own folds. These are its findings, which the pipeline hasn't rerun as MLflow runs yet:
 
 | Stage | Status | What the prototype found |
 |---|---|---|
