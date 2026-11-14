@@ -168,14 +168,16 @@ class Harnet10Projection(MovementEncoder):
         Args:
             inputs: (N, 1024) features, or an iterable of such chunks (such as one per
                 participant), so all the training windows never need to be in memory at once.
-                Summed in float64, so millions of windows lose no precision.
+                Each block's mean and squared deviations are combined exactly (Chan et al.'s
+                parallel variance), in float64: the sum of squares minus n x mean^2 would leave
+                rounding noise for a feature that never varies, instead of exactly 0.
 
         Raises:
             ModelError: a chunk of the wrong shape, a feature that isn't finite, or fewer than
                 2 windows in all.
         """
         chunks = [inputs] if isinstance(inputs, (np.ndarray, torch.Tensor)) else inputs
-        n, total, squares = 0, np.zeros(self.input_shape[0]), np.zeros(self.input_shape[0])
+        n, mean, m2 = 0, np.zeros(self.input_shape[0]), np.zeros(self.input_shape[0])
         for chunk in chunks:
             chunk = chunk.cpu().numpy() if isinstance(chunk, torch.Tensor) else chunk
             if chunk.ndim != 2 or chunk.shape[1] != self.input_shape[0]:
@@ -185,14 +187,15 @@ class Harnet10Projection(MovementEncoder):
                 block = np.asarray(chunk[start:start + self.FIT_BLOCK], dtype=np.float64)
                 if not np.isfinite(block).all():
                     raise ModelError("harnet10 features must all be finite")
-                total += block.sum(axis=0)
-                squares += np.square(block).sum(axis=0)
-            n += len(chunk)
+                nb = len(block)
+                block_mean = block.mean(axis=0)
+                delta = block_mean - mean
+                m2 += np.square(block - block_mean).sum(axis=0) + np.square(delta) * (n * nb / (n + nb))
+                mean += delta * (nb / (n + nb))
+                n += nb
         if n < 2:
             raise ModelError(f"fitting harnet10's standardisation needs at least 2 windows, not {n}")
-        mean = total / n
-        var = np.maximum(squares - n * np.square(mean), 0.0) / (n - 1)   # the sample variance
-        self.set_standardisation(mean, np.sqrt(var))
+        self.set_standardisation(mean, np.sqrt(m2 / (n - 1)))           # the sample SD
 
     def set_standardisation(self, mean, sd) -> None:
         """Set the standardisation from a mean and SD per feature worked out elsewhere."""
@@ -201,7 +204,9 @@ class Harnet10Projection(MovementEncoder):
             raise ModelError(f"harnet10 standardisation needs {self.input_shape[0]} means and SDs")
         if not (np.isfinite(mean).all() and np.isfinite(sd).all() and (sd >= 0).all()):
             raise ModelError("harnet10 standardisation needs finite means and SDs of 0 or more")
-        scale = 1.0 / np.maximum(sd, self.MIN_SD)
+        # A feature that (almost) never varies is only centred: dividing by a tiny SD would multiply it
+        # by up to 1 / MIN_SD, turning float32 rounding (and any later change) into huge values.
+        scale = np.where(sd > self.MIN_SD, 1.0 / np.maximum(sd, self.MIN_SD), 1.0)
         self.scale.copy_(torch.as_tensor(scale, dtype=torch.float32))
         self.shift.copy_(torch.as_tensor(-mean * scale, dtype=torch.float32))
         self.fitted.fill_(True)

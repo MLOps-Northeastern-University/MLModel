@@ -153,3 +153,18 @@ def test_fitting_in_blocks_matches_the_whole_and_is_fitted_survives_a_reload(mon
     assert fresh.is_fitted
     fresh.load_state_dict(Harnet10Projection().state_dict())           # an unfitted state makes it unfitted
     assert not fresh.is_fitted
+
+
+def test_the_variance_is_stable_for_large_offsets_and_constant_features(monkeypatch):
+    rng = np.random.default_rng(1)
+    x = (1e4 + rng.normal(0.0, 0.5, size=(5000, 1024))).astype(np.float32)   # big mean, small spread
+    x[:, 3] = np.float32(4.2)
+    monkeypatch.setattr(Harnet10Projection, "FIT_BLOCK", 333)                # uneven blocks
+    enc = Harnet10Projection()
+    enc.fit(x)
+    expected = np.std(x.astype(np.float64), axis=0, ddof=1)
+    got = 1.0 / enc.scale.numpy().astype(np.float64)
+    np.testing.assert_allclose(np.delete(got, 3), np.delete(expected, 3), rtol=1e-4)
+    assert enc.scale[3] == 1.0                                               # constant: only centred
+    out = torch.addcmul(enc.shift, torch.as_tensor(x), enc.scale)
+    assert torch.all(out[:, 3].abs() < 1e-5)
