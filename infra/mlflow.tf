@@ -61,12 +61,13 @@ resource "google_cloud_run_v2_service" "mlflow" {
     }
 
     containers {
-      image = "us-central1-docker.pkg.dev/${var.project_id}/ml/mlflow:3.17.2-2"
+      image = "us-central1-docker.pkg.dev/${var.project_id}/ml/mlflow:3.17.2-3"
 
       resources {
         limits = {
           cpu    = "1"
-          memory = "1Gi"
+          # Two workers (mlflow/Dockerfile). Billed only while it's answering requests.
+          memory = "1536Mi"
         }
         # Billed only while handling requests.
         cpu_idle = true
