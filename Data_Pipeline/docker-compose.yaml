@@ -48,8 +48,8 @@ services:
 
   pipeline:
     <<: *tool
-    # Other modes: docker compose run --rm pipeline python -m scripts.run_pipeline --mode full
-    command: ["python", "-m", "scripts.run_pipeline", "--mode", "sample"]
+    # Other modes: docker compose run --rm pipeline python -m scripts.pipeline --mode full
+    command: ["python", "-m", "scripts.pipeline", "--mode", "sample"]
 
   postgres:
     image: postgres:13
