@@ -133,8 +133,8 @@ def test_unknown_names_raise(table):
 
 
 def test_on_real_table_if_present():
-    # hourly_all.csv keeps sleep and no-data hours; hourly_features.csv drops them.
-    path = Path(__file__).resolve().parents[3] / "Data_Pipeline/data/processed/hourly_all.csv"
+    # hours.csv keeps every diary hour, sleep and no-data ones too.
+    path = Path(__file__).resolve().parents[3] / "Data_Pipeline/data/processed/hours.csv"
     if not path.exists():
         pytest.skip("data pipeline output not pulled")
     table = pd.read_csv(path, low_memory=False)
@@ -142,7 +142,7 @@ def test_on_real_table_if_present():
     assert (labels["state_now"] == ASLEEP).sum() == (table["kinesia_text"] == "Sleep").sum()
     assert labels["state_now"].notna().sum() == table["kinesia_score"].notna().sum() + (
         table["kinesia_text"] == "Sleep").sum()
-    # The data pipeline's off class is the same hours as the score's off group.
+    # The off group is the akinesia scores, -3 to -1.
     off = labels["state_now"].isin(STATE_GROUPS["off"])
-    assert (off == (table["kinesia_class"] == "off")).all()
+    assert (off == (table["kinesia_score"] < 0)).all()
     assert labels["tremor_now"].notna().sum() <= table["tremor_score"].notna().sum()

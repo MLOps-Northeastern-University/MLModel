@@ -7,9 +7,8 @@ data:
   # pipeline's table names them W_<name>, for whichever wrist it used.
   features: [move_mean, move_std, move_p95, still_fraction, tremor_mean, tremor_p95, tremor_ratio]
   feature_prefix: W_
-  label_column: kinesia_class
-  # Binary target: off (1) against on or dyskinetic (0).
-  positive_class: "off"
+  # The targets labelled for every horizon (core/targets.py): state_now, tremor_next_hour, ...
+  targets: [state, tremor]
   group_column: participant_id
   random_seed: 42
 
@@ -24,8 +23,11 @@ windows:
   axes: 3
 
 paths:
-  # The data pipeline's output. Get it with `dvc pull` in ../Data_Pipeline.
-  features_csv: ../Data_Pipeline/data/processed/hourly_features.csv
+  # The data pipeline's output folder (hours, events, patients, windows). Get it
+  # with `dvc pull` in ../Data_Pipeline. Only read, never written.
+  processed_data: ../Data_Pipeline/data/processed
+  # Its dvc.lock, which names the data version a run trained on.
+  dvc_lock: ../Data_Pipeline/dvc.lock
   # Everything a run writes: predictions, reports and the model bundle. Not in Git.
   artifacts_dir: artifacts
   log_file: logs/model_pipeline.log
@@ -45,10 +47,16 @@ logging:
   file: true
 
 split:
-  # Held-out participants, never used for training or tuning.
-  test_fraction: 0.3
-  # Participant-grouped folds on the rest, so no one is in both train and validation.
-  cv_folds: 5
+  # 5 folds fixed by hand (ARCHITECTURE.md, Evaluation protocol). Each tests 2
+  # participants, 1 with DBS and 1 without, paired so each pair has both OFF and
+  # not-OFF hours; everyone is tested once. The validation participant (early
+  # stopping) also has both, and is a different person in each fold. The rest train.
+  folds:
+    - {test: [COPS-42, COPS-25], validation: COPS-44}
+    - {test: [COPS-4, COPS-60], validation: COPS-3}
+    - {test: [COPS-24, COPS-18], validation: COPS-60}
+    - {test: [COPS-3, COPS-46], validation: COPS-18}
+    - {test: [COPS-44, COPS-11], validation: COPS-46}
 
 mlflow:
   # Local MLflow from docker-compose. CI sets MLFLOW_TRACKING_URI to the shared server.
@@ -59,11 +67,17 @@ selection:
   # The metric that picks the best candidate: the release gate's main rule.
   metric: cv/state_now/off_auc
 
-gates:
-  # Placeholder: the validation gate's lowest PR-AUC.
-  min_pr_auc: 0.0
-  # Placeholder: how much PR-AUC a new model may lose against the active one.
-  max_drop_vs_production: 0.0
+evaluation:
+  # The pooled AUC's interval: participants resampled this many times (ARCHITECTURE.md).
+  bootstrap_resamples: 1000
+  interval: 0.95
+
+validation_gate:
+  # A candidate fails when one of these is missing or below its value. 0.5 is chance:
+  # PLACEHOLDER until the baselines set a real floor.
+  min:
+    cv/state_now/off_auc: 0.5
+    cv/tremor_now/auc: 0.5
 
 release_gate:
   # MODEL.md, "Release gate and retraining". Each metric is a cross-validation

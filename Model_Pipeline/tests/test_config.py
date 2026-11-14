@@ -17,11 +17,11 @@ def test_the_model_inputs_are_the_phones_in_the_same_order(tmp_path):
     assert cfg["export"]["output_name"] == "off_risk"
 
 
-def test_output_folders_are_made_but_the_input_table_is_only_read(tmp_path):
-    cfg = make_config(tmp_path, features_csv=tmp_path / "not_pulled_yet.csv")
+def test_output_folders_are_made_but_the_input_data_is_only_read(tmp_path):
+    cfg = make_config(tmp_path)
     assert cfg["resolved_paths"]["artifacts_dir"] == tmp_path / "artifacts"
     assert cfg["resolved_paths"]["artifacts_dir"].is_dir()
-    assert not cfg["resolved_paths"]["features_csv"].exists()
+    assert not cfg["resolved_paths"]["processed_data"].exists()
 
 
 def test_overrides_change_only_what_they_name(tmp_path):

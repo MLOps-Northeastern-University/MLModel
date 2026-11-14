@@ -8,7 +8,7 @@ The data and model pipelines for our Parkinson's monitoring system. It turns wri
 
 | Part | Status | What it does |
 |---|---|---|
-| **Data pipeline** | Done: [Data_Pipeline/README.md](Data_Pipeline/README.md) | Downloads the COPS dataset, turns wrist accelerometry and the symptom diary into one row of features and a label for each participant-hour, then cleans, validates, checks for anomalies and bias, and versions the output with DVC. It runs as an Airflow DAG or as one command. |
+| **Data pipeline** | Done: [Data_Pipeline/README.md](Data_Pipeline/README.md) | Downloads the COPS dataset and builds the model's inputs: 10-second wrist windows at 30 Hz, every diary hour with its answers, every dose with its LEDD, and one row per patient. Checks them against the model's data contract, reports label balance per group, and versions the output with DVC. It runs as an Airflow DAG or as one command. |
 | **Model pipeline** | Next | Trains and evaluates models with subject-wise splits (no patient in both train and test), and tracks experiments |
 | **Promotion** | Planned | A new model replaces the current one only if it beats it on a fixed test set |
 | **Monitoring** | Planned | Checks incoming data against the training data for drift |
@@ -42,7 +42,7 @@ What the model has to produce for the dashboard, the data and inputs it can use,
 |---|---|
 | Orchestration | Airflow 2.10 in Docker (`Data_Pipeline/docker-compose.yaml`) |
 | Data versioning | DVC (`Data_Pipeline/dvc.yaml`, `dvc.lock`) |
-| Schema, statistics and anomalies | Our own checks with pandas (`Data_Pipeline/scripts/validate.py`, `anomalies.py`) |
+| Data checks and anomalies | Our own checks with pandas against the model's data contract (`Data_Pipeline/scripts/checks.py`) |
 | Bias slicing | Fairlearn |
 | Tests and style | pytest (coverage floor 85%), flake8 |
 
@@ -98,6 +98,8 @@ Newest first. One row per milestone, not per small change.
 
 | Date | Who | What changed | PR |
 |---|---|---|---|
+| 2026-11-14 | Dhruv Puri | Model pipeline (P1): the loader (the data pipeline's output as one checked `Dataset`, windows memory-mapped, labels from the diary, the data version from `dvc.lock`), the 5 hand-set folds (each tests 1 DBS and 1 non-DBS participant), and evaluation with the validation gate: the release gate's metric names, fold, pooled (with a 95% interval) and non-DBS AUCs, within-patient Spearman, `metrics.json` and ROC plots | (this PR) |
+| 2026-11-14 | Dhruv Puri | Data pipeline rebuilt for the window model: 10-s 30 Hz windows from the more affected wrist with an orientation fix, every diary hour kept, dose events and a patients table, 18 modules down to 8. Run on the model team's 10 participants and pushed as a DVC data version | (this PR) |
 | 2026-11-13 | Ayush Varma | Model pipeline (P4): model selection, the release gate against production, the export bundle, and the registry with rollback. Placeholders for the phone runtime, the registry location and the Backend endpoint | (this PR) |
 | 2026-11-11 | Sam Selvaraj | Model: the design decisions in MODEL.md. Model pipeline core: targets (kinesia score and tremor, now and next hour), the Dataset contract with a versioned window spec, the tracker contract with in-memory and MLflow trackers, and production logging. Data pipeline: dose events with LEDD from Jost et al. 2023. Fixed the Dependabot alerts | (this PR) |
 | 2026-10-25 | Ayush Varma | Data pipeline run on 5 sample participants with `dvc repro` and Airflow, first DVC data version, results, bias findings, Gantt chart and screenshots in the docs, and this README updated | (this PR) |

@@ -14,7 +14,7 @@ pytest -q                               # synthetic data only, nothing downloade
 python -m scripts.run_model_pipeline    # lists the steps until they're built
 ```
 
-The training data is the data pipeline's output, versioned by DVC. Get it with `dvc pull` in `../Data_Pipeline` once the shared remote is set up. `paths.features_csv` in `config/model.yaml` points at it.
+The training data is the data pipeline's output, versioned by DVC. Get it with `dvc pull` in `../Data_Pipeline` once the shared remote is set up. `paths.processed_data` in `config/model.yaml` points at it.
 
 ## Code structure
 
@@ -64,14 +64,21 @@ All paths are under `scripts/`.
 
 The four hand-offs from the team plan. Build against these, with stand-ins for a teammate's part until it's merged. Change one only by agreement, in this file first.
 
-### 1. `load_dataset(cfg)` → `X, y, groups, slices` (P1 → P2, P3)
+### 1. `load_dataset(cfg)` → `Dataset` (P1 → P2, P3)
 
-In `scripts/data_loader.py`. Reads `paths.features_csv`. The four outputs share one index, one row per participant-hour.
+In `scripts/data/loaders.py`. Reads the data pipeline's folder at `paths.processed_data` and returns one checked `Dataset` (`scripts/core/data.py`):
 
-- `X`: DataFrame of the `data.features` columns, without the `W_` prefix and in that order. That's the phone's input order.
-- `y`: Series of 0 and 1. 1 when `kinesia_class` is `off`.
-- `groups`: the `participant_id` of each row, for the participant-grouped splits.
-- `slices`: DataFrame of the `bias.slice_columns`.
+- `hours`: one row per diary hour, every hour kept: `participant_id`, `hour_index`, the diary answers and the bias slices.
+- `labels`: `state` and `tremor`, `now` and `next_hour` (`core/targets.py`), on the hours' index. NaN where the diary has no answer.
+- `features`: the 7 `W_` hourly features, on the same index. They're for the baselines.
+- `windows`: `{participant: Windows}`, the 10-s windows memory-mapped from `windows/<pid>/*.npy`.
+- `events`: every dose with its LEDD. `patients`: `more_affected_side` and `dbs`.
+
+`data_version(cfg)` names the data from the data pipeline's `dvc.lock`, for the tracker. `data/folds.py` splits the Dataset into the folds in `split.folds`.
+
+**Folds** (`split.folds`): 5, set by hand. Each tests 2 participants, 1 with DBS and 1 without, paired so each pair has both OFF and not-OFF hours, and names one validation participant for early stopping. Everyone is tested once.
+
+**Evaluation** (`steps/evaluate.py`): scores the predictions of every fold. For each label it reports the AUC inside each fold averaged over folds (the gate's metric), the same for non-DBS participants, the pooled AUC with a 95% interval from resampling participants, and within-patient Spearman. A fold with only one class is left out and the folds used are counted (`_folds`). It writes `metrics.json`, `evaluation.json` (per fold and per participant) and `roc.png`, and fails when a metric in `validation_gate.min` is missing or too low.
 
 ### 2. Predictions file (P2 → P1, P3)
 
@@ -105,7 +112,7 @@ In `scripts/models.py`, one class per model family, each with:
 | `model.tflite` | P4 | The exported model |
 | `metadata.json` | P4 | The Backend's model entry: `family`, `model_id`, `version`, `feature_spec_version`, `inputs`, `output` (`off_risk`, `nudge_above`) and `test_cases` |
 | `stats.json` | P4 | The training inputs' statistics, for drift. The Backend stores it as `<model_id>.stats.json`. |
-| `metrics.json` | P1 | Held-out metrics, PR-AUC first |
+| `metrics.json` | P1 | The cross-validation metrics from `steps/evaluate.py`, flat `{name: value}`: the release gate's names first (`cv/state_now/off_auc` and the rest) |
 | `bias.json` | P3 | Metrics per slice, the recall gap, and the mitigation result |
 
 The Backend works out the model file's sha256 when it registers the model.
