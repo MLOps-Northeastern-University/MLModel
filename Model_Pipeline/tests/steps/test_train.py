@@ -219,3 +219,33 @@ def test_runs_record_the_code_they_came_from(tmp_path):
     train = tracker.find("train")
     assert {"git_commit", "git_dirty"} <= set(train.tags)
     assert "environment.packages.numpy" in train.params and "environment.python" in train.params
+
+
+def test_every_run_with_predictions_gets_its_charts_and_the_train_run_the_comparison(tmp_path):
+    tracker = MemoryTracker()
+    TrainModels(config(tmp_path, score_test=True), tracker).run(data(), SPLIT)
+    charts = tmp_path / "charts"
+    train = tracker.find("train")
+    assert (charts / "comparison", "charts") in train.artifacts
+    assert (charts / "comparison" / "comparison.png").exists()
+    candidate = tracker.find("window_logistic")
+    assert (charts / "window_logistic" / "cv", "charts") in candidate.artifacts
+    runs = {r.name: r for r in tracker.children(candidate.run_id)}
+    assert (charts / "window_logistic" / "seed-0-fold-2", "charts") in runs["seed-0-fold-2"].artifacts
+    assert runs["final"].artifacts[0][1] == "model/window_logistic"      # the model first, then the test charts
+    assert (charts / "window_logistic" / "test", "charts") in runs["final"].artifacts
+    names = sorted(p.name for p in (charts / "window_logistic" / "cv").iterdir())
+    assert names == sorted(["scorecard.png"] + [f"confusion_{t}_{h}.png" for t in ("sleep", "state", "tremor")
+                                                for h in ("now", "next_hour")])
+
+
+def test_charts_can_be_turned_off_or_kept_off_the_folds(tmp_path):
+    cfg = config(tmp_path)
+    cfg["train"]["charts"] = {"folds": False}
+    tracker = MemoryTracker()
+    TrainModels(cfg, tracker).run(data(), SPLIT)
+    fold = tracker.find("seed-0-fold-1")
+    assert fold.artifacts == [] and (tmp_path / "charts" / "window_logistic" / "cv").exists()
+    cfg["train"]["charts"] = {"enabled": False}
+    TrainModels(cfg, MemoryTracker()).run(data(), SPLIT)
+    assert not (tmp_path / "charts").exists()                           # the last run's charts are cleared too

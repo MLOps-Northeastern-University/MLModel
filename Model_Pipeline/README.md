@@ -75,6 +75,7 @@ scripts/
 │   └── memory_tracker.py  for tests
 ├── steps/                 one class per step, in the order they run
 ├── experiments.py         what train and tune share: cross-validation, scoring, the tuned-settings file
+├── reporting/             charts (scorecard, confusion matrices, model comparison), saved and attached to runs
 ├── utils/                 config, logging and file helpers
 ├── alerts.py              email and Slack alerts
 └── run_model_pipeline.py  runs the steps from the config
@@ -92,7 +93,7 @@ Letters are the components in the team plan.
 | Owner | Components | Files |
 |---|---|---|
 | P1 | A Data loader, B Splits, F Validation + gate | `data/loaders.py`, `data/folds.py`, `steps/evaluate.py` |
-| P2 | C Models + training, D Tuning, E Experiment tracking, G Sensitivity (hyperparameters) | `core/`, `models/`, `tracking/`, `experiments.py`, `steps/train.py`, `steps/tune.py`, `steps/sensitivity_hparams.py` |
+| P2 | C Models + training, D Tuning, E Experiment tracking, G Sensitivity (hyperparameters) | `core/`, `models/`, `tracking/`, `experiments.py`, `reporting/`, `steps/train.py`, `steps/tune.py`, `steps/sensitivity_hparams.py` |
 | P3 | H Bias detection + mitigation, G Sensitivity (SHAP, ablation) | `steps/bias.py`, `steps/explain.py` |
 | P4 | I Selection after bias, J Export + bundle, K Registry + rollback | `steps/select.py`, `steps/export.py`, `steps/compare_production.py`, `steps/register.py` |
 | P5 | L Docker + orchestration, M CI/CD, N Alerts, O Infrastructure | `run_model_pipeline.py`, `alerts.py`, Docker and CI files |
@@ -230,10 +231,18 @@ They share one cross-validation (`scripts/experiments.py`), so a tuning trial an
 | Step | Config | What it does | Writes |
 |---|---|---|---|
 | `tune` | `tune:` | One Optuna study (TPE, seeded) per listed candidate. Each trial is a cross-validation scored by `selection.metric`. Studies resume after a crash, and any change to the split, data, candidate or space starts a new one. Transformer trials that change only diary settings reuse each fold's pretrained body | `artifacts/tuning/` (studies, a trials table per candidate), `artifacts/tuned_params.json` |
-| `train` | `models:`, `train:` | A shuffled-label check first (a model must score near chance on shuffled labels), then every candidate cross-validated, refit on all development patients, and saved. With `use_tuned`, a tuned candidate trains with its tuned settings, refused if they were tuned on another split, data or config | `artifacts/models/`, `artifacts/predictions/`, `artifacts/candidates.json` |
+| `train` | `models:`, `train:` | A shuffled-label check first (a model must score near chance on shuffled labels), then every candidate cross-validated, refit on all development patients, and saved. With `use_tuned`, a tuned candidate trains with its tuned settings, refused if they were tuned on another split, data or config | `artifacts/models/`, `artifacts/predictions/`, `artifacts/candidates.json`, `artifacts/charts/` |
 | `sensitivity_hparams` | (reads the studies) | Each tuned setting's importance (fANOVA), plus plots: importance, score against each setting, score per trial | `artifacts/sensitivity/<candidate>/` |
 
 In MLflow, each step is a run with a child per candidate. train and tune go on to a child per fold (and tune per trial before that), with the scores above, fit times and each epoch's curves. For the transformer that includes pretraining's skill per target on the validation patients, so one pretraining can be compared with another. Runs carry the split's hash and a data fingerprint, so only comparable runs get compared. For a live look at the tuning studies, `optuna-dashboard sqlite:///artifacts/tuning/studies.db`.
+
+Charts (`train.charts`): every train run with predictions gets its own, under `charts/` in its MLflow artifacts and in `artifacts/charts/<candidate>/<run>/`:
+
+- **Scorecard:** every score for every label, pooled and within patients side by side, with what guessing would score marked.
+- **Confusion matrix per label:** for each diary answer, the share of its hours the model predicted as each class.
+- **Comparison** (on the `train` run): the candidates side by side on the metrics in `train.charts.compare`, with each one's spread across folds.
+
+Each fold run gets them (`folds: false` turns that off), each candidate's run gets them for all its folds together, and the final run gets them when the test patients are scored. MLflow's own chart view still compares any logged metric across runs. A chart that fails to draw is a warning, never a failed run.
 
 ## Adding your step
 

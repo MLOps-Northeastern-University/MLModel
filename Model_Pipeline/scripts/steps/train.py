@@ -28,15 +28,23 @@ last run's candidates.json and predictions, so a failed run never leaves stale o
 
 MLflow, through the Tracker:
 
-    train                       tags: split hash, data fingerprint, test scored; params: the config used
+    train                       tags: split hash, data fingerprint, test scored; params: the config used;
+    │                           chart: every candidate side by side (charts/comparison.png)
     ├── leakage_check-<name>    the shuffled-label scores
     └── <candidate>             tags: family, split hash, tuned; params: the settings it trained with;
         │                       cv/<label>/<metric> and its _fold_sd; for a model that pretrains, the
         │                       folds' mean validation skill per pretraining target and overall
         │                       (run/pretrain_val_skill) and its time, to compare one pretraining with
-        │                       another (only between runs with the same split hash)
-        ├── seed-<s>-fold-<k>   val/<label>/<metric>, fit and predict seconds, the epoch curves
-        └── final               the saved model as an artifact; test/<label>/<metric> if scored
+        │                       another (only between runs with the same split hash);
+        │                       charts of every fold's validation hours together
+        ├── seed-<s>-fold-<k>   val/<label>/<metric>, fit and predict seconds, the epoch curves; charts
+        │                       of that fold (train.charts.folds)
+        └── final               the saved model as an artifact; test/<label>/<metric> and charts if scored
+
+Charts (reporting/, train.charts): each run above that has predictions gets a scorecard (every
+score, pooled and within, against chance) and a confusion matrix per label, under charts/ in its
+artifacts and in artifacts/charts/<candidate>/<run>/. A chart that fails to draw is a warning, never
+a failed run.
 
 Written locally for evaluate and bias, never sent to MLflow, since they're per patient-hour:
 
@@ -50,6 +58,7 @@ Written locally for evaluate and bias, never sent to MLflow, since they're per p
 import argparse
 import datetime as dt
 import math
+import shutil
 import sys
 from dataclasses import replace
 from pathlib import Path
@@ -61,6 +70,7 @@ from scripts.data.folds import read_split
 from scripts.experiments import (
     concat, cross_validate, fresh, load_development, named, provenance, read_tuned, rows, score, write_predictions)
 from scripts.models.registry import candidates
+from scripts.reporting.writer import FOLDER as CHARTS, ChartWriter
 from scripts.utils.file_io import write_json
 from scripts.utils.logging_setup import get_logger, log_step
 
@@ -74,6 +84,7 @@ class TrainModels:
         self.cfg, self.tracker = cfg, tracker
         self.settings = _settings(cfg)
         self.artifacts = Path(cfg["resolved_paths"]["artifacts_dir"])
+        self.charts = ChartWriter.from_config(cfg, tracker)
 
     def run(self, data=None, split=None):
         """Train every candidate; return them as dicts for evaluate, bias and select.
@@ -122,12 +133,15 @@ class TrainModels:
             by_name = dict(models)
             for name in self.settings["leakage_check"]["candidates"]:
                 self._leakage_check(name, by_name[name], dev, split)
-            frames, results = {}, []
+            frames, results, cv_metrics = {}, [], {}
             for name, model in models:
-                result, model_frames = self._candidate(name, model, dev, test, split, stamp, name in tuned)
+                result, model_frames, cv_metrics[name] = self._candidate(name, model, dev, test, split, stamp,
+                                                                         name in tuned)
                 results.append(result)
                 for label, frame in model_frames.items():
                     frames.setdefault(label, []).append(frame)
+            if self.charts is not None:
+                self.charts.comparison(cv_metrics)
             write_predictions(self.artifacts / "predictions", frames)
             write_json(results, self.artifacts / "candidates.json")
             if score_test:
@@ -136,9 +150,11 @@ class TrainModels:
         return results
 
     def _clear_outputs(self):
-        """Remove the last run's candidates.json and predictions, so a run that fails halfway never leaves
-        older outputs looking like its own (the saved models stay: each has its own dated folder)."""
+        """Remove the last run's candidates.json, predictions and charts, so a run that fails halfway never
+        leaves older outputs looking like its own (the saved models stay: each has its own dated folder)."""
         (self.artifacts / "candidates.json").unlink(missing_ok=True)
+        if (self.artifacts / CHARTS).exists():           # even with charts off: old ones would look like this run's
+            shutil.rmtree(self.artifacts / CHARTS)
         folder = self.artifacts / "predictions"
         if folder.exists():
             for path in folder.glob("*.csv"):
@@ -150,8 +166,11 @@ class TrainModels:
         with self.tracker.run(name, tags=tags) as run_id:
             self.tracker.log_params({"family": template.family, "targets": list(template.targets),
                                      "horizons": list(template.horizons), "params": template.params})
-            result = cross_validate(name, template, dev, split, seeds, self.tracker)
+            result = cross_validate(name, template, dev, split, seeds, self.tracker, self.charts)
             self.tracker.log_metrics(result.metrics())
+            if self.charts is not None:
+                self.charts.predictions(result.frames, result.cv, f"{name}/cv",
+                                        f"{name}, cross-validation (every fold's validation patients)")
             frames = [result.frames]
 
             final_params = {}
@@ -165,8 +184,12 @@ class TrainModels:
                 self.tracker.log_artifact(folder, folder=f"model/{name}")
                 if test is not None:
                     test_frames = rows(name, model.predict(test), test, fold="test", seed=seeds[0])
-                    test_metrics = named("test", score(test_frames))
+                    test_scores = score(test_frames)
+                    test_metrics = named("test", test_scores)
                     self.tracker.log_metrics(test_metrics)
+                    if self.charts is not None:
+                        self.charts.predictions(test_frames, test_scores, f"{name}/test",
+                                                f"{name}, final model on the test patients")
                     metrics.update(test_metrics)
                     frames.append(test_frames)
         summary = ", ".join(f"{k} {v:.3f}" for k, v in metrics.items() if k.endswith("off_auc_within"))
@@ -174,7 +197,7 @@ class TrainModels:
                     extra={"event": "candidate_trained", "candidate": name, "final_params": final_params})
         return ({"name": name, "family": template.family, "run_id": run_id, "model_dir": str(folder),
                  "metrics": metrics, "split_hash": split.hash, "tuned": tuned, "final_params": final_params},
-                concat(frames))
+                concat(frames), result.metrics())
 
     def _leakage_check(self, name, template, dev, split):
         """Train on labels shuffled among the training hours; every AUC must stay within reach of chance."""
