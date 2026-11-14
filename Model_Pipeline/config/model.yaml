@@ -155,11 +155,57 @@ release_gate:
     - {metric: cv/state_next_hour/off_auc, must_improve: false}
 
 bias:
+  # scripts/steps/bias.py (P3). The columns patients are sliced by: read from the hours table,
+  # or from the patients table when the hours table doesn't have them (dbs).
   slice_columns: [sex, age_group, visit, dbs, hoehn_yahr, pd_subtype]
-  # A recall gap larger than this between slices fails the bias gate.
+  # The largest gap allowed between the best and worst group, for a check that sets no max_gap.
   max_recall_gap: 0.10
-  # Slices with fewer rows are reported but not judged.
+  # A group is judged only with at least this many scored hours and this many patients. Most
+  # slices describe the person, so a group of one patient measures that person, not the group.
   min_slice_rows: 20
+  min_slice_participants: 2
+  # Which predictions are sliced: cv (every development patient's out-of-fold hours) or test
+  # (only after train.score_test has scored the test patients, once).
+  predictions: cv
+  # P(yes) at or above this counts as predicted yes, for the _recall, _precision and _fpr metrics.
+  threshold: 0.5
+  # The gates. metric is any core/metrics.py score of that label, or <question>_recall,
+  # _precision or _fpr (questions: off, on, dyskinetic, asleep, any_tremor).
+  # PLACEHOLDER max_gap values, for the team to agree.
+  checks:
+    - {label: state_now, metric: off_recall}
+    - {label: state_now, metric: off_auc}
+    - {label: tremor_now, metric: any_tremor_recall}
+    - {label: sleep_now, metric: asleep_recall}
+  mitigation:
+    # Retrain a candidate that fails with reweighted training hours (Kamiran and Calders'
+    # reweighing: each group and answer weighted as if they were independent).
+    enabled: true
+    # The candidates to retrain when they fail; empty means every failing candidate. Retraining
+    # the transformer takes as long as training it.
+    candidates: []
+    # weight ** power, then capped at max_weight, so a tiny group can't dominate training.
+    power: 1.0
+    max_weight: 5.0
+
+explain:
+  # scripts/steps/explain.py (P3): Shapley values over each model's input groups (windows,
+  # events, patients, features), and how the score changes when a group is left out.
+  # The final models are explained on these patients: development (the ones they were trained
+  # on: what the model relies on) or test (only once the test patients have been scored).
+  patients: development
+  # At most this many patients, picked with the seed, to keep the cost down; null for all.
+  max_participants: 8
+  # Each left-out group is replaced this many times with a different shuffle, and averaged.
+  repeats: 3
+  seed: 0
+  # The candidates to explain; empty means all.
+  candidates: []
+  # What is explained: the probability of one question of a label.
+  outputs:
+    - {label: state_now, question: "off"}
+    - {label: tremor_now, question: any_tremor}
+    - {label: sleep_now, question: asleep}
 
 export:
   # The phone model's entry in the Backend's model_versions table.

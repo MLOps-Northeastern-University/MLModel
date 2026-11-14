@@ -98,6 +98,7 @@ Newest first. One row per milestone, not per small change.
 
 | Date | Who | What changed | PR |
 |---|---|---|---|
+| 2026-11-14 | Tejaswini Sarikonda | Model pipeline (P3): the bias step (slices scored with Fairlearn, the bias gate with an alert, mitigation by reweighing as a new `_reweighted` candidate, `bias.json`, `bias_report.md` and plots) and the explain step (exact Shapley values over each model's input groups, the AUC drop when a group is left out, plots). Tested on synthetic data | (this PR) |
 | 2026-11-14 | Dhruv Puri | Model pipeline (P1): evaluate and the validation gate, after train: a 95% interval for each pooled AUC from resampling patients, AUCs per fold and per patient, ROC plots and each candidate's `metrics.json`, with `gates_passed` set for select. Model pipeline reads the rebuilt data pipeline's output (`hours.csv`, `windows/manifest.json`) | (this PR) |
 | 2026-11-14 | Dhruv Puri | Data pipeline rebuilt for the window model: 10-s 30 Hz windows from the more affected wrist with an orientation fix, every diary hour kept, dose events and a patients table, 18 modules down to 8. Run on the model team's 10 participants and pushed as a DVC data version | (this PR) |
 | 2026-11-13 | Ayush Varma | Model pipeline (P4): model selection, the release gate against production, the export bundle, and the registry with rollback. Placeholders for the phone runtime, the registry location and the Backend endpoint | (this PR) |
