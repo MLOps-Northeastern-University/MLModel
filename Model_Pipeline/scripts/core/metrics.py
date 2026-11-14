@@ -6,8 +6,9 @@ Pooled and within answer different questions, so both are reported:
 
     pooled   every hour of every patient in one pile. It also rewards telling patients apart, so a
              model can score well by learning who is usually OFF.
-    within   each patient's own score, from their hours only, averaged over the patients (those with
-             at least two different answers). Only how well the model follows one patient through the
+    within   each patient's own score, from their hours only, averaged over the patients (for the
+             AUCs, accuracy, F1 and correlation, those with at least two different answers; the
+             error, score_mae_within, uses every patient). Only how well the model follows one patient through the
              day, which is what the dashboard shows (MODEL.md, "How OFF is defined and counted").
 
 A metric name ends in _within for the within version; without it, it's pooled. Names follow the
@@ -49,6 +50,22 @@ import numpy as np
 
 from scripts.core.errors import ConfigError
 from scripts.core.targets import ASLEEP, STATE_GROUPS, get_target, parse_label
+
+# Scores where lower is better (an error); every other score is better higher. Tuning, selection and
+# the release gate all rank by this, so a metric is never maximised by mistake.
+LOWER_IS_BETTER = ("score_mae", "score_mae_within")
+
+
+def higher_is_better(name: str) -> bool:
+    """Whether a bigger value is better, for a score or a tracker name such as cv/state_now/score_mae.
+
+    A _fold_sd (how much a score varies between folds) is better smaller, too.
+    """
+    metric = str(name).rsplit("/", 1)[-1]
+    if metric.endswith("_fold_sd"):
+        return False
+    return metric not in LOWER_IS_BETTER
+
 
 # target -> {question: the classes that mean "yes"}
 QUESTIONS = {
@@ -165,7 +182,14 @@ def label_scores(label: str, y, probs, participants, no_dbs: Optional[np.ndarray
     participants = np.asarray(participants)
     if probs.shape != (len(y), k):
         raise ConfigError(f"{label}: probabilities are {probs.shape}, need ({len(y)}, {k})")
+    if len(participants) != len(y) or (no_dbs is not None and len(no_dbs) != len(y)):
+        raise ConfigError(f"{label}: y, participants and no_dbs need one value per hour")
     known = ~np.isnan(y)
+    classes_seen = y[known]
+    if not (np.all(classes_seen == np.round(classes_seen)) and np.all((classes_seen >= 0) & (classes_seen < k))):
+        raise ConfigError(f"{label}: answers must be class indices 0 to {k - 1}")
+    if not np.isfinite(probs[known]).all():
+        raise ConfigError(f"{label}: probabilities must be finite")
     y, probs, participants = y[known].astype(int), probs[known], participants[known]
     predicted = probs.argmax(axis=1) if len(probs) else np.zeros(0, int)
     out = {"hours": float(len(y))}
@@ -218,20 +242,17 @@ def _pair(a, b, name):
     a, b = np.asarray(a, dtype=float), np.asarray(b, dtype=float)
     if a.shape != b.shape or a.ndim != 1:
         raise ConfigError(f"{name} needs two vectors of the same length, not {a.shape} and {b.shape}")
+    if not (np.isfinite(a).all() and np.isfinite(b).all()):
+        raise ConfigError(f"{name} needs finite values (a NaN would be ranked as if it were a number)")
     return a, b
 
 
 def _average_ranks(x):
-    """1-based ranks, ties sharing their average rank."""
-    order = np.argsort(x, kind="mergesort")
-    sorted_x = x[order]
-    ranks = np.empty(len(x))
-    starts = np.flatnonzero(np.r_[True, sorted_x[1:] != sorted_x[:-1]])
-    ends = np.r_[starts[1:], len(x)]
-    for s, e in zip(starts, ends):
-        ranks[order[s:e]] = (s + e + 1) / 2
-    return ranks
+    """1-based ranks, ties sharing their average rank (no Python loop over the ties)."""
+    _, inverse, counts = np.unique(x, return_inverse=True, return_counts=True)
+    ends = np.cumsum(counts)                     # each distinct value's last rank
+    return ((ends - counts + 1 + ends) / 2.0)[inverse]
 
 
-__all__ = ["QUESTIONS", "auc", "auc_within", "balanced_accuracy", "confusion", "label_scores", "macro_f1", "mae",
-           "mean_scores", "spearman", "within"]
+__all__ = ["LOWER_IS_BETTER", "QUESTIONS", "auc", "auc_within", "balanced_accuracy", "confusion", "higher_is_better",
+           "label_scores", "macro_f1", "mae", "mean_scores", "spearman", "within"]

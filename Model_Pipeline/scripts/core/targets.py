@@ -11,7 +11,7 @@ changes in one place. See MODEL.md, Decisions: Outputs, and How OFF is defined.
 
 Each is predicted as one softmax. Sleep is its own output rather than an eighth state class: as a
 state class it swallowed OFF (a still OFF hour and a sleeping hour look alike), and on its own OFF
-within patients went from 0.35 to 0.75 AUC (team-hub/exploration/EXPERIMENTS.md).
+within patients went from 0.35 to 0.75 AUC in the prototype's cross-validation (MODEL.md, Decisions: Outputs).
 The rest is worked out from the class probabilities:
 
     P(asleep)        the sleep output's "asleep" class

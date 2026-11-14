@@ -120,8 +120,12 @@ def test_the_file_round_trips_and_the_hash_names_only_who_is_where(tmp_path):
     assert replace(split, rule="other", history=()).hash == split.hash
     with pytest.raises(SchemaError, match="format"):
         Split.from_json({**split.to_json(), "format_version": 2})
+    with pytest.raises(SchemaError, match="list of lists"):
+        Split.from_json({"format_version": 1, "test": []})                   # no folds
+    with pytest.raises(SchemaError, match="list of lists"):
+        Split.from_json({**split.to_json(), "test": "AB"})                   # not read as patients A and B
     with pytest.raises(SchemaError, match="bad field"):
-        Split.from_json({"format_version": 1, "test": []})
+        Split.from_json({"format_version": 1, "test": [], "folds": [["A"], ["B"]]})   # no seed
 
 
 def test_the_command_creates_once_then_only_adds(tmp_path, capsys):
@@ -158,3 +162,20 @@ def test_patient_facts_reads_dbs_and_dyskinetic_hours():
     patients = pd.DataFrame({"participant_id": ["A", "B"], "more_affected_side": True, "dbs": [True, False]})
     data = Dataset(WindowSpec(1, 10, 30, 3), hours, labels, patients=patients)
     assert folds.patient_facts(data) == {"A": (True, True), "B": (False, False)}
+
+
+def test_patient_facts_refuses_dbs_that_isnt_true_or_false():
+    from scripts.core.data import Dataset, WindowSpec
+    hours = pd.DataFrame({"participant_id": ["A", "B"], "hour_index": [0, 0]})
+    labels = pd.DataFrame({"state_now": [3.0, 3.0]})
+    for bad in ("no", np.nan, "False"):
+        patients = pd.DataFrame({"participant_id": ["A", "B"], "more_affected_side": True, "dbs": [True, bad]})
+        with pytest.raises(SchemaError, match="dbs"):
+            folds.patient_facts(Dataset(WindowSpec(1, 10, 30, 3), hours, labels, patients=patients))
+
+
+def test_too_few_patients_without_dbs_for_the_folds_is_warned(caplog):
+    patients = {f"P{i}": (i > 1, False) for i in range(1, 9)}          # one patient without DBS, 4 folds
+    with caplog.at_level("WARNING"):
+        folds.make_folds(patients, 4, seed=0)
+    assert "without DBS" in caplog.text

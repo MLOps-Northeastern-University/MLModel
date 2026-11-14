@@ -35,6 +35,10 @@ class MlflowTracker(Tracker):
 
     def __init__(self, tracking_uri, experiment):
         super().__init__()
+        # Ending a run makes MLflow fetch it again and print its link with an emoji. On a Windows
+        # console that isn't UTF-8 the emoji crashes the run's end, and every fold would pay the extra
+        # request; our own log already says which run ended.
+        os.environ.setdefault("MLFLOW_SUPPRESS_PRINTING_URL_TO_STDOUT", "true")
         self.client = MlflowClient(tracking_uri=tracking_uri)
         try:
             found = self.client.get_experiment_by_name(experiment)

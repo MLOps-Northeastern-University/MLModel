@@ -127,3 +127,12 @@ def test_a_block_of_the_transformer_settings_cant_be_tuned_whole(tmp_path):
     tune = {"mct": {"trials": 1, "space": {"diary": {"type": "float", "low": 0.1, "high": 1}}}}
     with pytest.raises(ConfigError, match="block of settings"):
         TuneModels(config(tmp_path, tune, entries=(entry,)), MemoryTracker())
+
+
+def test_an_error_metric_is_minimised(tmp_path):
+    tracker = MemoryTracker()
+    out = TuneModels(config(tmp_path, logistic(3), metric="cv/state_now/score_mae"), tracker).run(data(), SPLIT)
+    values = [r.latest("cv/state_now/score_mae") for r in tracker.runs.values() if r.name.startswith("trial-")]
+    assert out["window_logistic"]["value"] == min(values)
+    with pytest.raises(ConfigError, match="not a count or a spread"):
+        TuneModels(config(tmp_path, logistic(2), metric="cv/state_now/off_auc_fold_sd"), MemoryTracker())

@@ -143,6 +143,9 @@ class Dataset:
 
     def __post_init__(self):
         _require_columns(self.hours, (PARTICIPANT, HOUR_INDEX), "hours")
+        hour = pd.to_numeric(self.hours[HOUR_INDEX], errors="coerce")
+        if hour.isna().any() or not (hour == hour.round()).all():
+            raise SchemaError(f"hours: every {HOUR_INDEX} must be a whole number")
         if self.hours.duplicated([PARTICIPANT, HOUR_INDEX]).any():
             raise SchemaError(f"hours: a participant has the same {HOUR_INDEX} twice")
         if not self.labels.index.equals(self.hours.index):
@@ -176,7 +179,9 @@ class Dataset:
             hours=self.hours[keep],
             labels=self.labels[keep],
             features=None if self.features is None else self.features[keep],
-            windows=None if self.windows is None else {p: w for p, w in self.windows.items() if p in wanted},
+            # Only the wanted participants' windows are opened: windows can be a lazy store of every patient.
+            windows=None if self.windows is None else {p: self.windows[p] for p in sorted(wanted)
+                                                       if p in set(self.windows.keys())},
             events=rows(self.events),
             patients=rows(self.patients),
         )

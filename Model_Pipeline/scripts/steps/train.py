@@ -17,9 +17,14 @@ artifacts/tuned_params.json), merged over its config; train refuses settings tun
 other data or another configuration of the candidate.
 
 Before any candidate trains, the shuffled-label check (train.leakage_check): a model trained on
-labels shuffled among the training hours must score near chance. If it doesn't, something other
-than the movement gives the answer away (an ID, the clock, a patient in both training and
-validation), and the run stops with a GateError.
+labels shuffled among the training hours must score near chance on the real labels. If it doesn't,
+the labels are reaching the model through its inputs (for example through check-ins or event
+fields built from the diary), and the run stops with a GateError. It can't catch a shortcut that
+works with shuffled labels too, such as a patient ID or the clock: those need the ablations.
+
+The test patients are scored once per patient split: a second score_test run on the same split is
+refused (artifacts/test_scored/<split hash>.json records the first). Each run starts by removing the
+last run's candidates.json and predictions, so a failed run never leaves stale ones behind.
 
 MLflow, through the Tracker:
 
@@ -54,7 +59,7 @@ import numpy as np
 from scripts.core.errors import ConfigError, GateError
 from scripts.data.folds import read_split
 from scripts.experiments import (
-    concat, cross_validate, fresh, load_development, named, read_tuned, rows, score, write_predictions)
+    concat, cross_validate, fresh, load_development, named, provenance, read_tuned, rows, score, write_predictions)
 from scripts.models.registry import candidates
 from scripts.utils.file_io import write_json
 from scripts.utils.logging_setup import get_logger, log_step
@@ -93,16 +98,24 @@ class TrainModels:
             split.check(data.participants)
             fingerprint = "given"
         tuned = read_tuned(self.artifacts, models, split, fingerprint) if self.settings["use_tuned"] else {}
-        models = [(name, fresh(model, tuned[name]) if name in tuned else model) for name, model in models]
+        models = [(name, fresh(model, tuned[name]["params"]) if name in tuned else model) for name, model in models]
+        marker = self.artifacts / "test_scored" / f"{split.hash}.json"
+        if score_test and marker.exists():
+            raise ConfigError(f"the test patients were already scored for split {split.hash} ({marker}). They're "
+                              "scored once; delete that file only to score them again on purpose")
+        self._clear_outputs()
         dev = data.subset(split.development)
         test = data.subset(split.test) if score_test else None
         stamp = dt.datetime.now(dt.timezone.utc).strftime("%Y%m%d-%H%M%S")
+        code_tags, code_params = provenance()
 
         with self.tracker.run("train", tags={"owner": "P2", "split_hash": split.hash, "data_fingerprint": fingerprint,
-                                             "test_scored": str(score_test).lower()}):
-            self.tracker.log_params({"train": self.settings, "models": self.cfg["models"],
+                                             "test_scored": str(score_test).lower(), **code_tags}):
+            self.tracker.log_params({"train": self.settings, "models": self.cfg["models"], "environment": code_params,
                                      "split": {"hash": split.hash, "test": len(split.test),
-                                               "development": len(split.development), "folds": len(split.folds)}})
+                                               "development": len(split.development), "folds": len(split.folds)},
+                                     "tuned": {name: {k: entry.get(k) for k in ("study", "best_trial", "tuned_at")}
+                                               for name, entry in tuned.items()}})
             if score_test:
                 logger.warning("scoring the test patients: do this once, at the end of model work",
                                extra={"event": "test_scored"})
@@ -117,7 +130,19 @@ class TrainModels:
                     frames.setdefault(label, []).append(frame)
             write_predictions(self.artifacts / "predictions", frames)
             write_json(results, self.artifacts / "candidates.json")
+            if score_test:
+                write_json({"split_hash": split.hash, "scored_at": stamp, "candidates": [r["name"] for r in results]},
+                           marker)
         return results
+
+    def _clear_outputs(self):
+        """Remove the last run's candidates.json and predictions, so a run that fails halfway never leaves
+        older outputs looking like its own (the saved models stay: each has its own dated folder)."""
+        (self.artifacts / "candidates.json").unlink(missing_ok=True)
+        folder = self.artifacts / "predictions"
+        if folder.exists():
+            for path in folder.glob("*.csv"):
+                path.unlink()
 
     def _candidate(self, name, template, dev, test, split, stamp, tuned):
         seeds = self.settings["seeds"]

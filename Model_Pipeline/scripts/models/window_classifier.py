@@ -3,8 +3,8 @@
 Owner: P2.
 
 The baselines the motor causal transformer has to beat (MODEL.md, Experiment order, stage 0). They
-follow the prototype's best version (team-hub/exploration/baselines/window_classifier.py, harnet10
-features only):
+follow the prototype's best version (harnet10 features only; MODEL.md, Experiment order, has its
+results):
 
     - every worn window of an answered hour takes that hour's label;
     - one classifier per label (a target at a horizon) reads the window's 1,024 harnet10 features
@@ -22,8 +22,8 @@ Two families, which differ only in the classifier:
     predictions = model.predict(data)        # every diary hour, and every worn window
 
 Doses are left out: in the prototype every dose feature tried (raw LEDD, LEDD relative to the patient's
-usual dose, timing only) made these classifiers worse on new patients (EXPERIMENTS.md, Window
-classifiers), because each lets a model learn the training patients' routines.
+usual dose, timing only) made these classifiers worse on new patients (within-patient OFF AUC 0.49-0.56 with them,
+0.67 without), because each lets a model learn the training patients' routines.
 
 Training reads at most windows_per_hour windows from each answered hour (60, sampled with the seed), so
 every hour counts about the same and the training set fits in memory. Class weights come from the
@@ -33,10 +33,11 @@ it weren't there.
 
 harnet10's features come from the shared cache (motor_causal_transformer/harnet.py, feature_cache), so
 the transformer and these baselines compute them once. A saved model records harnet10's weights
-fingerprint, and predict refuses other weights. The classifiers are saved with joblib, which is pickle:
-load only models this pipeline wrote.
+fingerprint, and predict refuses other weights. The classifiers are saved with joblib, which is pickle,
+so loading checks the file's SHA-256 against the one saved beside it before unpickling anything.
 """
 
+import hashlib
 import json
 import numbers
 from abc import abstractmethod
@@ -212,16 +213,26 @@ class WindowClassifier(Model):
     # ---- save and load -------------------------------------------------------------------------
 
     def _save_weights(self, folder):
+        import sklearn
         joblib.dump(self._classifiers, Path(folder) / CLASSIFIERS_FILE)
         (Path(folder) / INFO_FILE).write_text(json.dumps(
-            {"harnet10": self._fingerprint, "prior": self._prior, "result": self._result}, indent=1),
-            encoding="utf-8")
+            {"harnet10": self._fingerprint, "prior": self._prior, "result": self._result,
+             "classifiers_sha256": _sha256(Path(folder) / CLASSIFIERS_FILE), "scikit_learn": sklearn.__version__},
+            indent=1), encoding="utf-8")
 
     def _load_weights(self, folder):
+        """Check the pickle's SHA-256 before unpickling it (unpickling runs code), and warn on another
+        scikit-learn version (a pickled pipeline may not load or behave the same under it)."""
+        import sklearn
+        info = json.loads((Path(folder) / INFO_FILE).read_text(encoding="utf-8"))
+        if _sha256(Path(folder) / CLASSIFIERS_FILE) != info.get("classifiers_sha256"):
+            raise ModelError(f"{folder}: {CLASSIFIERS_FILE} isn't the file this model saved (its SHA-256 differs)")
+        if info.get("scikit_learn", "").split(".")[:2] != sklearn.__version__.split(".")[:2]:
+            logger.warning("%s was saved with scikit-learn %s, this is %s", folder, info.get("scikit_learn"),
+                           sklearn.__version__, extra={"event": "sklearn_version_differs"})
         self._classifiers = joblib.load(Path(folder) / CLASSIFIERS_FILE)
         if set(self._classifiers) != set(self.labels):
             raise ModelError(f"{folder}: the saved classifiers don't match the model's labels")
-        info = json.loads((Path(folder) / INFO_FILE).read_text(encoding="utf-8"))
         self._fingerprint, self._prior, self._result = info["harnet10"], info["prior"], info["result"]
 
 
@@ -271,6 +282,14 @@ class WindowBoosting(WindowClassifier):
                              HistGradientBoostingClassifier(max_iter=p["iterations"], learning_rate=p["learning_rate"],
                                                             max_leaf_nodes=p["leaves"], early_stopping=False,
                                                             random_state=seed))
+
+
+def _sha256(path):
+    digest = hashlib.sha256()
+    with open(path, "rb") as f:
+        for block in iter(lambda: f.read(1 << 20), b""):
+            digest.update(block)
+    return digest.hexdigest()
 
 
 def _hour_rows(time_s, hour_index, rows):

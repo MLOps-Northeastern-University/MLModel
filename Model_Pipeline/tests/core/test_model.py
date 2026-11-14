@@ -377,3 +377,58 @@ def test_a_window_model_must_read_windows():
 
     with pytest.raises(ConfigError, match="must need the windows group"):
         NoWindows(["state"])
+
+
+def test_a_failed_refit_leaves_the_model_unfitted():
+    class Flaky(Prior):
+        fail = False
+
+        def _fit(self, train, val, sample_weight, seed):
+            if self.fail:
+                raise RuntimeError("out of memory")
+            super()._fit(train, val, sample_weight, seed)
+
+    data = make_dataset(SPEC, n_participants=3)
+    model = Flaky(["state"], spec=SPEC).fit(data)
+    model.fail = True
+    with pytest.raises(RuntimeError):
+        model.fit(data)
+    assert not model.is_fitted
+    with pytest.raises(NotFittedError):
+        model.predict(data)
+
+
+def test_sample_weights_reach_the_family_rescaled_to_average_one():
+    seen = {}
+
+    class Recorder(Prior):
+        def _fit(self, train, val, sample_weight, seed):
+            seen["w"] = sample_weight
+            super()._fit(train, val, sample_weight, seed)
+
+    data = make_dataset(SPEC, n_participants=3)
+    n = len(data.hours)
+    Recorder(["state"], spec=SPEC).fit(data, sample_weight=np.r_[np.zeros(1), np.full(n - 1, 4.0)])
+    assert seen["w"][0] == 0 and np.allclose(seen["w"][1:][data.labels["state_now"].notna().to_numpy()[1:]], 1.0)
+    unlabelled = data.labels.copy()
+    unlabelled.iloc[0] = np.nan                                         # one hour with no answer at all
+    data = replace(data, labels=unlabelled)
+    with pytest.raises(ConfigError, match="0 on every hour"):           # weight only where nothing is learned
+        Recorder(["state"], spec=SPEC).fit(data, sample_weight=np.r_[np.ones(1), np.zeros(n - 1)])
+
+
+def test_a_family_cant_override_the_checked_lifecycle_or_repeat_a_target():
+    with pytest.raises(TypeError, match=r"overrides \['predict'\]"):
+        class Sneaky(Prior):
+            def predict(self, data):
+                return None
+    with pytest.raises(ConfigError, match="named twice"):
+        Prior(["state", "state"], spec=SPEC)
+
+
+def test_hour_index_must_be_whole_numbers():
+    from scripts.core.data import Dataset
+    for bad in ([0, np.nan], [0, 1.5]):
+        with pytest.raises(SchemaError, match="whole number"):
+            Dataset(SPEC, pd.DataFrame({"participant_id": ["A", "A"], "hour_index": bad}),
+                    pd.DataFrame({"state_now": [3.0, 3.0]}))

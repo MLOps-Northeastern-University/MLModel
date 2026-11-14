@@ -78,3 +78,8 @@ def test_load_refuses_a_folder_without_a_manifest_or_of_an_unknown_family(tmp_pa
     (tmp_path / "manifest.json").write_text(json.dumps({"family": "svm"}), encoding="utf-8")
     with pytest.raises(ModelError, match="doesn't know"):
         registry.load(tmp_path)
+
+
+def test_a_name_with_a_trailing_newline_is_refused():
+    with pytest.raises(ConfigError, match="name must be"):
+        registry.candidates(config({"name": "x\n", "family": "window_logistic"}))

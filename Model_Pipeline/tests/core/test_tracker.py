@@ -183,3 +183,19 @@ def test_tags_become_strings(tracker):
     with tracker.run("train") as run_id:
         tracker.set_tags({"feature_spec_version": 3})
     assert ("tags", run_id, {"feature_spec_version": "3"}) in tracker.calls
+
+
+def test_a_failing_run_end_doesnt_hide_the_error_that_ended_the_run():
+    from scripts.tracking.memory_tracker import MemoryTracker
+
+    class Flaky(MemoryTracker):
+        def _end_run(self, run_id, status):
+            raise ConnectionError("server down")
+
+    tracker = Flaky()
+    with pytest.raises(ValueError, match="the real error"):
+        with tracker.run("train"):
+            raise ValueError("the real error")
+    with pytest.raises(ConnectionError):                 # a clean block whose run can't be closed says so
+        with tracker.run("train"):
+            pass

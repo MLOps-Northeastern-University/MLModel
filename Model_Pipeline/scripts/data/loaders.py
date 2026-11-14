@@ -9,7 +9,7 @@ touches the windows. hours and labels are always read: every diary hour, with ea
 target's label derived as core/targets.py says. Windows are memory-mapped one participant
 at a time, on first use, so a Dataset of every patient takes almost no memory.
 
-The files, from config paths (the data pipeline's layout, team-hub/Data-Pipeline-Changes.md):
+The files, from config paths (the layout the data pipeline writes):
 
     hours_csv        every diary hour: answers, kinesia_text, scores, bias columns
     features_csv     the hourly features (features group)
@@ -71,7 +71,11 @@ def read_window_spec(folder):
         raise SchemaError(f"no {MANIFEST} in {folder}: can't tell how the windows were cut")
     manifest = json.loads(path.read_text(encoding="utf-8"))
     try:
-        return WindowSpec(manifest["spec_version"], manifest["seconds"], manifest["rate_hz"], manifest["axes"])
+        values = {k: manifest[k] for k in ("spec_version", "seconds", "rate_hz", "axes")}
+        try:
+            return WindowSpec.from_config({"windows": values})     # the same checks as the config's spec
+        except ConfigError as e:
+            raise SchemaError(f"{path}: {e}") from None
     except KeyError as missing:
         raise SchemaError(f"{path} has no {missing}") from None
 
@@ -119,6 +123,8 @@ def load_dataset(cfg, groups=(), participants=None, targets=tuple(TARGETS)):
         absent = [c for c in columns if c not in table.columns]
         if absent:
             raise SchemaError(f"features_csv has no {absent}")
+        if table.duplicated([PARTICIPANT, HOUR_INDEX]).any():
+            raise SchemaError(f"features_csv has a participant's {HOUR_INDEX} twice")
         merged = hours[[PARTICIPANT, HOUR_INDEX]].merge(
             table[[PARTICIPANT, HOUR_INDEX, *columns]], on=[PARTICIPANT, HOUR_INDEX], how="left")
         parts["features"] = merged[columns].set_axis(names, axis=1).set_axis(hours.index)

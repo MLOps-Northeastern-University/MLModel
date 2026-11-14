@@ -166,3 +166,22 @@ def test_the_families_are_named_and_read_only_windows():
     assert (WindowLogistic.family, WindowBoosting.family) == ("window_logistic", "window_boosting")
     assert WindowLogistic.needs == WindowBoosting.needs == ("windows",)
     assert WindowLogistic.scores_windows and WindowBoosting.scores_windows
+
+
+def test_scaling_every_sample_weight_changes_nothing():
+    data = dataset()
+    train = data.subset(["A", "B", "C"])
+    weight = np.where(train.hours.participant_id.to_numpy() == "A", 2.0, 1.0)
+    one = WindowLogistic(["state"], ["now"], spec=SPEC).fit(train, sample_weight=weight, seed=0)
+    tiny = WindowLogistic(["state"], ["now"], spec=SPEC).fit(train, sample_weight=weight * 0.01, seed=0)
+    np.testing.assert_allclose(one.predict(data).probs["state_now"], tiny.predict(data).probs["state_now"], atol=1e-9)
+    assert one._prior == tiny._prior
+
+
+def test_a_tampered_pickle_is_refused_before_it_is_unpickled(tmp_path):
+    model, _ = fitted(WindowLogistic, {})
+    model.save(tmp_path / "m")
+    with open(tmp_path / "m" / "weights" / "classifiers.joblib", "ab") as f:
+        f.write(b"extra")
+    with pytest.raises(ModelError, match="SHA-256"):
+        WindowLogistic.load(tmp_path / "m")

@@ -20,7 +20,8 @@ params (its family's defaults, or set in its config), so a typo fails before any
 Each trial fits the candidate with the sampled settings merged over its config, on every fold of the
 patient split's development patients, with tune.seed (experiments.cross_validate, as train does),
 and returns its score on the selection metric (selection.metric). The same metric as selection, by
-design: tuning for one score and choosing by another would optimise the wrong thing. The test
+design: tuning for one score and choosing by another would optimise the wrong thing. A score is
+maximised, or minimised if lower is better (an error, core/metrics.higher_is_better). The test
 patients are never loaded. A transformer trial that only changes the diary step reuses each fold's
 cached pretrained body (motor_causal_transformer/pretrained_cache.py), so it costs only that step.
 
@@ -61,9 +62,11 @@ import warnings
 from pathlib import Path
 
 from scripts.core.errors import ConfigError, ModelError, TrackingError
+from scripts.core.metrics import higher_is_better
 from scripts.core.tracker import validate_metric_name
 from scripts.data.folds import read_split
-from scripts.experiments import candidate_fingerprint, cross_validate, fresh, load_development, write_tuned
+from scripts.experiments import (
+    candidate_fingerprint, cross_validate, fresh, load_development, provenance, write_tuned)
 from scripts.models.registry import candidates
 from scripts.utils.logging_setup import get_logger
 
@@ -109,11 +112,12 @@ class TuneModels:
         self.folder.mkdir(parents=True, exist_ok=True)
         metric = self.settings["metric"]
         out = {}
+        code_tags, code_params = provenance()
         with self.tracker.run("tune", tags={"owner": "P2", "split_hash": split.hash, "data_fingerprint": fingerprint,
-                                            "metric": metric}):
-            self.tracker.log_params({"tune": {"seed": self.settings["seed"], "metric": metric,
-                                              "candidates": {n: c["trials"] for n, c in
-                                                             self.settings["candidates"].items()}}})
+                                            "metric": metric, **code_tags}):
+            trials = {n: c["trials"] for n, c in self.settings["candidates"].items()}
+            self.tracker.log_params({"environment": code_params,
+                                     "tune": {"seed": self.settings["seed"], "metric": metric, "candidates": trials}})
             for name in names:
                 out[name] = self._candidate(name, dev, split, fingerprint)
                 write_tuned(self.artifacts, {name: out[name]})     # after each, so a crash keeps the finished ones
@@ -131,11 +135,15 @@ class TuneModels:
             warnings.simplefilter("ignore", optuna.exceptions.ExperimentalWarning)
             storage = optuna.storages.RDBStorage(f"sqlite:///{(self.folder / STUDIES_FILE).as_posix()}",
                                                  heartbeat_interval=60, grace_period=180)
-        study = optuna.create_study(study_name=study_name, storage=storage, direction="maximize", load_if_exists=True)
+        direction = "maximize" if higher_is_better(metric) else "minimize"      # an error is minimised
+        study = optuna.create_study(study_name=study_name, storage=storage, direction=direction, load_if_exists=True)
         # Seeded by how far the study got, so a resumed study doesn't redraw the settings it already tried.
         study.sampler = optuna.samplers.TPESampler(seed=seed + len(study.trials))
         with self.tracker.run(name, tags={"family": template.family, "study": study_name}):
             self.tracker.log_params({"space": config["space"], "trials": config["trials"]})
+            with warnings.catch_warnings():                # experimental in Optuna, relied on on purpose
+                warnings.simplefilter("ignore", optuna.exceptions.ExperimentalWarning)
+                optuna.storages.fail_stale_trials(study)   # a trial a crash left "running" is marked failed
             done = _complete(study)
             remaining = max(0, config["trials"] - len(done))
             logger.info("tuning %s: %d of %d trials done, %d to go", name, len(done), config["trials"], remaining,
@@ -247,6 +255,8 @@ def _settings(cfg, models):
         raise ConfigError(f"selection.metric (what tuning maximises): {e}") from None
     if not metric.startswith("cv/"):
         raise ConfigError(f"selection.metric must be a cross-validation score (cv/...), not {metric!r}")
+    if metric.endswith(("/hours", "_fold_sd")):
+        raise ConfigError(f"selection.metric must be a score, not a count or a spread: {metric!r}")
     seed = section.get("seed")
     if isinstance(seed, bool) or not isinstance(seed, int) or seed < 0:
         raise ConfigError(f"tune.seed must be a non-negative whole number, not {seed!r}")

@@ -63,21 +63,39 @@ def load_development(cfg, split, models, include_test=False):
     split.check(everyone)
     groups = sorted({g for _, m in models for g in m.needs} | {"patients"})
     people = list(split.development) + (list(split.test) if include_test else [])
-    return load_dataset(cfg, groups=groups, participants=people), data_fingerprint(paths, groups)
+    return load_dataset(cfg, groups=groups, participants=people), data_fingerprint(paths)
 
 
-def data_fingerprint(paths, groups) -> str:
-    """Names the data a run read: the tables' contents, and the window files' names and sizes."""
+TABLES = ("hours_csv", "events_csv", "patients_csv", "features_csv")
+SAMPLE_BYTES = 1 << 20
+
+
+def data_fingerprint(paths) -> str:
+    """Names the data a run could read, whichever groups it loaded, so tune and train agree on it.
+
+    Every input table in paths that exists, by content; the windows folder by its manifest, and each
+    file by its name, size and the first and last MiB of its contents (reading every window would take
+    minutes; a file reprocessed in place changes in those bytes, even at the same size).
+    """
     digest = hashlib.blake2b(digest_size=8)
-    tables = ["hours_csv"] + [f"{g}_csv" for g in groups if g in ("events", "patients", "features")]
-    for key in tables:
-        with open(paths[key], "rb") as f:
+    for key in TABLES:
+        path = paths.get(key)
+        if path is None or not Path(path).exists():
+            continue
+        digest.update(key.encode("utf-8"))
+        with open(path, "rb") as f:
             for block in iter(lambda: f.read(1 << 20), b""):
                 digest.update(block)
-    if "windows" in groups:
-        folder = Path(paths["windows_folder"])
+    folder = Path(paths["windows_folder"]) if paths.get("windows_folder") else None
+    if folder is not None and folder.exists():
         for path in sorted(p for p in folder.rglob("*") if p.is_file()):
-            digest.update(f"{path.relative_to(folder).as_posix()}:{path.stat().st_size};".encode("utf-8"))
+            size = path.stat().st_size
+            digest.update(f"{path.relative_to(folder).as_posix()}:{size};".encode("utf-8"))
+            with open(path, "rb") as f:
+                digest.update(f.read(SAMPLE_BYTES))
+                if size > 2 * SAMPLE_BYTES:
+                    f.seek(-SAMPLE_BYTES, 2)
+                    digest.update(f.read(SAMPLE_BYTES))
     return digest.hexdigest()
 
 
@@ -267,7 +285,10 @@ def write_tuned(folder, entries: Mapping[str, Mapping]) -> Path:
 
 
 def read_tuned(folder, models, split, fingerprint) -> Dict[str, Dict]:
-    """{candidate: tuned settings} for the candidates in the file, checked against what they were tuned on.
+    """{candidate: its entry} for the candidates in the file, checked against what they were tuned on.
+
+    An entry holds "params" (the settings to merge over the candidate's config) and where they came
+    from ("study", "best_trial", "value", "tuned_at").
 
     Raises:
         ConfigError: An entry tuned on another split, other data, or another configuration of the
@@ -288,8 +309,19 @@ def read_tuned(folder, models, split, fingerprint) -> Dict[str, Dict]:
         if stale:
             raise ConfigError(f"{name} was tuned on a different {' and '.join(stale)}: tune again, or set "
                               "train.use_tuned to false")
-        out[name] = entry["params"]
+        out[name] = entry
     return out
+
+
+# ---- what every run records -------------------------------------------------------------------
+
+def provenance():
+    """Tags and params that say which code made a run: the git commit (and if it had uncommitted
+    changes), Python and the library versions."""
+    from scripts.utils.logging_setup import environment
+    env = environment(packages=("numpy", "pandas", "scikit-learn", "mlflow", "torch", "optuna"))
+    tags = {"git_commit": env["git_commit"] or "unknown", "git_dirty": str(env["git_dirty"]).lower()}
+    return tags, {"python": env["python"], "packages": env["packages"]}
 
 
 # ---- helpers ------------------------------------------------------------------------------------
@@ -342,5 +374,5 @@ def _mean_over(parts):
 
 
 __all__ = ["CVResult", "candidate_fingerprint", "concat", "cross_validate", "data_fingerprint", "fresh",
-           "load_development", "log_curves", "merge_params", "named", "pretraining_summary", "read_tuned", "rows",
-           "score", "slug", "write_predictions", "write_tuned"]
+           "load_development", "log_curves", "merge_params", "named", "pretraining_summary", "provenance", "read_tuned",
+           "rows", "score", "slug", "write_predictions", "write_tuned"]

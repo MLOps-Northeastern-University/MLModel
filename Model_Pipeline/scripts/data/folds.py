@@ -123,6 +123,9 @@ class Split:
     def from_json(cls, obj: Mapping) -> "Split":
         if obj.get("format_version") != FORMAT_VERSION:
             raise SchemaError(f"split file format {obj.get('format_version')!r}, this code reads {FORMAT_VERSION}")
+        test, folds = obj.get("test"), obj.get("folds")
+        if not (isinstance(test, list) and isinstance(folds, list) and all(isinstance(f, list) for f in folds)):
+            raise SchemaError("the split file's test must be a list of patients and folds a list of lists")
         try:
             return cls(obj["test"], obj["folds"], obj["seed"], obj.get("rule", ""), obj.get("history", ()))
         except (KeyError, TypeError) as e:
@@ -149,6 +152,11 @@ def make_folds(patients: Mapping[str, Tuple[bool, bool]], n_folds: int, seed: in
         raise ConfigError(f"the number of folds must be a whole number of 2 or more, not {n_folds!r}")
     if len(patients) < n_folds:
         raise ConfigError(f"{len(patients)} development patients can't fill {n_folds} folds")
+    no_dbs = sum(not bool(v[0]) for v in patients.values())
+    if 0 < no_dbs < n_folds:
+        logger.warning("only %d development patients without DBS for %d folds: %d fold(s) can't score OFF for "
+                       "patients without DBS", no_dbs, n_folds, n_folds - no_dbs,
+                       extra={"event": "folds_short_of_no_dbs", "no_dbs": no_dbs, "folds": n_folds})
     rng = np.random.default_rng(seed)
     ids = sorted(patients)                   # so the input's order never changes the folds
     facts = {p: (int(bool(patients[p][0])), int(bool(patients[p][1]))) for p in ids}
@@ -276,6 +284,7 @@ def patient_facts(data) -> Dict[str, Tuple[bool, bool]]:
     """{patient: (has DBS, has any dyskinetic hour)}, from a Dataset with the patients group."""
     if data.patients is None:
         raise SchemaError("the split needs the patients table (DBS)")
+    data.check(("patients",), data.spec)      # dbs must be True or False: "no" or NaN would read as True
     dbs = dict(zip(data.patients[PARTICIPANT], data.patients["dbs"].astype(bool)))
     state = data.labels["state_now"].to_numpy()
     dyskinetic = np.isin(state, list(STATE_GROUPS["dyskinetic"]))

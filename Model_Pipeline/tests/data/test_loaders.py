@@ -123,3 +123,16 @@ def test_a_missing_file_or_unknown_group_is_reported(cfg, tmp_path):
         load_dataset(cfg, groups=("events",))
     with pytest.raises(ConfigError, match="unknown input group"):
         load_dataset(cfg, groups=("medication",))
+
+
+def test_duplicate_feature_rows_and_a_bad_window_spec_are_schema_errors(tmp_path):
+    paths = write_files(tmp_path)
+    features = pd.read_csv(paths["features_csv"])
+    pd.concat([features, features.iloc[:1]]).to_csv(paths["features_csv"], index=False)
+    cfg = make_config(tmp_path, features_csv=paths["features_csv"], paths=paths)
+    with pytest.raises(SchemaError, match="twice"):
+        load_dataset(cfg, groups=("features",))
+    (tmp_path / "windows" / "manifest.json").write_text(json.dumps({"spec_version": 1, "seconds": 0, "rate_hz": 30,
+                                                                    "axes": 3}))
+    with pytest.raises(SchemaError, match="seconds"):
+        load_dataset(cfg, groups=("windows",))

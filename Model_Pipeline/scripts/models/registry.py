@@ -110,7 +110,7 @@ def build(entry: Mapping, spec: WindowSpec, targets=None, horizons=None, where="
     if unknown:
         raise ConfigError(f"{where} has unknown key(s) {sorted(unknown)}; allowed: {sorted(CANDIDATE_KEYS)}")
     name = entry.get("name")
-    if not isinstance(name, str) or not _NAME.match(name):
+    if not isinstance(name, str) or not _NAME.fullmatch(name):
         raise ConfigError(f"{where}: name must be lowercase letters, digits and underscores, not {name!r}")
     where = f"candidate {name!r}"
     cls = family_class(_required(entry, "family", where))

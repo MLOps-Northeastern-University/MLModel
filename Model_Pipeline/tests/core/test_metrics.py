@@ -87,3 +87,21 @@ def test_label_scores_for_tremor_and_sleep():
 def test_mean_scores_ignores_nan_parts():
     out = mean_scores({1: {"state_now": {"off_auc": 0.6, "x": math.nan}}, 2: {"state_now": {"off_auc": 0.8}}})
     assert out["state_now"]["off_auc"] == pytest.approx(0.7) and math.isnan(out["state_now"]["x"])
+
+
+def test_errors_and_spreads_are_better_lower_and_everything_else_higher():
+    from scripts.core.metrics import higher_is_better
+    assert higher_is_better("cv/state_now/off_auc_within") and higher_is_better("macro_f1")
+    assert not higher_is_better("cv/state_now/score_mae") and not higher_is_better("score_mae_within")
+    assert not higher_is_better("cv/state_now/off_auc_fold_sd")
+
+
+def test_bad_inputs_are_refused_not_scored():
+    with pytest.raises(ConfigError, match="finite"):
+        auc([True, False, True], [0.1, float("nan"), 0.3])              # scikit-learn refuses this too
+    with pytest.raises(ConfigError, match="class indices"):
+        label_scores("tremor_now", [0, 3], np.eye(3)[[0, 1]], ["A", "A"])
+    with pytest.raises(ConfigError, match="class indices"):
+        label_scores("tremor_now", [0, 1.5], np.eye(3)[[0, 1]], ["A", "A"])
+    with pytest.raises(ConfigError, match="one value per hour"):
+        label_scores("state_now", [0, 3], np.eye(7)[[0, 3]], ["A", "A"], no_dbs=np.array([True]))

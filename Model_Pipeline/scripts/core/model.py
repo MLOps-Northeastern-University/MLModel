@@ -214,6 +214,14 @@ class Model(ABC):
     needs: ClassVar[Tuple[str, ...]] = ()
     scores_windows: ClassVar[bool] = False
 
+    def __init_subclass__(cls, **kwargs):
+        """A family writes the hooks, never fit, predict, save or load, so the base class's checks always run."""
+        super().__init_subclass__(**kwargs)
+        sealed = sorted({"fit", "predict", "save", "load"} & set(vars(cls)))
+        if sealed:
+            raise TypeError(f"{cls.__name__} overrides {sealed}: a model family writes _fit, _predict, "
+                            "_save_weights and _load_weights instead, so the contract's checks can't be skipped")
+
     def __init__(self, targets, horizons=tuple(HORIZONS), params=None, spec=None):
         if not self.family:
             raise ConfigError(f"{type(self).__name__} must set a family name")
@@ -223,6 +231,9 @@ class Model(ABC):
         if self.scores_windows and "windows" not in self.needs:
             raise ConfigError(f"{self.family} scores windows, so it must need the windows group")
         self.targets, self.horizons = tuple(targets), tuple(horizons)
+        for what, names in (("target", self.targets), ("horizon", self.horizons)):
+            if len(set(names)) != len(names):
+                raise ConfigError(f"{self.family}: a {what} is named twice in {list(names)}")
         if not self.targets or not self.horizons:
             raise ConfigError(f"{self.family}: name at least one target and one horizon")
         for name in self.targets:
@@ -273,7 +284,10 @@ class Model(ABC):
             train: The training Dataset.
             val: Optional validation Dataset, with different participants.
             sample_weight: Optional weight per training hour (bias mitigation), in
-                train.hours order: finite, 0 or more, not all 0.
+                train.hours order: finite, 0 or more, not all 0 on the hours with a label.
+                Only relative weights matter: they're rescaled to average 1 over the hours
+                that have one of the model's labels and a weight above 0, before the family
+                sees them.
             seed: Non-negative integer, for reproducible training.
 
         Returns:
@@ -292,7 +306,8 @@ class Model(ABC):
             shared = set(train.participants) & set(val.participants)
             if shared:
                 raise SchemaError(f"{len(shared)} participant(s) in both training and validation")
-        weights = _checked_weights(sample_weight, len(train.hours))
+        weights = _normalised_weights(_checked_weights(sample_weight, len(train.hours)), train, self.labels)
+        self._training = None    # a fit that fails halfway leaves the model unfitted, never half-fitted
         with log_step(logger, "fit", model=self.family):
             logger.info("fitting %s on %d participants, %d hours", self.family, len(train.participants),
                         len(train.hours), extra={
@@ -450,6 +465,22 @@ class Model(ABC):
     @abstractmethod
     def _load_weights(self, folder):
         """Read what _save_weights wrote."""
+
+
+def _normalised_weights(weights, train, labels):
+    """weights rescaled to average 1 over the labelled hours that count (weight above 0).
+
+    So scaling every weight by the same amount changes nothing, and weights of only 0 and 1 stay
+    0 and 1: an hour of weight 0 is exactly as if it weren't there, even for a regularised model.
+    """
+    if weights is None:
+        return None
+    present = [label for label in labels if label in train.labels.columns]
+    labelled = train.labels[present].notna().any(axis=1).to_numpy() if present else np.ones(len(weights), bool)
+    counted = labelled & (weights > 0)
+    if not counted.any():
+        raise ConfigError("sample_weight is 0 on every hour with a label: nothing would be learned")
+    return weights / weights[counted].mean()
 
 
 def _checked_weights(sample_weight, n):

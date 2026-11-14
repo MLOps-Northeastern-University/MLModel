@@ -178,3 +178,44 @@ def test_it_loads_the_split_and_only_the_patients_it_needs_from_files(tmp_path):
     state = pd.read_csv(cfg["resolved_paths"]["artifacts_dir"] / "predictions" / "tremor_now.csv")
     assert set(state.participant_id) == {"COPS-1", "COPS-2"}           # the test patient wasn't even loaded
     assert result["final_params"] == {}
+
+
+def test_the_data_fingerprint_covers_every_table_and_the_window_files_contents(tmp_path):
+    from scripts.experiments import data_fingerprint
+    from tests.data.test_loaders import write_files
+    paths = write_files(tmp_path)
+    first = data_fingerprint(paths)
+    assert data_fingerprint(paths) == first                                    # whichever step asks
+    signal = tmp_path / "windows" / "COPS-1" / "signal.npy"
+    values = np.load(signal)
+    np.save(signal, values + 1.0)                                              # same size, new contents
+    assert data_fingerprint(paths) != first
+    np.save(signal, values)
+    assert data_fingerprint(paths) == first
+    events = pd.read_csv(paths["events_csv"]).assign(ledd=50.0)
+    events.to_csv(paths["events_csv"], index=False)
+    assert data_fingerprint(paths) != first                                    # a table a baseline never reads
+
+
+def test_the_test_patients_are_scored_once_per_split(tmp_path):
+    TrainModels(config(tmp_path, score_test=True, leakage=()), MemoryTracker()).run(data(), SPLIT)
+    assert (tmp_path / "test_scored" / f"{SPLIT.hash}.json").exists()
+    with pytest.raises(ConfigError, match="already scored"):
+        TrainModels(config(tmp_path, score_test=True, leakage=()), MemoryTracker()).run(data(), SPLIT)
+    TrainModels(config(tmp_path, leakage=()), MemoryTracker()).run(data(), SPLIT)    # without the test: fine
+
+
+def test_a_failed_run_leaves_no_outputs_from_the_last_one(tmp_path):
+    TrainModels(config(tmp_path, leakage=()), MemoryTracker()).run(data(), SPLIT)
+    assert (tmp_path / "candidates.json").exists() and list((tmp_path / "predictions").glob("*.csv"))
+    with pytest.raises(GateError):
+        TrainModels(config(tmp_path, max_auc=0.501), MemoryTracker()).run(data(), SPLIT)
+    assert not (tmp_path / "candidates.json").exists() and not list((tmp_path / "predictions").glob("*.csv"))
+
+
+def test_runs_record_the_code_they_came_from(tmp_path):
+    tracker = MemoryTracker()
+    TrainModels(config(tmp_path, leakage=()), tracker).run(data(), SPLIT)
+    train = tracker.find("train")
+    assert {"git_commit", "git_dirty"} <= set(train.tags)
+    assert "environment.packages.numpy" in train.params and "environment.python" in train.params
