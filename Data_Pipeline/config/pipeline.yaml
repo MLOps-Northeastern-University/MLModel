@@ -8,9 +8,15 @@ data:
   mode: sample
   sample_size: 5 # ignored when participants list is mentioned
   # When set, exactly these participants are processed, whatever the mode.
-  # The model team's 10: 5 with DBS and 5 without, so each of the 5 test folds
-  # holds one of each. COPS-4 is the smallest tremor-dominant participant.
-  participants: [COPS-3, COPS-4, COPS-11, COPS-18, COPS-24, COPS-25, COPS-42, COPS-44, COPS-46, COPS-60]
+  # The model's 60: every COPS participant except the 6 kept for the app demo
+  # (COPS-6, 41, 50, 51, 52, 59), which the model pipeline must never see. The model's
+  # patient split makes 10 of these 60 the test patients and the other 50 development.
+  participants: [COPS-1, COPS-2, COPS-3, COPS-4, COPS-5, COPS-7, COPS-8, COPS-9, COPS-10, COPS-11,
+                 COPS-12, COPS-13, COPS-14, COPS-15, COPS-16, COPS-17, COPS-18, COPS-19, COPS-20, COPS-21,
+                 COPS-22, COPS-23, COPS-24, COPS-25, COPS-26, COPS-27, COPS-28, COPS-29, COPS-30, COPS-31,
+                 COPS-32, COPS-33, COPS-34, COPS-35, COPS-36, COPS-37, COPS-38, COPS-39, COPS-40, COPS-42,
+                 COPS-43, COPS-44, COPS-45, COPS-46, COPS-47, COPS-48, COPS-49, COPS-53, COPS-54, COPS-55,
+                 COPS-56, COPS-57, COPS-58, COPS-60, COPS-61, COPS-62, COPS-63, COPS-64, COPS-65, COPS-66]
   # Zips already in paths.raw_dir are used instead of downloaded; with every listed
   # participant and Demographics.csv there, OSF isn't contacted at all.
   # Delete each downloaded zip once it's processed, to save disk space.
