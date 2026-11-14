@@ -310,17 +310,13 @@ After an Airflow run, the `dvc_version` task updates `dvc.lock` with `dvc commit
 
 **Getting a version:** `git checkout <commit>` and then `dvc pull` restore exactly the data of that commit. Without access to the remote, `dvc repro` rebuilds it from OSF, and `dvc.lock` shows whether the result matches.
 
-**Where the data is stored (the remote).** The data goes to a DVC remote, set once per machine. The repo has no shared remote yet. The first version (the sample run of 2026-10-25) is in a local folder remote, set with `--local`. To use a remote, choose one:
+**Where the data is stored (the remote).** The shared remote is the team's training-data bucket, `gs://team17-mlops-neu-training-data/cops-dvc`, set in `.dvc/config` for everyone. `dvc[gs]` is in `requirements.txt`. Sign in once with `gcloud auth application-default login`; your Google account needs Editor on the `team17-mlops-neu` project.
+
+The first version (the sample run of 2026-10-25) was pushed to a local folder remote, set with `--local` in `.dvc/config.local`, which isn't committed and overrides the shared remote on that machine. To move it to the bucket, no re-run is needed: `dvc push -r storage`, or remove the local remote with `dvc remote remove --local <name>` and then `dvc push`. A folder remote is still possible for working offline:
 
 ```bash
-# Google Cloud Storage (dvc[gs] is in requirements.txt). Sign in first: gcloud auth application-default login
-dvc remote add -d storage gs://<bucket>/cops-dvc
-
-# Or a folder outside the repo, until a bucket exists
 dvc remote add -d --local storage <path outside the repo>
 ```
-
-`--local` keeps a folder remote in `.dvc/config.local`, which is not committed, so each person's path stays their own. A bucket remote is committed in `.dvc/config` for everyone. Moving from a folder to a bucket later needs no re-run: add the bucket remote, then `dvc push`.
 
 ## Speed
 

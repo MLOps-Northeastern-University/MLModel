@@ -2,7 +2,7 @@
 
 Trains the Parkinson's off-risk model that runs on the phone. It reads the data pipeline's hourly table, trains and tunes models with participant-grouped splits, checks them for bias, and packages the best deployable one as a TFLite bundle for the Backend's model registry.
 
-> **Status:** skeleton. The shared config, utilities, alerts, synthetic test data, the run command's step list and the folder structure below are in place. Each module says what it's for and who owns it; owners fill in their own.
+> **Status:** the run command goes through every step, logged to MLflow, with alerts, and runs on GitHub Actions against the team's GCP project. Selection, the release gate, export and the registry (P4) are built; loading, training, evaluation and bias are stand-ins in `run_model_pipeline.py` until their owners merge them.
 
 ## Running
 
@@ -14,7 +14,106 @@ pytest -q                               # synthetic data only, nothing downloade
 python -m scripts.run_model_pipeline --no-mlflow   # every step; stand-ins for the unbuilt ones
 ```
 
-The training data is the data pipeline's output, versioned by DVC. Get it with `dvc pull` in `../Data_Pipeline` once the shared remote is set up. `paths.features_csv` in `config/model.yaml` points at it.
+Or with only Docker: `docker compose up -d mlflow` for a local MLflow at <http://localhost:5001>, then `docker compose run --rm train` for the pipeline and `docker compose run --rm tests` for the tests.
+
+The run command's options:
+
+| Option | What it does |
+|---|---|
+| `--config <file>` | Another config instead of `config/model.yaml` |
+| `--no-mlflow` | Keeps tracking in memory, so no MLflow server is needed |
+| `--no-register` | Checks every gate and builds the bundle, but releases nothing. CI uses it for every run except a push to `dev` or `main`. |
+
+The training data is the data pipeline's output, versioned by DVC. Get it with `dvc pull` in `../Data_Pipeline` (see [Training data](#training-data-dvc)). `paths.features_csv` in `config/model.yaml` points at it.
+
+## Running in the cloud
+
+Everything runs in the GCP project `team17-mlops-neu`, region `us-central1`. It's all defined as Terraform in [`../infra/`](../infra/), so `terraform plan` there shows what exists.
+
+| What | Where |
+|---|---|
+| Training data (DVC remote) | `gs://team17-mlops-neu-training-data/cops-dvc` |
+| MLflow server | Cloud Run service `mlflow`, private |
+| MLflow runs, parameters and metrics | Cloud SQL instance `mednova-db`, database `mlflow` |
+| MLflow files: plots, reports, bundles of each run | `gs://team17-mlops-neu-models/mlflow` |
+| Released bundles | `gs://team17-mlops-neu-models/parkinsons-risk/v<N>/`, once `paths.registry_dir` points there. It's a local folder for now. |
+| Images | Artifact Registry `ml`: `mlflow` (the server, from `mlflow/Dockerfile`) and `training` (this folder's image, one per release) |
+
+To use any of it, a teammate needs Editor on the project, and to run once:
+
+```bash
+gcloud auth login
+gcloud auth application-default login     # the login DVC and MLflow's Python client use
+gcloud config set project team17-mlops-neu
+```
+
+### Opening the hosted MLflow
+
+The server only lets in signed-in Google accounts, so a browser can't open its URL directly (403). Open it through a proxy that signs each request as you:
+
+```bash
+gcloud run services proxy mlflow --region=us-central1 --port=5001
+```
+
+Then open <http://localhost:5001>, and leave the command running while you use it.
+
+- If the local MLflow from `docker compose` is running, it already has port 5001: use `--port=5002`, or stop it with `docker compose stop mlflow`.
+- The server sleeps when unused, so the first page takes about 30 seconds.
+- To log runs to it from your laptop, set `MLFLOW_TRACKING_URI=http://localhost:5001` while the proxy runs.
+
+### CI: the model workflow
+
+[`.github/workflows/model.yml`](../.github/workflows/model.yml) runs the pipeline on GitHub Actions:
+
+1. Installs Python 3.11 and `requirements.txt`.
+2. Signs in to GCP as the `training` service account through Workload Identity Federation, so there's no key file, and gets an ID token for the hosted MLflow.
+3. Runs `python -m scripts.run_model_pipeline`, logged to the hosted MLflow. A failed gate fails the job.
+4. Uploads `artifacts/` and `logs/` as the run's `model-run` artifact, even when it fails.
+5. On a push to `dev` or `main` only: releases the model, and pushes the training image as `ml/training:<commit>`.
+
+**For now it only runs by hand:** Actions → Model → Run workflow. That button shows once the workflow is on `main`. The triggers for every pull request and push are in the file, commented out, until the real steps are merged.
+
+### Settings
+
+In the repo's Settings → Secrets and variables → Actions. Changing them needs repo admin.
+
+| Name | Kind | Value |
+|---|---|---|
+| `GCP_PROJECT_ID` | Variable | `team17-mlops-neu` |
+| `GCP_WIF_PROVIDER` | Variable | `projects/818790524724/locations/global/workloadIdentityPools/github/providers/mlmodel` |
+| `GCP_SERVICE_ACCOUNT` | Variable | `training@team17-mlops-neu.iam.gserviceaccount.com` |
+| `MLFLOW_TRACKING_URI` | Variable | `https://mlflow-pnpgeaktha-uc.a.run.app`, with no trailing slash: it's also the ID token's audience |
+| `ALERT_EMAIL` | Secret | Who gets the alerts, comma-separated |
+| `SMTP_HOST`, `SMTP_PORT` | Secret | `smtp.gmail.com`, `587` |
+| `SMTP_USER`, `SMTP_PASSWORD` | Secret | The sending Gmail account and its app password |
+
+The GCP values are variables, not secrets: the workflow reads them with `vars.`, and none of them grants access on its own. There's no GCP key anywhere; GCP checks GitHub's ID token instead, and only accepts it from this repo.
+
+To send alerts from your own machine, put the five alert settings in `Model_Pipeline/.env`, which Git ignores and `docker compose` reads.
+
+### Alerts
+
+[`scripts/alerts.py`](scripts/alerts.py) emails the team. Every subject starts with `[MedNOVA model]`, and every email links to the GitHub Actions run, or names the machine for a local run.
+
+| When | Sent by | Subject |
+|---|---|---|
+| A gate fails | the run command | `The production gate failed`, with the reason, such as `cv/state_now/off_auc: 0.500 vs 0.500` |
+| The run crashes on an unexpected error | the run command | `Run crashed: <error>`, with the stack trace |
+| A model is released | the run command | `parkinsons-risk v<N> released` |
+| Any other CI step fails: install, GCP sign-in, image push | `model.yml` | `CI job failed` |
+
+A run that only checks (`--no-register`) and passes sends nothing. An alert that can't be sent is logged and never fails the run. Slack works the same way with `SLACK_WEBHOOK_URL`, but the team uses email.
+
+### Training data (DVC)
+
+The data pipeline's output is versioned by DVC: `../Data_Pipeline/dvc.lock` in Git says which version, and the files are in the bucket. From `../Data_Pipeline`, signed in as above:
+
+```bash
+pip install "dvc[gs]"     # or the data pipeline's requirements.txt
+dvc pull                  # downloads the version dvc.lock names, including data/processed/hourly_features.csv
+```
+
+To publish a new version after changing the data pipeline: `dvc repro`, `dvc push`, then commit `dvc.lock`. An Airflow run pushes by itself; the commit is always by hand. See [Data_Pipeline/README.md](../Data_Pipeline/README.md), "Making a version".
 
 ## Code structure
 
@@ -37,7 +136,7 @@ scripts/
 │   └── memory_tracker.py  for tests
 ├── steps/                 one class per step, in the order they run
 ├── utils/                 config, logging and file helpers
-├── alerts.py              email and Slack alerts
+├── alerts.py              email (and Slack) alerts
 └── run_model_pipeline.py  runs the steps from the config
 tests/                     mirrors scripts/: tests/core, tests/models, ...
 ```
