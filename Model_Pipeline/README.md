@@ -11,7 +11,7 @@ With Python 3.11 (or 3.12), from `Model_Pipeline/`:
 ```bash
 pip install -r requirements.txt
 pytest -q                               # synthetic data only, nothing downloaded
-python -m scripts.run_model_pipeline    # lists the steps until they're built
+python -m scripts.run_model_pipeline --no-mlflow   # every step; stand-ins for the unbuilt ones
 ```
 
 The training data is the data pipeline's output, versioned by DVC. Get it with `dvc pull` in `../Data_Pipeline` once the shared remote is set up. `paths.features_csv` in `config/model.yaml` points at it.

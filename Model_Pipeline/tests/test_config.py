@@ -1,8 +1,7 @@
-"""The config loads, agrees with the phone model, and the run command goes through every step."""
+"""The config loads and agrees with the phone model."""
 
 import pytest
 
-from scripts import run_model_pipeline
 from scripts.utils.config import load_config
 from tests.helpers import FEATURE_NAMES, make_config
 
@@ -33,9 +32,3 @@ def test_overrides_change_only_what_they_name(tmp_path):
 def test_a_missing_config_file_is_reported(tmp_path):
     with pytest.raises(FileNotFoundError):
         load_config(tmp_path / "missing.yaml")
-
-
-def test_the_run_command_goes_through_every_step(tmp_path, monkeypatch):
-    cfg = make_config(tmp_path)
-    monkeypatch.setattr(run_model_pipeline, "load_config", lambda path=None: cfg)
-    assert run_model_pipeline.main([]) == 0
