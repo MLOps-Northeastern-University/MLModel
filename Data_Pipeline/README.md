@@ -115,19 +115,20 @@ The spec is `windows:` in the config (10 s, 30 Hz, 3 axes, `spec_version: 1`). I
 - **Warnings** (alert, the run carries on): fewer than 24 usable hours for a participant, under 50% of windows worn, wrists that still disagree after the orientation fix, and diary label issues.
 - **Bias** (`bias_report.md`): rows, participants, and the share of off, on, dyskinetic and asleep, per sex, age group, visit, DBS, Hoehn & Yahr stage and PD subtype. The model pipeline checks the model itself per group.
 
-## Sample run (2026-11-13)
+## Sample run (2026-11-14)
 
-The 5 sample participants (COPS-11, 18, 25, 44, 46), from zips already downloaded:
+The model team's 10 participants (`data.participants`: 5 with DBS, 5 without):
 
 | | |
 | --- | --- |
-| Processing | About 10 s for all 5 on a laptop, 4 at a time (plus about 1 min of downloading) |
-| Hours | 336 diary hours, 180 usable by the baselines |
-| Windows | 84,494, of which 76,360 worn. 231 hours are complete (360 windows) |
-| Doses | 56 |
-| Wrists | 2 left and 3 right. COPS-25's right watch was turned round. |
-| Checks | 0 critical, 4 warnings: COPS-11 has 15 usable hours; COPS-25's Z axis disagrees slightly between wrists (−0.11 over 12 hours); 6 diary scores without a label, for kinesia and for tremor |
-| Model contract | The output loads into Model_Pipeline's `Dataset` and passes `check()` for every input group: 190 state labels (63 asleep) and 99 tremor labels |
+| Hours | 1,080 diary hours, 789 usable by the baselines |
+| Windows | 311,695, of which 300,266 worn. 857 hours are complete (360 windows) |
+| Labels | 821 state (345 OFF, 152 ON, 52 dyskinetic, 272 asleep) and 523 tremor |
+| Doses | 174 |
+| Wrists | 6 left and 4 right. COPS-24 had only its left wrist recorded, so it uses that. Watches turned round: all of COPS-3, 4, 25 and 42, most of COPS-60 (re-strapped after day 0) and part of COPS-18 |
+| Checks | 0 critical, 7 warnings: COPS-11 has 15 usable hours; small wrist disagreements for COPS-3, 11 and 25 (−0.08 to −0.15 on one axis); COPS-24 can't be compared; 13 diary scores without a label, for kinesia and for tremor |
+| Model contract | Model_Pipeline's `load_dataset` loads it and passes `check()` for every input group |
+| Data version | Pushed to the DVC remote; `dvc.lock` names it |
 
 ## Code
 
@@ -172,7 +173,7 @@ Newest first.
 
 | Date | Who | What changed | PR |
 | --- | --- | --- | --- |
-| 2026-11-13 | Dhruv Puri | Rebuilt the pipeline for the window model: every diary hour kept (sleep is a label), 10-s 30 Hz windows with worn flags, the more affected wrist with an orientation fix checked on both wrists, dose events wired in, a patients table, and checks against Model_Pipeline's `Dataset` contract. Removed UPDRS, the row-dropping cleaning, `hours_since_dose`, the schema baseline and the model-level bias check. 18 modules became 8 | (this PR) |
+| 2026-11-14 | Dhruv Puri | Rebuilt the pipeline for the window model: every diary hour kept (sleep is a label), 10-s 30 Hz windows with worn flags, the more affected wrist with an orientation fix checked on both wrists, dose events wired in, a patients table, and checks against Model_Pipeline's `Dataset` contract. Removed UPDRS, the row-dropping cleaning, `hours_since_dose`, the schema baseline and the model-level bias check. 18 modules became 8. Then: a named list of participants (the 10 for the model team), orientation decided per wear bout, a fallback when only one wrist was recorded or the side is "both", every wrist mirrored to read like a right one, zips already in `data/raw/` reused without downloading, and 3 more COPS drug names in the LEDD table | (this PR) |
 | 2026-11-11 | Sam Selvaraj | Added `scripts/ledd.py`: doses as events with their levodopa equivalent dose, from `config/ledd.yaml` (Jost et al. 2023, Table 1, every value cited), with COMT inhibitor boosts and a clear stop on any unknown drug name. Updated requests, pyarrow and pytest for the Dependabot alerts | (this PR) |
 | 2026-10-26 | Shaikh Basim | Made the pipeline run with only Docker: `tests` and `pipeline` services, Airflow's slim image, the Linux `AIRFLOW_UID` setup, and a README that starts with the Docker commands | #9 |
 | 2026-10-26 | Sam Selvaraj | Corrected the DAG's task count, and made Git check out text files with LF line endings everywhere, so DVC sees the same files on Windows | #7 |
