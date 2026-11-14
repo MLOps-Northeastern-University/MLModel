@@ -4,7 +4,7 @@ Trains the model behind Careportal's symptom timeline. From the watch's movement
 
 > **Status:** in progress.
 >
-> - **Built:** the contracts in `core/` (with the shared scores, `core/metrics.py`), the data loader, the patient split, three model families and the registry, training, tuning, hyperparameter sensitivity, the MLflow tracker, and selection, export, registry and the release gate (P4).
+> - **Built:** the contracts in `core/` (with the shared scores, `core/metrics.py`), the data loader, the patient split, three model families and the registry, training, tuning, hyperparameter sensitivity, the MLflow tracker, and selection, export, registry and the release gate (P4).  The bias step (slices, gate, reweighing) and the explain step (Shapley values over input groups, ablation), tested on synthetic data and a small test model family (P3).
 > - **Still a docstring:** the evaluate, bias and explain steps, and `models/composite.py`.
 > - **Not run on the real data yet:** training, tuning and sensitivity are tested on synthetic data only.
 >
