@@ -15,17 +15,21 @@ model. The rules are mentioned in MODEL.md, "Release gate and retraining".
 
 
 from scripts.core.errors import GateError
+from scripts.core.metrics import higher_is_better
 from scripts.utils.logging_setup import get_logger
 
 
 logger = get_logger(__name__)
 
 
-def passes(new, production, must_improve):
+def passes(new, production, must_improve, higher=True):
     """Whether the new model's score passes against production's score,
     given the must_improve flag.
     If must_improve is True, the new model must strictly improve over production.
-    If must_improve is False, the new model can be equal to production."""
+    If must_improve is False, the new model can be equal to production.
+    higher=False for a score where lower is better (an error): then improving means going down."""
+    if not higher:
+        new, production = -new, -production
     if must_improve:
         return new > production
     return new >= production
@@ -44,7 +48,7 @@ def failed_rules(rules, new_metrics, production_metrics):
             failures.append(f"{name}: missing")
             continue
         new, production = new_metrics[name], production_metrics[name]
-        if not passes(new, production, rule["must_improve"]):
+        if not passes(new, production, rule["must_improve"], higher_is_better(name)):
             failures.append(f"{name}: {new:.3f} vs {production:.3f}")
     return failures
 

@@ -38,6 +38,10 @@ class GateError(PipelineError):
         self.gate = gate
 
 
+class ModelError(PipelineError):
+    """A model broke its contract (bad predictions, a manifest that doesn't match), or was used wrongly."""
+
+
 class TrackingError(PipelineError):
     """Tracking was used wrongly: no active run, a bad metric name or value."""
 

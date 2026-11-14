@@ -258,6 +258,9 @@ def build(cfg, results, patients_path, mode=None):
     for d, m in zip(dirs, metas):
         shutil.move(str(d / "windows"), str(processed / "windows" / m["participant_id"]))
     worn = [np.load(processed / "windows" / m["participant_id"] / "worn.npy") for m in metas]
+    # How the windows were cut, next to them: Model_Pipeline's loader refuses windows without it.
+    write_json({k: cfg["windows"][k] for k in ("spec_version", "seconds", "rate_hz", "axes")},
+               processed / "windows" / "manifest.json")
 
     write_table(hours, processed / "hours.csv")
     write_table(events, processed / "events.csv")

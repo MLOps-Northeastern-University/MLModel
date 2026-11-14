@@ -1,178 +1,101 @@
-"""Scores the cross-validation predictions and applies the validation gate.
+"""Adds what train's scores leave out, writes metrics.json and the plots, and applies the validation gate.
 
 Owner: P1 (component F).
 
-Predictions are one row per hour and label: participant_id, hour_index, fold,
-label (such as state_now), an optional seed, and one probability column per
-class of the label's target, p_<class> (prediction_columns). They're checked
-against the diary labels in the Dataset; hours with no label are left out.
+train.py already scores every candidate's out-of-fold hours (core/metrics.py): cv/<label>/<metric>,
+pooled and within patients, and _fold_sd. This step reads its outputs,
 
-Each target is scored on events, a group of its classes (EVENTS): OFF is
-P(score -3 to -1), any tremor is P(tremor score 1 or 2). For each label and event:
+    artifacts/candidates.json           name, metrics, ... per candidate
+    artifacts/predictions/<label>.csv   participant_id, hour_index, fold, seed, model, worn, y_true,
+                                        then one column per class
 
-    cv/<label>/<event>             AUC inside each fold, averaged over folds (the gate)
-    cv/<label>/<event>_no_dbs      the same, on participants without DBS
-    cv/<label>/pooled_<event>      every test hour scored together, with _lo and _hi,
-                                   a 95% interval from resampling participants
-    cv/<label>/tracking_spearman   per participant, the predicted score against
-                                   the diary's, averaged over those whose diary varies
+and, for each candidate, on the same hours train scores (labelled, with a worn window, out of fold):
 
-A fold where an event's AUC can't be computed (one class only) is left out of
-the average, and the number of folds used is reported with _folds. With several
-seeds, each metric is the mean over seeds, with its spread as _seed_std.
+    cv/<label>/<question>_auc_lo, _hi   a 95% interval for the pooled AUC, from resampling patients
+                                        (ARCHITECTURE.md, Evaluation protocol), averaged over seeds
+    evaluation.json                     each question's AUC per fold and per patient
+    roc.png                             the pooled ROC curve of every question, per label
 
-Writes artifacts/metrics.json (the flat {name: value} the release gate reads),
-artifacts/evaluation.json (per fold and per participant) and the plots, and
-raises GateError when a metric in validation_gate.min is missing or below it.
+It writes artifacts/evaluation/<candidate>/metrics.json (train's metrics plus the intervals, the
+flat {name: value} the release gate reads), and sets each candidate's gates_passed: False when a
+metric in validation_gate.min is missing or below its value. select.py then keeps only those that
+passed (and the bias step can only turn a pass into a fail).
 """
 
 import math
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
-from sklearn.metrics import roc_auc_score, roc_curve
 
-from scripts.core.errors import GateError, SchemaError
-from scripts.core.targets import ASLEEP, HOUR_INDEX, PARTICIPANT, STATE_GROUPS, get_target
-from scripts.utils.file_io import write_json
+from scripts.core.metrics import QUESTIONS, auc
+from scripts.core.targets import PARTICIPANT, get_target, parse_label
+from scripts.utils.file_io import read_json, write_json
 from scripts.utils.logging_setup import get_logger
 
 logger = get_logger(__name__)
 
-# Each target's events: metric name -> the classes whose probabilities add up to it.
-EVENTS = {
-    "state": {"off_auc": STATE_GROUPS["off"], "dyskinetic_auc": STATE_GROUPS["dyskinetic"],
-              "asleep_auc": STATE_GROUPS["asleep"]},
-    "tremor": {"auc": (1, 2)},
-}
-KEYS = (PARTICIPANT, HOUR_INDEX)
 
-
-def target_of(label):
-    """The target a label belongs to: state_next_hour -> state."""
-    return label.split("_", 1)[0]
-
-
-def prediction_columns(target):
-    """The probability columns a target's predictions need, in class order."""
-    return [f"p_{c}" for c in get_target(target).classes]
-
-
-def attach_truth(predictions, dataset):
-    """The predictions with y_true (the class index from the diary) and dbs, labelled hours only.
-
-    Raises:
-        SchemaError: A column is missing, probabilities don't add up to 1, or a
-            prediction is for an hour or label the Dataset doesn't have.
-    """
-    missing = [c for c in KEYS + ("fold", "label") if c not in predictions.columns]
-    if missing:
-        raise SchemaError(f"predictions need column(s) {missing}")
-    parts = []
-    for label, rows in predictions.groupby("label", sort=True):
-        if label not in dataset.labels.columns:
-            raise SchemaError(f"predictions for {label!r}, which the dataset has no labels for")
-        probs = prediction_columns(target_of(label))
-        absent = [c for c in probs if c not in rows.columns]
-        if absent:
-            raise SchemaError(f"{label} predictions need column(s) {absent}")
-        p = rows[probs].to_numpy(float)
-        if not (np.isfinite(p).all() and (p >= 0).all() and np.allclose(p.sum(axis=1), 1, atol=1e-3)):
-            raise SchemaError(f"{label}: each row's probabilities must be 0 or more and add up to 1")
-        truth = dataset.hours[list(KEYS)].assign(y_true=dataset.labels[label].to_numpy())
-        rows = rows.merge(truth, on=list(KEYS), how="left", indicator=True)
-        if (rows["_merge"] == "left_only").any():
-            raise SchemaError(f"{label}: predictions for hours that aren't in the dataset")
-        parts.append(rows.drop(columns="_merge").dropna(subset=["y_true"]))
-    out = pd.concat(parts, ignore_index=True)
-    dbs = dataset.patients.set_index(PARTICIPANT)["dbs"] if dataset.patients is not None else None
-    out["dbs"] = out[PARTICIPANT].map(dbs) if dbs is not None else np.nan
-    return out
-
-
-def auc(y, score):
-    """ROC AUC, or NaN when y has only one class."""
-    return float(roc_auc_score(y, score)) if len(set(y)) == 2 else math.nan
-
-
-def expected_score(rows, target):
-    """The predicted score: expected tremor score, or expected kinesia score on waking hours (else NaN)."""
-    p = rows[prediction_columns(target)].to_numpy(float)
-    if target == "tremor":
-        return p @ np.arange(p.shape[1])
-    waking = p[:, :ASLEEP]
-    return np.where(rows["y_true"] < ASLEEP, waking @ np.arange(-3, 4) / waking.sum(axis=1).clip(1e-12), np.nan)
-
-
-def tracking(rows, target):
-    """Spearman of predicted against diary score per participant, for those whose diary varies."""
-    rows = rows.assign(pred=expected_score(rows, target)).dropna(subset=["pred"])
+def scored_rows(folder, name):
+    """{label: rows} of one candidate's out-of-fold hours that count: labelled, worn, not the test patients."""
     out = {}
-    for pid, r in rows.groupby(PARTICIPANT):
-        if r["y_true"].nunique() > 1 and r["pred"].nunique() > 1:
-            out[pid] = float(r["pred"].corr(r["y_true"], method="spearman"))
+    for path in sorted(Path(folder).glob("*.csv")):
+        rows = pd.read_csv(path)
+        rows = rows[(rows["model"] == name) & (rows["fold"].astype(str) != "test")
+                    & rows["worn"].astype(bool) & rows["y_true"].notna()]
+        if len(rows):
+            out[path.stem] = rows.reset_index(drop=True)
     return out
 
 
-def pooled_interval(y, score, groups, resamples, seed, level=0.95):
-    """A percentile interval for the pooled AUC, resampling participants with replacement."""
+def questions(label, rows):
+    """[(question, y, score)]: each broad question of the label's target, as yes/no and P(yes)."""
+    target = parse_label(label)[0]
+    classes = list(get_target(target).classes)
+    y = rows["y_true"].to_numpy(int)
+    return [(q, np.isin(y, c).astype(int), rows[[classes[i] for i in c]].sum(axis=1).to_numpy())
+            for q, c in QUESTIONS[target].items()]
+
+
+def interval(y, score, groups, resamples, seed, level):
+    """A percentile interval for the pooled AUC, resampling patients with replacement. NaN if it can't be had."""
     rng = np.random.default_rng(seed)
-    pids = np.unique(groups)
-    rows_of = {p: np.flatnonzero(groups == p) for p in pids}
+    rows_of = {p: np.flatnonzero(groups == p) for p in np.unique(groups)}
+    pids = list(rows_of)
     values = []
     for _ in range(resamples):
         idx = np.concatenate([rows_of[p] for p in rng.choice(pids, len(pids))])
         values.append(auc(y[idx], score[idx]))
-    values = np.array(values)
-    values = values[np.isfinite(values)]
+    values = np.array([v for v in values if math.isfinite(v)])
     if not len(values):
         return math.nan, math.nan
     tail = 100 * (1 - level) / 2
     return float(np.percentile(values, tail)), float(np.percentile(values, 100 - tail))
 
 
-def score_seed(rows, cfg):
-    """The flat metrics and the per-fold and per-participant details for one seed's predictions."""
-    ev = cfg["evaluation"]
+def by(values, y, score):
+    """{group: AUC} for each value of values (a fold or a patient), NaN where it has one class only."""
+    values = np.asarray(values).astype(str)
+    return {g: auc(y[values == g], score[values == g]) for g in sorted(set(values))}
+
+
+def evaluate_candidate(rows_by_label, cfg):
+    """(extra metrics, details) for one candidate: the intervals, and AUCs per fold and per patient."""
+    ev, seed = cfg["evaluation"], cfg["data"]["random_seed"]
     metrics, details = {}, {}
-    for label, r in rows.groupby("label", sort=True):
-        target = target_of(label)
-        for event, classes in EVENTS[target].items():
-            y = r["y_true"].isin(classes).to_numpy(int)
-            score = r[[prediction_columns(target)[c] for c in classes]].sum(axis=1).to_numpy()
-            folds = {str(f): auc(y[m], score[m]) for f, m in _masks(r["fold"])}
-            no_dbs = (r["dbs"] == False).to_numpy()  # noqa: E712 (NaN is neither)
-            folds_no_dbs = {str(f): auc(y[m & no_dbs], score[m & no_dbs]) for f, m in _masks(r["fold"])}
-            people = {str(p): auc(y[m], score[m]) for p, m in _masks(r[PARTICIPANT])}
-            lo, hi = pooled_interval(y, score, r[PARTICIPANT].to_numpy(), ev["bootstrap_resamples"],
-                                     cfg["data"]["random_seed"], ev["interval"])
-            base = f"cv/{label}/{event}"
-            metrics.update({
-                base: _mean(folds), f"{base}_folds": _count(folds),
-                f"{base}_no_dbs": _mean(folds_no_dbs), f"{base}_no_dbs_folds": _count(folds_no_dbs),
-                f"cv/{label}/pooled_{event}": auc(y, score),
-                f"cv/{label}/pooled_{event}_lo": lo, f"cv/{label}/pooled_{event}_hi": hi,
-            })
-            details[f"{label}/{event}"] = {"folds": folds, "folds_no_dbs": folds_no_dbs, "participants": people}
-        spearman = tracking(r, target)
-        metrics[f"cv/{label}/tracking_spearman"] = _mean(spearman)
-        metrics[f"cv/{label}/tracking_participants"] = len(spearman)
-        details[f"{label}/tracking_spearman"] = spearman
-    return metrics, details
-
-
-def score(predictions, dataset, cfg):
-    """(metrics, details) for the predictions: means over seeds, with _seed_std when there are several."""
-    rows = attach_truth(predictions, dataset)
-    seeds = rows.groupby("seed") if "seed" in rows.columns else [(None, rows)]
-    results = {str(s): score_seed(r, cfg) for s, r in seeds}
-    names = list(next(iter(results.values()))[0])
-    table = pd.DataFrame([m for m, _ in results.values()], columns=names)
-    metrics = table.mean().to_dict()
-    if len(results) > 1:
-        metrics.update({f"{n}_seed_std": float(table[n].std()) for n in names if not n.endswith(("_folds",
-                                                                                                "_participants"))})
-    details = {"seeds": {s: d for s, (_, d) in results.items()}}
+    for label, rows in rows_by_label.items():
+        for question, _, _ in questions(label, rows):
+            bounds = []
+            for _, part in rows.groupby("seed"):
+                _, y, score = next(q for q in questions(label, part) if q[0] == question)
+                bounds.append(interval(y, score, part[PARTICIPANT].to_numpy(), ev["bootstrap_resamples"], seed,
+                                       ev["interval"]))
+            lo, hi = (float(np.nanmean(b)) if not np.isnan(b).all() else math.nan for b in zip(*bounds))
+            metrics[f"cv/{label}/{question}_auc_lo"], metrics[f"cv/{label}/{question}_auc_hi"] = lo, hi
+        first = rows[rows["seed"] == rows["seed"].min()]
+        for question, y, score in questions(label, first):
+            details[f"{label}/{question}_auc"] = {"folds": by(first["fold"], y, score),
+                                                  "patients": by(first[PARTICIPANT], y, score)}
     return metrics, details
 
 
@@ -181,74 +104,66 @@ def gate_failures(metrics, minimums):
     failures = []
     for name, lowest in (minimums or {}).items():
         value = metrics.get(name, math.nan)
-        if not math.isfinite(value) or value < lowest:
-            failures.append(f"{name}: {value:.3f} < {lowest}" if math.isfinite(value) else f"{name}: missing")
+        if not (isinstance(value, (int, float)) and math.isfinite(value)):
+            failures.append(f"{name}: missing")
+        elif value < lowest:
+            failures.append(f"{name}: {value:.3f} < {lowest}")
     return failures
 
 
-def plot(rows, metrics, folder):
-    """roc.png: the pooled ROC curve of each label's events, side by side."""
+def plot(rows_by_label, metrics, path):
+    """The pooled ROC curve of each question, one panel per label, for the first seed."""
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
+    from sklearn.metrics import roc_curve
 
-    labels = sorted(rows["label"].unique())
+    labels = sorted(rows_by_label)
     fig, axes = plt.subplots(1, len(labels), figsize=(4 * len(labels), 4), squeeze=False)
     for ax, label in zip(axes[0], labels):
-        r, target = rows[rows["label"] == label], target_of(label)
-        for event, classes in EVENTS[target].items():
-            y = r["y_true"].isin(classes).to_numpy(int)
+        rows = rows_by_label[label]
+        for question, y, score in questions(label, rows[rows["seed"] == rows["seed"].min()]):
             if len(set(y)) == 2:
-                s = r[[prediction_columns(target)[c] for c in classes]].sum(axis=1)
-                fpr, tpr, _ = roc_curve(y, s)
-                ax.plot(fpr, tpr, label=f"{event} {metrics[f'cv/{label}/pooled_{event}']:.2f}")
+                fpr, tpr, _ = roc_curve(y, score)
+                ax.plot(fpr, tpr, label=f"{question} {metrics.get(f'cv/{label}/{question}_auc', math.nan):.2f}")
         ax.plot([0, 1], [0, 1], color="grey", linestyle=":")
         ax.set(title=label, xlabel="false positive rate", ylabel="true positive rate")
         ax.legend(loc="lower right", fontsize=8)
     fig.tight_layout()
-    fig.savefig(folder / "roc.png", dpi=120)
+    fig.savefig(path, dpi=120)
     plt.close(fig)
 
 
 class EvaluateModel:
-    """Scores a candidate's cross-validation predictions and applies the validation gate."""
+    """Step F: see the top of this file."""
 
     def __init__(self, cfg, tracker):
-        self.cfg = cfg
-        self.tracker = tracker
-        self.folder = cfg["resolved_paths"]["artifacts_dir"]
+        self.cfg, self.tracker = cfg, tracker
+        self.artifacts = Path(cfg["resolved_paths"]["artifacts_dir"])
 
-    def run(self, predictions, dataset):
-        """The metrics. Raises GateError when one in validation_gate.min is missing or too low."""
+    def run(self, candidates=None):
+        """The candidates, each with its metrics extended and gates_passed set. Reads candidates.json if None."""
+        candidates = candidates if candidates is not None else read_json(self.artifacts / "candidates.json")
+        minimums = self.cfg["validation_gate"]["min"]
         with self.tracker.run("evaluate", tags={"owner": "P1"}):
-            metrics, details = score(predictions, dataset, self.cfg)
-            self.tracker.log_metrics({n: v for n, v in metrics.items() if math.isfinite(v)})
-            write_json({n: _finite(v) for n, v in metrics.items()}, self.folder / "metrics.json")
-            write_json(_finite(details), self.folder / "evaluation.json")
-            plot(attach_truth(predictions, dataset), metrics, self.folder)
-            for name in ("metrics.json", "evaluation.json", "roc.png"):
-                self.tracker.log_artifact(self.folder / name, "evaluation")
-            failures = gate_failures(metrics, self.cfg["validation_gate"]["min"])
-            self.tracker.set_tags({"validation_gate": "failed" if failures else "passed"})
-            logger.info("off_auc %.3f over %d folds, tremor auc %.3f", metrics.get("cv/state_now/off_auc", math.nan),
-                        metrics.get("cv/state_now/off_auc_folds", 0), metrics.get("cv/tremor_now/auc", math.nan))
-            if failures:
-                raise GateError("validation", "; ".join(failures))
-            return metrics
-
-
-def _masks(values):
-    values = np.asarray(values)
-    return [(v, values == v) for v in sorted(pd.unique(values), key=str)]
-
-
-def _mean(scores):
-    finite = [v for v in scores.values() if math.isfinite(v)]
-    return float(np.mean(finite)) if finite else math.nan
-
-
-def _count(scores):
-    return sum(math.isfinite(v) for v in scores.values())
+            for c in candidates:
+                rows = scored_rows(self.artifacts / "predictions", c["name"])
+                extra, details = evaluate_candidate(rows, self.cfg)
+                c["metrics"] = {**c["metrics"], **extra}
+                folder = self.artifacts / "evaluation" / c["name"]
+                write_json(_finite(c["metrics"]), folder / "metrics.json")
+                write_json(_finite(details), folder / "evaluation.json")
+                if rows:
+                    plot(rows, c["metrics"], folder / "roc.png")
+                with self.tracker.run(c["name"], tags={"run_id": str(c.get("run_id"))}):
+                    self.tracker.log_metrics({n: v for n, v in extra.items() if math.isfinite(v)})
+                    self.tracker.log_artifact(folder, "evaluation")
+                failures = gate_failures(c["metrics"], minimums)
+                c["gates_passed"] = not failures
+                c["validation_failures"] = failures
+                logger.info("%s: validation gate %s%s", c["name"], "failed: " if failures else "passed",
+                            "; ".join(failures))
+        return candidates
 
 
 def _finite(value):

@@ -20,7 +20,7 @@ def write_table(df, path):
 
 
 def read_table(path):
-    """Read a CSV written by write_table, or one of the data pipeline's tables."""
+    """Read a CSV written by write_table, or the data pipeline's hourly_features.csv."""
     return pd.read_csv(path, dtype=TEXT_COLUMNS)
 
 

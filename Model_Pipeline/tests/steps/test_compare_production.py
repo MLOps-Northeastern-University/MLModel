@@ -103,3 +103,9 @@ def test_reads_the_rules_from_the_real_config():
     assert len(gate.rules) == 6
     assert gate.rules[0] == {"metric": "cv/state_now/off_auc", "must_improve": True}
     assert all(rule["must_improve"] is False for rule in gate.rules[1:])
+
+
+def test_for_an_error_improving_means_going_down():
+    rules = [{"metric": "cv/state_now/score_mae", "must_improve": True}]
+    assert failed_rules(rules, {"cv/state_now/score_mae": 0.7}, {"cv/state_now/score_mae": 0.8}) == []
+    assert failed_rules(rules, {"cv/state_now/score_mae": 0.9}, {"cv/state_now/score_mae": 0.8}) != []

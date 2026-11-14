@@ -61,6 +61,8 @@ def test_the_dataset_is_described_and_passes_its_checks(built):
     meta = read_json(built["resolved_paths"]["processed_dir"] / "dataset_meta.json")
     assert (meta["spec_version"], meta["seconds"], meta["rate_hz"], meta["axes"]) == (1, 10, 30, 3)
     assert meta["participants"] == 2 and meta["windows"] == 144
+    manifest = read_json(built["resolved_paths"]["processed_dir"] / "windows" / "manifest.json")
+    assert manifest == {"spec_version": 1, "seconds": 10, "rate_hz": 30, "axes": 3}
     reports = built["resolved_paths"]["reports_dir"]
     assert read_json(reports / "checks.json")["critical"] == []
     assert read_json(reports / "failed_participants.json") == []

@@ -39,7 +39,7 @@ def main(argv=None):
     # One id per run, on every log line, to find a run's lines in Cloud Logging.
     with log_context(run_id=uuid.uuid4().hex[:12]):
         log_run_start(logger, cfg)
-        logger.info("Training data: %s", cfg["resolved_paths"]["processed_data"])
+        logger.info("Training data: %s", cfg["resolved_paths"]["features_csv"])
         for name, owner in STEPS:
             with log_step(logger, name, owner=owner):
                 logger.info("not built yet")
