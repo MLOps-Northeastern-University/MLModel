@@ -1,4 +1,4 @@
-"""Acquisition failure paths: retries, checksums, caching, OSF errors, local zips.
+"""Acquisition failure paths: retries, checksums, caching, OSF errors, zips already in data/raw.
 
 No test touches the network: a fake session stands in for requests.
 """
@@ -8,7 +8,7 @@ import hashlib
 import pytest
 
 from scripts import acquire
-from tests.helpers import make_config, make_demographics, make_participant_zip
+from tests.helpers import make_config, make_demographics, raw_dir
 
 CONTENT = b"participant zip bytes " * 1000
 SHA = hashlib.sha256(CONTENT).hexdigest()
@@ -187,36 +187,28 @@ def test_an_unknown_mode_is_refused(cfg):
         acquire.build_manifest(files, cfg, "everything")
 
 
-def test_local_zips_sample_mode_takes_the_smallest(tmp_path):
-    folder = tmp_path / "zips"
-    folder.mkdir()
-    # The manifest only looks at names and sizes, so plain files of known sizes will do.
-    for name, size in [("COPS-1.zip", 900), ("COPS-2.zip", 100), ("COPS-3.zip", 500), ("notes.zip", 1)]:
-        (folder / name).write_bytes(b"x" * size)
+def test_listed_participants_already_in_raw_are_used_without_osf(tmp_path):
+    folder = raw_dir(tmp_path)
+    for name in ["COPS-1.zip", "COPS-2.zip", "COPS-3.zip"]:
+        (folder / name).write_bytes(b"x")
     make_demographics(folder, ["COPS-1", "COPS-2", "COPS-3"])
-
-    cfg = make_config(tmp_path, data={"local_zip_dir": str(folder), "sample_size": 2})
-    manifest = acquire.fetch_manifest(cfg, "sample")
-
-    # The two smallest participant zips, in participant order; other zips are ignored.
+    cfg = make_config(tmp_path, data={"participants": ["COPS-3", "COPS-2"]})
+    manifest = acquire.fetch_manifest(cfg, session=NoNetwork())
     assert [p["name"] for p in manifest["participants"]] == ["COPS-2.zip", "COPS-3.zip"]
-    assert manifest["demographics"]["name"] == "Demographics.csv"
+    assert manifest["mode"] == "list" and manifest["demographics"]["name"] == "Demographics.csv"
     assert acquire.load_manifest(cfg) == manifest  # saved for the next steps
 
 
-def test_local_zips_without_demographics_still_run(tmp_path):
-    folder = tmp_path / "zips"
-    folder.mkdir()
-    make_participant_zip(folder, "COPS-1")
-    cfg = make_config(tmp_path, data={"local_zip_dir": str(folder)})
-    assert acquire.build_local_manifest(cfg, "full")["demographics"] is None
-
-
-def test_an_empty_local_folder_is_reported(tmp_path):
-    (tmp_path / "zips").mkdir()
-    cfg = make_config(tmp_path, data={"local_zip_dir": str(tmp_path / "zips")})
-    with pytest.raises(acquire.AcquisitionError, match="No participant zips found"):
-        acquire.build_local_manifest(cfg, "full")
+@pytest.mark.parametrize("participants, files", [
+    (["COPS-1", "COPS-2"], ["COPS-1.zip", "Demographics.csv"]),   # a listed zip is missing
+    (["COPS-1"], ["COPS-1.zip"]),                                  # Demographics.csv is missing
+    (None, ["COPS-1.zip", "Demographics.csv"]),                    # no list: OSF says who there is
+])
+def test_otherwise_osf_is_listed(tmp_path, participants, files):
+    for name in files:
+        (raw_dir(tmp_path) / name).write_bytes(b"x")
+    cfg = make_config(tmp_path, data={"participants": participants})
+    assert not acquire.have_local_files(cfg)
 
 
 # ---------- safety ----------
@@ -246,3 +238,55 @@ def test_odd_file_names_in_the_listing_are_never_chosen(cfg, name):
              {"name": "Demographics.csv", "size": 1}]
     manifest = acquire.build_manifest(files, cfg, "full")
     assert [p["name"] for p in manifest["participants"]] == ["COPS-2.zip"]
+
+
+# ---------- the manifest from a nested OSF listing ----------
+
+class FolderSession:
+    """A root listing with Demographics.csv and a Data folder holding four participants."""
+
+    def get(self, url, timeout=None, stream=False):
+        if url.endswith("/files/osfstorage/"):
+            return JsonResponse({"data": [
+                {"attributes": {"kind": "file", "name": "Demographics.csv", "size": 3600, "extra": {}},
+                 "links": {"download": "https://osf.example/demo"}},
+                {"attributes": {"kind": "folder", "name": "Data"},
+                 "relationships": {"files": {"links": {"related": {"href": "https://osf.example/data/"}}}}},
+            ], "links": {"next": None}})
+        sizes = [(1, 900), (2, 100), (3, 500), (4, 300)]
+        return JsonResponse({"data": [_file(f"COPS-{i}.zip", size) for i, size in sizes], "links": {"next": None}})
+
+
+def test_sample_mode_picks_the_smallest_from_nested_folders(cfg):
+    cfg["data"]["sample_size"] = 2
+    manifest = acquire.build_manifest(acquire.list_osf_files(cfg, FolderSession()), cfg, "sample")
+    assert [p["name"] for p in manifest["participants"]] == ["COPS-2.zip", "COPS-4.zip"]
+    assert manifest["demographics"]["name"] == "Demographics.csv"
+
+
+def test_full_mode_takes_everyone(cfg):
+    files = acquire.list_osf_files(cfg, FolderSession())
+    assert len(acquire.build_manifest(files, cfg, "full")["participants"]) == 4
+
+
+def test_unreachable_osf_raises(cfg):
+    class Broken:
+        def get(self, *a, **k):
+            raise acquire.requests.ConnectionError("down")
+    with pytest.raises(acquire.AcquisitionError):
+        acquire.list_osf_files(cfg, Broken())
+
+
+# ---------- a named list of participants ----------
+
+def test_a_named_list_takes_exactly_those_whatever_the_mode(cfg):
+    cfg["data"]["participants"] = ["COPS-3", "COPS-1"]
+    manifest = acquire.build_manifest(acquire.list_osf_files(cfg, FolderSession()), cfg, "sample")
+    assert [p["name"] for p in manifest["participants"]] == ["COPS-1.zip", "COPS-3.zip"]
+    assert manifest["mode"] == "list"
+
+
+def test_a_named_participant_who_isnt_there_is_reported(cfg):
+    cfg["data"]["participants"] = ["COPS-1", "COPS-99"]
+    with pytest.raises(acquire.AcquisitionError, match="COPS-99"):
+        acquire.build_manifest(acquire.list_osf_files(cfg, FolderSession()), cfg, "full")
