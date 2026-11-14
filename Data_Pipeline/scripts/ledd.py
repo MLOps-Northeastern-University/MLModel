@@ -31,8 +31,7 @@ import numpy as np
 import pandas as pd
 import yaml
 
-from scripts.utils.config import PROJECT_ROOT, load_config
-from scripts.utils.logging_setup import get_logger
+from scripts.utils import PROJECT_ROOT, get_logger, load_config
 
 logger = get_logger("ledd")
 

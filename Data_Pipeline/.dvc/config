@@ -1,5 +1,5 @@
 [core]
     analytics = false
-    remote = storage
-['remote "storage"']
+    remote = gcs
+['remote "gcs"']
     url = gs://team17-mlops-neu-training-data/cops-dvc

@@ -36,7 +36,7 @@ jobs:
           # The pipeline's data folders hold dataset-derived files of any type (JSON reports
           # name participants), so nothing in them may be committed except these. DVC versions the rest.
           data_dirs='(^|/)data/(raw|interim|processed|reports)/'
-          allowed_in_data='/(\.gitkeep|cleaning_summary\.json|bias_report\.md)$'
+          allowed_in_data='/(\.gitkeep|bias_report\.md)$'
           fail=0
           while IFS= read -r -d '' f; do
             if echo "$f" | grep -qiE "$blocked" && ! echo "$f" | grep -qE "$fixtures"; then

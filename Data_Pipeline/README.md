@@ -1,339 +1,171 @@
 # Data Pipeline
 
-Turns the COPS Parkinson's dataset ([osf.io/5xvwn](https://osf.io/5xvwn/)) into an hourly table of wrist-movement features and symptom labels, ready for modelling.
-
-**Target:** hourly kinesia state from the patient's diary (`KinesiaScore`, −3 to +3):
-
-| KinesiaScore | Class |
-| --- | --- |
-| −3, −2, −1 | `off` |
-| 0 | `on` |
-| +1, +2, +3 | `dyskinetic` |
+Turns the COPS Parkinson's dataset ([osf.io/5xvwn](https://osf.io/5xvwn/)) into the inputs the model trains on: 10-second wrist-movement windows, every diary hour with its answers, every dose, and one row per patient. These are the input groups of `Model_Pipeline/scripts/core/data.py`; the model design is in [MODEL.md](../MODEL.md).
 
 ## Dataset
 
-**COPS** ([osf.io/5xvwn](https://osf.io/5xvwn/)), a public dataset of people with Parkinson's disease recorded at home. Check the OSF page for its licence, and cite it as the page asks.
+**COPS**: 66 people with Parkinson's, up to 7 days each, one zip per participant (47.9 GB; the 5 smallest, used by `sample` mode, are 1.1 GB). Check the OSF page for its licence, and cite it as the page asks.
 
-- **66 participants**, one zip each (47.9 GB in all; the 5 smallest, used by `sample` mode, are 1.1 GB).
-- **Wrist sensors** on both wrists: one CSV per wrist per hour, 100 samples a second, with acceleration `X`, `Y`, `Z` (in g), `Photo` (light) and `Temp` (temperature). Users are expected to wear one watch, so the pipeline uses one wrist (`features.wrist` in the config, left by default) and ignores the other.
-- **An hourly symptom diary** filled in by the participant: kinesia (−3 to +3, the label), tremor, freezing, falls, medication and dose, and whether the watch was worn.
-- **Clinical exams:** MDS-UPDRS Part III, OFF and ON medication.
-- **`Demographics.csv`:** age, sex, handedness, Parkinson's subtype and dominant side, Hoehn & Yahr stage, years since diagnosis, and DBS.
+- **Wrist accelerometers** (GENEActiv) on both wrists: one CSV per wrist per hour, 100 samples a second: `X`, `Y`, `Z` (g), `Photo`, `Temp`.
+- **An hourly symptom diary:** kinesia (−3 to +3, or Sleep), tremor (0 to 2), medication and dose, and whether the watch was worn. The only labels.
+- **`Demographics.csv`:** age, sex, PD subtype and more affected side, Hoehn & Yahr stage, DBS.
 
-Participant IDs are the dataset's own pseudonyms (`COPS-7`). Even so, files that list participants are versioned by DVC, not committed (see [Data versioning](#data-versioning-dvc)).
+The zips also hold UPDRS exams; the pipeline doesn't use them. Participant IDs are the dataset's pseudonyms (`COPS-7`); files that list participants are versioned by DVC, not committed.
 
 ## Quick start (only Docker needed)
 
 Install [Docker Desktop](https://www.docker.com/products/docker-desktop/) and give it at least 4 GB of memory. Then, from this folder:
 
 ```bash
-mkdir -p logs/airflow && echo "AIRFLOW_UID=$(id -u)" > .env    # Linux only, once, before docker compose
-docker compose run --rm tests       # run the tests in the Airflow image (first run builds the image, a few minutes)
-docker compose run --rm pipeline    # run the pipeline on the 5 smallest participants (~1.1 GB download)
-docker compose up airflow-init      # first time only: sets up Airflow's database and login
-docker compose up -d                # starts Airflow at http://localhost:8080 (see Airflow below to run the DAG)
+mkdir -p logs/airflow && echo "AIRFLOW_UID=$(id -u)" > .env    # Linux only, once
+docker compose run --rm tests       # the tests, in the Airflow image (the first run builds it)
+docker compose run --rm pipeline    # the pipeline on the 5 smallest participants (~1.1 GB download)
+docker compose up airflow-init      # first time only: Airflow's database and login
+docker compose up -d                # Airflow at http://localhost:8080
 ```
 
-Outputs land in `data/` on your machine (see [Output files](#output-files)). Don't run the `pipeline` service and the Airflow DAG at the same time: both write to `data/`. Stop Airflow with `docker compose down`.
+Outputs land in `data/` on your machine. Don't run the `pipeline` service and the DAG at the same time: both write to `data/`.
 
-**On Linux,** the containers write to this folder as user `AIRFLOW_UID` (50000 by default), which isn't you, so writing to `data/` and `logs/` fails without the first line. It runs the containers as your own user instead. Mac and Windows don't need it. If you copy `.env.example` to `.env` for alerts, set `AIRFLOW_UID` in it to the output of `id -u`.
+## Without Docker
 
-To work without Docker, set up Python as below.
-
-## Setup
-
-Use **Python 3.11** or 3.12. Python 3.13 and newer fail to install the pinned libraries.
+Use **Python 3.11** or 3.12 (3.13 can't install the pinned libraries).
 
 ```bash
-conda create -n cops python=3.11 -y
-conda activate cops
+python3.11 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
-pytest -v
+pytest -q                                     # synthetic files only, nothing downloaded
+python -m scripts.pipeline --mode sample      # the 5 smallest participants
+python -m scripts.pipeline --mode full        # all 66
 ```
 
-All tests should pass. They use small synthetic files, so no download is needed.
+- **Downloads:** zips already in `data/raw/` are reused. With every listed participant and `Demographics.csv` there, OSF isn't contacted at all, so copy zips you already have into `data/raw/` to run offline.
 
-If you do not use conda:
+- **Who is processed:** `data.participants` in the config names exactly who, whatever the mode. It's set to the model team's 10: 5 with DBS and 5 without, so each of the 5 test folds holds one of each. Set it to `null` to go back to `--mode sample` (the smallest `data.sample_size`) or `--mode full` (all 66).
+- Participants run 4 at a time (`run.parallel_participants`). One failing is skipped and listed in `reports/failed_participants.json` with an alert; more than 20% failing (`data.max_failed_fraction`) stops the run with exit code 1.
+- A dataset that fails its checks also stops the run with exit code 1.
+- Every setting is in `config/pipeline.yaml`. Email and Slack alerts are on once `.env` is filled in from `.env.example`; without it they're logged and skipped.
 
-```bash
-python3.11 -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
-pytest -v
-```
-
-## Tests
-
-`docker compose run --rm tests` runs 122 tests in `tests/`, on synthetic participants made by `tests/helpers.py`. Plain `pytest` outside Docker runs 116 of them: the 6 in `test_dag.py` need Airflow and skip. No test downloads anything or sends a real alert.
-
-| File | What it checks |
-| --- | --- |
-| `test_diary.py` | Diary parsing, kinesia classes, text/score mismatches, every dose-column layout |
-| `test_features.py` | Movement and tremor features, gravity removal, missing and impossible values, corrupt files, and the fast CSV reader matching pandas exactly |
-| `test_clean_and_join.py` | Every cleaning rule, duplicates, merging participants and demographics |
-| `test_validate_and_anomalies.py` | Rules, schema against the baseline, statistics, outliers, label issues |
-| `test_acquire_and_bias.py` | Choosing participants from the OSF listing, and the bias report |
-| `test_download.py` | Retries after a dropped connection, refusing corrupt or truncated downloads, the download cache, OSF paging and outages, local zips, downloading only `https://` from OSF, and never choosing an odd file name |
-| `test_robustness.py` | Diaries in UTF-8, with a BOM or in Windows encoding; wrong separators, empty and cut-off files; partial failures (one participant failing doesn't stop the run, too many do); config files; passwords never logged |
-| `test_alerts.py` | Email and Slack alerts when set up, skipped when not, and a broken mail server or webhook never crashing the run |
-| `test_run_pipeline.py` | Failed participants reported, the failure limit, parallel runs matching sequential ones |
-| `test_end_to_end.py` | The whole pipeline on four synthetic participants: every output, exact row counts, a second run checked against the first, and stopping on too many failures or on critical anomalies |
-| `test_dag.py` | The Airflow DAG loads, its tasks run in order, failures retry and alert, and one failed participant doesn't fail the run. Needs Airflow, so it skips outside Docker. `docker compose run --rm tests` runs it; for this file alone, `docker compose run --rm tests python -m pytest tests/test_dag.py` |
-
-Coverage of `scripts/` is about 92%: `pytest --cov=scripts --cov-branch`. CI fails below 85%.
-
-## Running
-
-Run from this folder.
-
-```bash
-# Download the 5 smallest participants from OSF and run everything
-python -m scripts.run_pipeline --mode sample
-
-# All 66 participants
-python -m scripts.run_pipeline --mode full
-
-# Use participant zips you already downloaded
-python -m scripts.run_pipeline --local-zips /path/to/folder
-```
-
-- Write `scripts.run_pipeline` without `.py`.
-- For `--local-zips`, the folder needs the original zips, named like `COPS-7.zip`, plus `Demographics.csv` from the top level of the OSF project.
-- Processing one participant takes about half a minute, plus its download (see [Speed](#speed)). Progress is logged every 20 hours.
-- Participants run 4 at a time (`run.parallel_participants`), each in its own process. Set it to 1 to run them one after another.
-- All settings are in `config/pipeline.yaml`.
-- A participant that fails is skipped and listed in `data/reports/failed_participants.json`, and an alert is sent. If more than 20% fail (`data.max_failed_fraction`), the run stops with exit code 1. Airflow follows the same rule, in its `check_failures` task.
-- With Docker, the same commands work through the `pipeline` service, e.g. `docker compose run --rm pipeline python -m scripts.run_pipeline --mode full`.
-
-### Airflow
-
-The same steps run as an Airflow DAG in `dags/cops_pipeline_dag.py`. On Linux, run the one-time setup line from [Quick start](#quick-start-only-docker-needed) first. From this folder:
-
-```bash
-docker compose up airflow-init   # first time only: sets up the database and the login
-docker compose up -d             # starts the webserver and scheduler
-```
-
-Open <http://localhost:8080> and log in as `airflow` / `airflow`. Trigger `cops_data_pipeline` with `{"mode": "sample"}` or `{"mode": "full"}`.
-
-A `.env` file is optional. Copy `.env.example` to `.env` only to turn on email or Slack alerts. Without it, alerts are skipped and logged.
-
-To run the DAG:
-
-1. On the DAGs page, set the toggle of `cops_data_pipeline` to on. DAGs are paused when Airflow starts.
-2. Click ▶, then **Trigger DAG w/ config**. Type `{"mode": "sample"}` and click **Trigger**.
-3. Look at the run in **Grid** (state of each task), **Graph** (how the tasks connect), and **Gantt** (time of each task). To see the output of a task, click the task and then **Logs**.
-4. Stop Airflow with `docker compose down`. The run history stays in the Docker volume `data_pipeline_postgres-db`. To delete it, use `docker compose down -v`.
-
-The sign-in and the database are local test values in `docker-compose.yaml`: the `airflow-init` service makes the web user `airflow` with the password `airflow` and the Admin role, and the `postgres` service makes the database user `airflow`.
-
-The DAG has 12 tasks. `process_participant` is mapped: Airflow makes one task for each participant and runs 4 at a time.
-
-![DAG graph view](docs/dag_graph.png)
-
-In the sample run all 12 tasks passed, including the 5 mapped `process_participant` tasks. The Event Log shows each task go from running to success.
-
-![Event log of a sample run](docs/dag_run.png)
-
-## Results of the sample run
-
-On 2026-10-25 we ran the pipeline on the 5 participants of `sample` mode (COPS-11, 18, 25, 44, 46; 1.08 GB), with Python 3.11. We ran it with `dvc repro` and with the Airflow DAG. Both runs gave the same results.
-
-| Step | Result |
-| --- | --- |
-| Run time | 2 min 6 s with `dvc repro`. Approximately 4 min with Airflow. 0 participants failed. |
-| Cleaning | 118 of 336 hours kept. Removed: 209 without a label, 5 with low valid data, 4 where the sensor showed the watch was not worn. |
-| Final dataset | 118 rows, 67 columns. Labels: off 63, dyskinetic 35, on 20. |
-| Validation | 0 violations. This run is the schema baseline. |
-| Anomalies | 0 critical, 10 warnings: tremor outliers, 2 participants with less than 24 usable hours, and 6 diary rows with a score but no label. An alert was sent. |
-| DVC | `dvc.lock` records this version. The data is in the DVC remote. |
-
-![Hours kept and removed by cleaning](docs/charts/01_cleaning.png)
-
-The labels depend strongly on the participant:
-
-![Labels per participant](docs/charts/02_labels_per_participant.png)
-
-The tremor features are higher in dyskinetic hours, and the share of still seconds is highest in off hours:
-
-![Wrist features by label](docs/charts/03_features_by_label.png)
-
-![Anomaly warnings](docs/charts/06_anomalies.png)
-
-Earlier runs used single participants: COPS-7 (192 diary hours, 105 usable) and COPS-25 (72 diary hours, 36 usable). The reports in Git now come from the 5-participant run.
-
-## Preprocessing steps
-
-1. **Acquire:** list files on OSF, pick participants, and for each one download its zip (checked against OSF's SHA-256, with retries), process it, and delete it. Several participants run at once.
-2. **Parse the diary:** read the hourly diary, map `KinesiaScore` to off / on / dyskinetic, and flag rows where the text and score disagree (the text is trusted).
-3. **Extract features** for each hour from the wrist set in `features.wrist`:
-    1. Magnitude per row: √(X² + Y² + Z²)
-    2. Band-pass filter into 0.1–3 Hz (movement, also removes gravity) and 4–8 Hz (tremor)
-    3. Absolute value, averaged per second
-    4. Hourly summary: `move_mean`, `move_std`, `move_p95`, `still_fraction`, `tremor_mean`, `tremor_p95`, `tremor_ratio`
-4. **Name the features:** prefix them with `W_` (the watch), whichever wrist it is, so the column names don't depend on the side.
-5. **Add patient info:** UPDRS-III off and on scores, levodopa response, demographics, and hours since the last dose.
-6. **Clean:** remove hours with no label (sleep, no data), not worn, missing or low-quality sensor data, and duplicates.
-7. **Validate:** check fixed rules, compare with the baseline schema, and save statistics.
-8. **Detect anomalies:** missing values, outliers, low coverage, and label issues. Alerts are sent by email or Slack if set up in `.env`.
-9. **Bias report:** compare label balance and a baseline model's results across sex, age group, visit, DBS, Hoehn & Yahr, and PD subtype.
-
-**Why we use our own checks for step 7.** TFDV needs TensorFlow. Great Expectations needs a large setup for one table. Our checks in `scripts/validate.py` do the same 3 tasks with pandas: fixed expectations, a schema baseline that we compare with each run, and statistics with a history file. The checks run the same in Airflow and on the command line. Unit tests check them.
-
-## Output files
-
-All in `data/`.
-
-| File | Contents |
-| --- | --- |
-| `processed/hourly_features.csv` | **Final dataset for modelling:** one row per usable participant-hour |
-| `processed/hourly_all.csv` | All diary hours before cleaning |
-| `processed/label_issues.json` | Diary text/score mismatches and missing UPDRS files |
-| `interim/COPS-X_hourly.csv` | Per-participant table before merging |
-| `interim/COPS-X_issues.json` | That participant's diary issues, merged into `processed/label_issues.json` |
-| `reports/failed_participants.json` | Participants that could not be processed, with the error (empty means none) |
-| `reports/cleaning_summary.json` | Hours kept and removed, by reason |
-| `reports/schema_baseline.json` | Reference schema from the first run |
-| `reports/schema_latest.json` | Schema of the latest run |
-| `reports/validation_report.json` | Failed checks (empty means all passed) |
-| `reports/stats/stats_<run>.json` | Full statistics of each run |
-| `reports/stats_history.csv` | One summary line per run |
-| `reports/anomalies.json` | Critical anomalies and warnings |
-| `reports/bias_report.md` | Bias slicing results, to read |
-| `reports/bias_report.json` | The same, as data, with the participants the model was tested on |
-| `raw/Demographics.csv` | Demographics, downloaded from OSF |
-| `raw/manifest.json` | Files used in the run |
-
-Only `cleaning_summary.json` and `bias_report.md` are committed to Git; DVC versions the rest of `processed/` and `reports/`. Raw and interim data aren't versioned.
-
-## Data card
-
-`processed/hourly_features.csv`: one row per participant-hour that has a label and usable sensor data from the watch wrist.
-
-| Group | Columns | What they are |
-| --- | --- | --- |
-| Identifiers | `participant_id`, `visit`, `day`, `hour_start`, `hour_index` | Who and when: the diary day, the hour it starts (0–23), and hours since the first diary day (`day × 24 + hour_start`) |
-| **Label** | `kinesia_class` | `off`, `on` or `dyskinetic`, from `kinesia_score` |
-| Diary | `kinesia_text`, `kinesia_score`, `tremor_score`, `tremor_present`, `freezing`, `fall`, `wear_status` | The participant's own hourly entries; `kinesia_score` runs from −3 to +3 |
-| Medication | `medication_taken`, `medication`, `dosage_mg`, `hours_since_dose` | Doses logged in the diary, and hours since the last one |
-| Movement (`W_`) | `move_mean`, `move_std`, `move_p95`, `still_fraction` | Everyday movement (0.1–3 Hz), from the per-second averages over the hour |
-| Tremor (`W_`) | `tremor_mean`, `tremor_p95`, `tremor_ratio` | Tremor-band movement (4–8 Hz), and its size relative to everyday movement |
-| Quality (`W_`) | `n_samples`, `valid_fraction`, `n_gaps`, `n_clipped`, `temp_mean`, `photo_mean`, `status` | How much usable data the hour had, gaps and clipped values, and the sensor's temperature and light |
-| Clinical | `updrs_off_total`, `updrs_on_total`, `levodopa_response`, `updrs_days_since_exam`, `has_updrs_off`, `has_updrs_on` | MDS-UPDRS Part III OFF and ON; `levodopa_response` is (OFF − ON) / OFF |
-| Demographics | `age`, `age_group`, `sex`, `handedness`, `pd_subtype`, `pd_dominantside`, `hoehn_yahr`, `pd_yearssincediagnosis`, `dbs` | From `Demographics.csv`; `age_group` is `<55`, `55-64` or `65+`. Also the slices for the bias report. |
-| Files | `left_zip`, `left_csv` (`right_zip`, `right_csv` with `wrist: right`) | The sensor files each row was computed from, for tracing |
-
-## Bias detection and mitigation
-
-**What we checked.** We used 6 slices: sex, age group, visit, DBS, Hoehn and Yahr stage, and Parkinson's subtype.
-
-- Data level: the number of rows and participants, and the label balance, for each group.
-- Model level: a baseline logistic regression that predicts "off" or "not off". The training participants and the test participants are different (`GroupShuffleSplit`). For each group we calculate recall, precision, and false positive rate with Fairlearn's `MetricFrame`.
-
-**What we found in the sample run.** The test set has 2 participants and 50 hours.
-
-- Overall recall is 0.889. Precision is 0.909. The false positive rate is 0.8. 90% of the test hours are "off", so the baseline almost always predicts "off". We use this model only to find bias. It is not our final model.
-- 2 slices have 2 groups in the test set. Age group: 55-64 has recall 0.90 and 65+ has 0.88. Subtype: akinetic-rigid has 0.90 and equivalence-type has 0.88. The gap is 0.02. Our limit is 0.10 (`bias.max_recall_gap`).
-- 4 slices have only 1 group in the test set. Both test participants are male, inpatient, have DBS, and have Hoehn and Yahr stage 3. Thus we cannot measure a gap for these slices. The report shows `nan` for them.
-- Data level: some groups have only 1 participant (65+, no DBS, Hoehn and Yahr 2 and 4). The labels depend strongly on the participant. One participant is 89% dyskinetic. Another is 100% off.
-
-![Data-level slices](docs/charts/04_bias_data_level.png)
-
-![Model-level slices](docs/charts/05_bias_model_level.png)
-
-**Mitigation.** If a recall gap is more than 0.10, `bias.py` trains the model again with sample weights. These weights give each group the same total weight. The report then shows the recall before and after. The unit tests check this step. In the sample run no gap was more than 0.10, so this step did not start.
-
-**Limits and next steps.** 5 participants are not sufficient to say if the data is fair. In the model phase we will:
-
-1. Use more participants.
-2. Use leave-one-participant-out, so that each participant and each group is tested one time.
-3. Compare the recall of each group before and after we change the weights.
-
-We expect this trade-off: the new weights can decrease the overall recall a little, but they make the gap between the groups smaller.
-
-## Code structure
+## How it works
 
 ```text
-Data_Pipeline/
-├── config/pipeline.yaml   every setting: paths, download, features, cleaning, validation, alerts, bias
-├── dags/                  cops_pipeline_dag.py: the Airflow DAG
-├── scripts/               the pipeline, one module per step
-│   ├── acquire.py         list OSF files, choose participants, download with retries and checksums
-│   ├── diary.py           read the hourly diary, map kinesia to classes, flag text/score mismatches
-│   ├── features.py        read the wrist CSVs, filter, and compute the hourly features for one wrist
-│   ├── patient_info.py    UPDRS exams and levodopa response
-│   ├── process_patient.py one participant zip -> one hourly table (the unit of parallel work)
-│   ├── join.py            merge participants and demographics
-│   ├── clean.py           drop unusable hours, with a count for each reason
-│   ├── validate.py        rules, schema against the baseline, statistics and their history
-│   ├── anomalies.py       missing values, outliers, low coverage, label issues
-│   ├── bias.py            data slicing and the baseline model's results per slice, with reweighting
-│   ├── alerts.py          email and Slack alerts
-│   ├── pipeline_steps.py  each step as a function, shared by the DAG and the command line
-│   ├── run_pipeline.py    the whole pipeline without Airflow (also what dvc repro runs)
-│   └── utils/             config loading, file reading and writing, logging
-├── tests/                 pytest tests on small synthetic files (no download)
-├── data/                  raw/, interim/, processed/, reports/ (see Output files)
-├── docs/                  DAG screenshots, gantt/ (Airflow Gantt charts), charts/ (results of the sample run)
-├── logs/                  pipeline.log
-├── dvc.yaml               the DVC stage
-├── Dockerfile, docker-compose.yaml   Airflow, plus the tests and pipeline services
-└── requirements.txt
+OSF ──▶ acquire.py: manifest, download + verify (SHA-256, retries)
+          │
+          ├─ 1. patients    read.py + pipeline.py: Demographics.csv → each person's wrist (more affected side), DBS, bias slices
+          │
+          ├─ 2. per participant (4 at a time)                                pipeline.process_participant
+          │      diary.py   one row per diary hour: labels, wear, medication (nothing dropped)
+          │      ledd.py    doses → events with their levodopa equivalent dose (Jost et al. 2023)
+          │      sensor.py  for each hour of that wrist: the 7 hourly features, and 10-s windows at 30 Hz
+          │                 then for the whole recording: worn flags and the orientation fix
+          │      → data/interim/<pid>/ ; the downloaded zip is deleted
+          │
+          ├─ 3. build       pipeline.build: join everyone → data/processed/
+          ├─ 4. checks      checks.py: the contract (stops the run), warnings, bias report
+          └─ 5. version     dvc commit + push (the DAG, or dvc repro)
 ```
+
+### The windows (`sensor.hour_windows`)
+
+The spec is `windows:` in the config (10 s, 30 Hz, 3 axes, `spec_version: 1`). It must match `windows:` in `Model_Pipeline/config/model.yaml`, and the Android app cuts windows the same way. Bump `spec_version` when anything below changes.
+
+1. Split the hour at recording gaps (> 0.05 s). Nothing is filtered or resampled across a gap.
+2. Clip to ±8 g, interpolate onto an exact 100 Hz grid starting on a window boundary, and resample to 30 Hz (`resample_poly`; its low-pass removes everything above 15 Hz).
+3. Cut whole 10-s windows: `time_s` is a multiple of 10 on the diary clock, 360 per full hour. COPS stamps each sample at the end of its 10 ms (an hour runs `10:00:00.010` to `11:00:00.000`), so a window may start one sample before the first stamp.
+4. Keep each window's per-axis mean (for the orientation check), then remove it.
+
+**Wrist:** the more affected side; when only the other wrist was recorded (COPS-24), that one, with `more_affected_side` false.
+
+**Worn:** false where the diary says the watch wasn't worn, or where over a 30-minute block the watch is cold (< 25 °C) and nearly every window is still.
+
+**Orientation**, checked on the sample's two wrists (recorded at the same time): X runs along the arm, Y across the wrist, Z out of the face.
+
+- A watch strapped on turned round reads X (along the arm) mostly above 0. X and Y are flipped back. This is decided **per wear bout** (a new bout starts after 30 minutes off), because a watch can be put back on another way round: COPS-60's were, after day 0.
+- The left wrist is the right's mirror image, so its Y is flipped too. Every wrist then reads like a right one worn the usual way.
+- Each run compares the chosen wrist with the other one for up to 12 waking hours (`reports/wrist_agreement.csv`), and warns if they still disagree.
+
+### The clock
+
+`time_s` is seconds since the participant's first diary day began (Day `0 days`, 00:00). The diary row `Time 18 hr` is 17:00–18:00, so `hour_index` = day × 24 + 17 = `time_s` // 3600. Doses sit at mid-hour, since the diary only ticks the hour.
+
+## Outputs
+
+`data/processed/`, versioned by DVC:
+
+| File | One row per | Columns |
+| --- | --- | --- |
+| `hours.csv` | Diary hour, none dropped | `participant_id`, `day`, `hour_start`, `hour_index`, `visit`, `kinesia_text`, `kinesia_score`, `tremor_score`, `wear_status`, `medication`, `dosage_mg`; the 7 features `W_move_mean` … `W_tremor_ratio` with `W_valid_fraction`, `W_status`; `n_windows`, `worn_fraction`; `drop_reason`; bias slices `sex`, `age_group`, `dbs`, `hoehn_yahr`, `pd_subtype` |
+| `events.csv` | Dose | `participant_id`, `time_s`, `kind` (`dose`), `ledd`, `source` (`on_time`), `kinesia_score`, `tremor_score` (empty: check-ins are simulated in training), `drug` |
+| `patients.csv` | Participant | `participant_id`, `wrist`, `more_affected_side`, `dbs`, `turned_round_share`, `wear_bouts`, `mirrored` |
+| `windows/<pid>/` | Window | `time_s.npy` (n,) int64 · `worn.npy` (n,) bool · `signal.npy` (n, 3, 300) float32, g, mean removed. Load with `np.load(..., mmap_mode="r")` |
+| `dataset_meta.json` | Run | The window spec, the wrist rule, and counts |
+
+- **Labels** are made by Model_Pipeline from `hours.csv` (`core/targets.py`): the state is the kinesia score −3 to +3, or asleep when `kinesia_text` is `Sleep`; tremor is the tremor score, left out in sleep hours.
+- **`drop_reason`** is empty for hours the hourly baselines can use. Otherwise it's the first that applies: `no_label` (No Data), `not_worn`, `no_sensor_data`, `low_valid_fraction` (< 80%), `sensor_nonwear` (< 50% of windows worn). The window model uses every hour, and the `worn` flag per window.
+- **The 7 hourly features** (0.1–3 Hz movement and 4–8 Hz tremor from the 100 Hz magnitude, averaged per second, summarised per hour) are for the baselines and drift monitoring, not the window model.
+
+`data/reports/`: `checks.json` (critical problems, warnings, windows per participant), `wrist_agreement.csv`, `label_issues.json` (diary text/score disagreements, unreadable doses), `failed_participants.json`, `bias_report.json` and `bias_report.md`. Only `bias_report.md` names no participant and is committed to Git.
+
+## Checks (`checks.py`)
+
+- **Critical** (stops the run and the DAG, with an alert): the contract `core/data.py` relies on.
+  - A participant-hour appears twice, or a score is out of range.
+  - A dose has no time or an LEDD below 0.
+  - A patient is missing, or their `dbs` isn't true or false.
+  - The windows: wrong shape or type, not stepping by whole windows, NaN values, outside the diary hours, or cut with another spec.
+- **Warnings** (alert, the run carries on): fewer than 24 usable hours for a participant, under 50% of windows worn, wrists that still disagree after the orientation fix, and diary label issues.
+- **Bias** (`bias_report.md`): rows, participants, and the share of off, on, dyskinetic and asleep, per sex, age group, visit, DBS, Hoehn & Yahr stage and PD subtype. The model pipeline checks the model itself per group.
+
+## Sample run (2026-11-14)
+
+The model team's 10 participants (`data.participants`: 5 with DBS, 5 without):
+
+| | |
+| --- | --- |
+| Hours | 1,080 diary hours, 789 usable by the baselines |
+| Windows | 311,695, of which 300,266 worn. 857 hours are complete (360 windows) |
+| Labels | 821 state (345 OFF, 152 ON, 52 dyskinetic, 272 asleep) and 523 tremor |
+| Doses | 174 |
+| Wrists | 6 left and 4 right. COPS-24 had only its left wrist recorded, so it uses that. Watches turned round: all of COPS-3, 4, 25 and 42, most of COPS-60 (re-strapped after day 0) and part of COPS-18 |
+| Checks | 0 critical, 7 warnings: COPS-11 has 15 usable hours; small wrist disagreements for COPS-3, 11 and 25 (−0.08 to −0.15 on one axis); COPS-24 can't be compared; 13 diary scores without a label, for kinesia and for tremor |
+| Model contract | Model_Pipeline's `load_dataset` loads it and passes `check()` for every input group |
+| Data version | Pushed to the DVC remote; `dvc.lock` names it |
+
+## Code
+
+```text
+scripts/
+├── acquire.py    list OSF files, choose participants, download with retries and checksums
+├── read.py       participant zips, the diary file, hourly accelerometer CSVs (pyarrow, with a pandas fallback), demographics
+├── diary.py      the diary as one row per hour: labels (text trusted over score), wear, doses
+├── ledd.py       doses → events with LEDD, from config/ledd.yaml (every factor cited)
+├── sensor.py     windows, wear, orientation, wrist agreement, the 7 hourly features
+├── pipeline.py   patients, one participant, the build, failures, the command line
+├── checks.py     the contract, warnings, the bias report
+└── utils.py      config, file I/O, logging, email and Slack alerts
+dags/cops_pipeline_dag.py   the same steps in Airflow
+tests/                      one file per module, on synthetic participants (tests/helpers.py)
+```
+
+**Tests:** `pytest -q` runs 138 tests on synthetic participants made by `tests/helpers.py`, and nothing is downloaded or sent. `test_dag.py` needs Airflow, so it skips outside Docker; `docker compose run --rm tests` runs it. Coverage of `scripts/` is about 94% (`pytest --cov=scripts --cov-branch`); CI fails below 85%.
 
 ## Data versioning (DVC)
 
-The pipeline is one DVC stage, `build_dataset` in `dvc.yaml`: its inputs are `scripts/` and `config/pipeline.yaml`, and its outputs are everything it writes to `processed/` and `reports/` (listed in `dvc.yaml`). `raw/` and `interim/` are working files and aren't versioned. DVC is set up in this folder (`dvc init --subdir`, so `.dvc/` is here and not at the repo root).
-
-**What goes where:**
-
-| Where | What |
-| --- | --- |
-| Git | The code, `dvc.yaml`, and `dvc.lock`, which records the hash of every input and output for each version |
-| Git, readable by anyone | The summary reports with no participant IDs: `cleaning_summary.json` and `bias_report.md` (`cache: false` in `dvc.yaml`) |
-| DVC, never Git | The datasets and the reports that name participants: `processed/`, the statistics, schema, validation, anomaly and failure reports, and `bias_report.json` (it lists the test participants) |
-
-There are no separate `.dvc` files: in a DVC pipeline, `dvc.lock` records the outputs, doing the job `.dvc` files do for data added with `dvc add`.
-
-The schema baseline, the statistics and their history are `persist: true`, so they're kept between runs: each run is validated against the first, and the history grows by one line per run.
-
-**Making a version:**
+One stage, `build_dataset` in `dvc.yaml`. Its inputs are `scripts/` and both config files; its outputs are everything in `processed/` and `reports/`. `raw/` and `interim/` are working files. The remote is `gs://team17-mlops-neu-training-data/cops-dvc` (the bucket in `infra/storage.tf`). Sign in first with `gcloud auth application-default login`.
 
 ```bash
-dvc repro            # runs the pipeline if code, config or data changed, and updates dvc.lock
-git add dvc.lock data/reports/cleaning_summary.json data/reports/bias_report.md
-git commit -m "Data version: <what changed>"
-dvc push             # uploads the data to the remote
+dvc repro                        # rebuild if code, config or data changed; updates dvc.lock
+git add dvc.lock data/reports/bias_report.md && git commit -m "Data version: <what changed>"
+dvc push                         # upload the data
+dvc pull                         # elsewhere: get exactly the data of the checked-out commit
 ```
 
-After an Airflow run, the `dvc_version` task updates `dvc.lock` with `dvc commit -f build_dataset` and tries `dvc push`. It doesn't commit to Git; do the `git add` and `git commit` above yourself.
+After an Airflow run, the `dvc_version` task runs `dvc commit -f build_dataset` and tries `dvc push`. It doesn't commit to Git; do the `git add` and `git commit` yourself.
 
-**Getting a version:** `git checkout <commit>` and then `dvc pull` restore exactly the data of that commit. Without access to the remote, `dvc repro` rebuilds it from OSF, and `dvc.lock` shows whether the result matches.
+## Airflow
 
-**Where the data is stored (the remote).** The shared remote is the team's training-data bucket, `gs://team17-mlops-neu-training-data/cops-dvc`, set in `.dvc/config` for everyone. `dvc[gs]` is in `requirements.txt`. Sign in once with `gcloud auth application-default login`; your Google account needs Editor on the `team17-mlops-neu` project.
+Open <http://localhost:8080> and log in as `airflow` / `airflow` (local test values in `docker-compose.yaml`). Turn `cops_data_pipeline` on, then trigger it with `{"mode": "sample"}` or `{"mode": "full"}`.
 
-The first version (the sample run of 2026-10-25) was pushed to a local folder remote, set with `--local` in `.dvc/config.local`, which isn't committed and overrides the shared remote on that machine. To move it to the bucket, no re-run is needed: `dvc push -r storage`, or remove the local remote with `dvc remote remove --local <name>` and then `dvc push`. A folder remote is still possible for working offline:
-
-```bash
-dvc remote add -d --local storage <path outside the repo>
-```
-
-## Speed
-
-A participant like COPS-7 has about 190 diary hours, and each hour is one CSV per wrist of 360,000 rows (100 a second). Profiling one full-size hour showed where the time went: reading the CSV (0.25 s) and converting its clock times to seconds (0.20 s), not the filtering (0.015 s). Two changes followed:
-
-| Change | Before | After |
-| --- | --- | --- |
-| Read each CSV with pyarrow, with typed columns, so clock times are parsed while reading. Files with a broken value fall back to pandas and are cleaned as before; the features are identical. | 0.68 s per wrist-hour | 0.09 s per wrist-hour |
-| Process participants in parallel on the command line too, not only in Airflow (`run.parallel_participants`, 4) | One participant at a time | 4 at a time |
-
-Together, processing one participant went from about 4.3 minutes to about 35 seconds, and the command-line run handles four at once. Downloading is now the larger share of the time. Measured on one laptop with a synthetic full-size hour; real runs also depend on the network.
-
-### Gantt chart
-
-![Airflow Gantt chart of a sample run](docs/gantt/gantt_sample.png)
-
-The Gantt chart of the sample run shows that `process_participant` takes the most time. Each of these 5 mapped tasks downloads the zip file of one participant and calculates the features for each wrist-hour. They took approximately 3.5 minutes, nearly all of the run. The 8 tasks after them (`check_failures` to `notify_success`) took approximately 10 seconds together. Thus the two changes above (pyarrow, and 4 participants at a time) are on the slow part of the pipeline.
+Tasks run in this order: `fetch_manifest` → `patients` → `process_participant` (one mapped task per participant, 4 at a time, 2 retries) → `check_failures` (runs even when some participants failed) → `build` → `run_checks` (no retries) → `dvc_version` → `notify_success`. Any failed task sends an alert.
 
 ## Contributions
 
@@ -341,10 +173,11 @@ Newest first.
 
 | Date | Who | What changed | PR |
 | --- | --- | --- | --- |
-| 2026-10-26 | Shaikh Basim | Made the pipeline run with only Docker: `tests` and `pipeline` services in `docker-compose.yaml`, Airflow's slim image (no clashing add-on pins, half the download), the Linux `AIRFLOW_UID` setup, and a front-page README that starts with the Docker commands | #9 |
-| 2026-11-11 | Sam Selvaraj | Added `scripts/ledd.py`: turns the diary's doses into dose events with their levodopa equivalent dose, from the table in `config/ledd.yaml` (Jost et al. 2023, Table 1, every value cited), with COMT inhibitor boosts over the durations the paper gives and a clear stop on any unknown drug name. Not called by the pipeline yet. Updated requests, pyarrow and pytest for the Dependabot alerts | (this PR) |
-| 2026-10-26 | Sam Selvaraj | Corrected the DAG's task count to 12, and made Git check out text files with LF line endings everywhere, so DVC sees the same files on Windows | #7 |
-| 2026-10-25 | Ayush Varma | Ran the pipeline on the 5 sample participants with `dvc repro` and with the Airflow DAG (same results), recorded the first data version (`dvc.lock`, pushed to a local DVC remote), committed the 5-participant summary reports, and documented the results, the bias findings, the Gantt chart, the Airflow steps and a `venv` setup, with DAG screenshots and charts in `docs/` | #6 |
-| 2026-10-24 | Sam Selvaraj | Set up DVC (every output versioned, participant-level reports kept out of Git, summaries kept in), made processing about 7× faster (pyarrow reading, parallel participants on the command line), fixed one failed participant failing the whole Airflow run, Windows-encoded and empty diaries, and unchecked download addresses, added CI for the pipeline (lint, tests with an 85% coverage floor, DVC, a stricter data guard), and added tests for downloads, alerts, the whole pipeline end to end, the DAG and robustness (coverage 73% to 92%) | #5 |
-| 2026-10-22 | Shaikh Basim | Fixed the pipeline run: diaries with `Dosage` or `Dosage_1..N` columns are read, failed participants are listed in `failed_participants.json` with an alert, the Airflow DAG path in `docker-compose.yaml` is fixed, `.env` is optional, Airflow is pinned in the Dockerfile, and `airflow-init` creates the admin user | #4 |
-| 2026-10-21 | Tejaswini Sarikonda | Built the data pipeline: download from OSF, diary parsing, wrist features, cleaning, validation and statistics, anomaly alerts, bias slicing, the Airflow DAG, the DVC stage, the Docker setup and the tests | #3 |
+| 2026-11-14 | Dhruv Puri | Rebuilt the pipeline for the window model: every diary hour kept (sleep is a label), 10-s 30 Hz windows with worn flags, the more affected wrist with an orientation fix checked on both wrists, dose events wired in, a patients table, and checks against Model_Pipeline's `Dataset` contract. Removed UPDRS, the row-dropping cleaning, `hours_since_dose`, the schema baseline and the model-level bias check. 18 modules became 8. Then: a named list of participants (the 10 for the model team), orientation decided per wear bout, a fallback when only one wrist was recorded or the side is "both", every wrist mirrored to read like a right one, zips already in `data/raw/` reused without downloading, and 3 more COPS drug names in the LEDD table | (this PR) |
+| 2026-11-11 | Sam Selvaraj | Added `scripts/ledd.py`: doses as events with their levodopa equivalent dose, from `config/ledd.yaml` (Jost et al. 2023, Table 1, every value cited), with COMT inhibitor boosts and a clear stop on any unknown drug name. Updated requests, pyarrow and pytest for the Dependabot alerts | (this PR) |
+| 2026-10-26 | Shaikh Basim | Made the pipeline run with only Docker: `tests` and `pipeline` services, Airflow's slim image, the Linux `AIRFLOW_UID` setup, and a README that starts with the Docker commands | #9 |
+| 2026-10-26 | Sam Selvaraj | Corrected the DAG's task count, and made Git check out text files with LF line endings everywhere, so DVC sees the same files on Windows | #7 |
+| 2026-10-25 | Ayush Varma | Ran the pipeline on the 5 sample participants with `dvc repro` and Airflow, recorded the first data version, and documented the results, bias findings, Gantt chart and Airflow steps | #6 |
+| 2026-10-24 | Sam Selvaraj | Set up DVC, made processing about 7× faster (pyarrow reading, parallel participants), fixed one failed participant failing the whole Airflow run, added CI and most of the tests | #5 |
+| 2026-10-22 | Shaikh Basim | Fixed the pipeline run: both dose-column layouts, failed participants listed with an alert, the DAG path, an optional `.env`, Airflow pinned, and the admin user | #4 |
+| 2026-10-21 | Tejaswini Sarikonda | Built the data pipeline: download, diary parsing, wrist features, cleaning, validation, anomaly alerts, bias slicing, the DAG, the DVC stage, Docker and the tests | #3 |
