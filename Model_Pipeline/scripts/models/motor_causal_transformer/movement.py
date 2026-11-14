@@ -30,7 +30,7 @@ harnet10 (the one in use)
     Dropout 0.2
     Linear 128 -> 256, LayerNorm
 
-    The same layers as the prototype's harnet branch and join (team-hub/exploration).
+    The same layers as the prototype's harnet branch and join.
 """
 
 from abc import ABC, abstractmethod
@@ -129,6 +129,7 @@ class Harnet10Projection(MovementEncoder):
     input_group = "harnet"
     input_shape = (1024,)
     MIN_SD = 1e-6   # a feature that never varies in training is centred, not blown up
+    FIT_BLOCK = 16_384   # windows summed at a time when fitting: about 130 MB in float64
 
     def __init__(self, hidden_dim: int = 128, output_dim: int = 256, input_dropout: float = 0.5,
                  dropout: float = 0.2):
@@ -144,6 +145,7 @@ class Harnet10Projection(MovementEncoder):
         self.register_buffer("scale", torch.ones(features))
         self.register_buffer("shift", torch.zeros(features))
         self.register_buffer("fitted", torch.tensor(False))
+        self._fitted_known = False   # a Python copy of `fitted`, so forward never waits on the GPU to read it
         self.project = nn.Sequential(
             nn.Dropout(input_dropout), nn.Linear(features, hidden_dim), nn.ReLU(),
             nn.Dropout(dropout), nn.Linear(hidden_dim, output_dim), nn.LayerNorm(output_dim))
@@ -151,7 +153,14 @@ class Harnet10Projection(MovementEncoder):
 
     @property
     def is_fitted(self) -> bool:
-        return bool(self.fitted)
+        # Read the buffer only until it says fitted: on a GPU each read would wait for the GPU.
+        if not self._fitted_known:
+            self._fitted_known = bool(self.fitted)
+        return self._fitted_known
+
+    def _load_from_state_dict(self, *args, **kwargs):
+        super()._load_from_state_dict(*args, **kwargs)
+        self._fitted_known = False   # the loaded buffer decides again
 
     def fit(self, inputs: Union[np.ndarray, torch.Tensor, Iterable[np.ndarray]]) -> None:
         """Fit the standardisation on the training windows' features.
@@ -168,14 +177,17 @@ class Harnet10Projection(MovementEncoder):
         chunks = [inputs] if isinstance(inputs, (np.ndarray, torch.Tensor)) else inputs
         n, total, squares = 0, np.zeros(self.input_shape[0]), np.zeros(self.input_shape[0])
         for chunk in chunks:
-            chunk = np.asarray(chunk.cpu() if isinstance(chunk, torch.Tensor) else chunk, dtype=np.float64)
+            chunk = chunk.cpu().numpy() if isinstance(chunk, torch.Tensor) else chunk
             if chunk.ndim != 2 or chunk.shape[1] != self.input_shape[0]:
                 raise ModelError(f"harnet10 features must be (N, {self.input_shape[0]}), not {chunk.shape}")
-            if not np.isfinite(chunk).all():
-                raise ModelError("harnet10 features must all be finite")
+            # A block at a time, so a patient's features are never copied whole into float64.
+            for start in range(0, len(chunk), self.FIT_BLOCK):
+                block = np.asarray(chunk[start:start + self.FIT_BLOCK], dtype=np.float64)
+                if not np.isfinite(block).all():
+                    raise ModelError("harnet10 features must all be finite")
+                total += block.sum(axis=0)
+                squares += np.square(block).sum(axis=0)
             n += len(chunk)
-            total += chunk.sum(axis=0)
-            squares += np.square(chunk).sum(axis=0)
         if n < 2:
             raise ModelError(f"fitting harnet10's standardisation needs at least 2 windows, not {n}")
         mean = total / n
@@ -193,6 +205,7 @@ class Harnet10Projection(MovementEncoder):
         self.scale.copy_(torch.as_tensor(scale, dtype=torch.float32))
         self.shift.copy_(torch.as_tensor(-mean * scale, dtype=torch.float32))
         self.fitted.fill_(True)
+        self._fitted_known = True
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         if not self.is_fitted:

@@ -58,7 +58,7 @@ def test_prepare_keeps_worn_windows_answers_and_whole_recording_events():
     assert rec.answer("sleep_now", 6) == 1.0
     dosed = np.flatnonzero(rec.events[:, F["dose"]])
     assert rec.time_s[dosed[0]] == 4 * H and len(dosed) == 181       # its own window, then 30 min of them
-    assert rec.patient.tolist() == [1.0, 0.0]
+    assert rec.patient.tolist() == [1.0, -1.0]
     assert recordings()["P2"].answers == {}
 
 

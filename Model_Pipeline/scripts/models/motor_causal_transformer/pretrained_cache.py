@@ -110,18 +110,26 @@ class PretrainedCache:
                     extra={"event": "pretrain_cache_hit", "key": key})
         return entry
 
-    def save(self, key: str, state: Mapping[str, torch.Tensor], history, rng: Mapping, about: Mapping) -> Path:
-        """Write an entry atomically. about goes in <key>.json, for whoever looks in the folder."""
-        self.folder.mkdir(parents=True, exist_ok=True)
+    def save(self, key: str, state: Mapping[str, torch.Tensor], history, rng: Mapping, about: Mapping):
+        """Write an entry atomically, or log a warning and return None if it can't be written.
+        about goes in <key>.json, for whoever looks in the folder."""
         path = self.folder / f"{key}.pt"
         tmp = path.with_name(f".{key}.{os.getpid()}.tmp")
-        torch.save({"format": FORMAT_VERSION, "state": {k: v.detach().cpu() for k, v in state.items()},
-                    "history": history, "rng": rng}, tmp)
-        os.replace(tmp, path)
         info = path.with_suffix(".json")
         tmp_info = info.with_name(f".{key}.{os.getpid()}.json.tmp")
-        tmp_info.write_text(json.dumps(about, indent=1, default=str), encoding="utf-8")
-        os.replace(tmp_info, info)
+        try:
+            self.folder.mkdir(parents=True, exist_ok=True)
+            torch.save({"format": FORMAT_VERSION, "state": {k: v.detach().cpu() for k, v in state.items()},
+                        "history": history, "rng": rng}, tmp)
+            os.replace(tmp, path)
+            tmp_info.write_text(json.dumps(about, indent=1, default=str), encoding="utf-8")
+            os.replace(tmp_info, info)
+        except OSError as e:                       # a full disk or a locked file costs the speed-up, not the fit
+            for leftover in (tmp, tmp_info):
+                leftover.unlink(missing_ok=True)
+            logger.warning("couldn't cache the pretrained body %s (%s); the fit goes on", key[:12], e,
+                           extra={"event": "pretrain_cache_unwritable", "key": key})
+            return None
         logger.info("cached the pretrained body %s", key[:12], extra={"event": "pretrain_cache_saved", "key": key})
         return path
 

@@ -29,7 +29,7 @@ class_weight="balanced", with a cap so a class with a handful of hours can't tak
 set_class_weights every weight is 1, which is the plain mean.
 
 Defaults are the final recipe's: lam 0.3, beta 0.2, hour_weight 1, balanced class weights with
-power 1 and cap 10. The maths is the prototype's (team-hub/exploration).
+power 1 and cap 10. The maths is the prototype's.
 
 Speed:
 - The cost of every possible answer is worked out at once: -log p + lam x (p @ D), where
@@ -180,8 +180,10 @@ class MILLoss(nn.Module):
                 from core/targets.py, which checks them.
             has_windows: (batch, hours) bool, False for hours with no worn windows.
             sample_weights: (batch, hours) each hour's weight (bias mitigation by reweighting), or
-                None for 1 each. It multiplies the hour's class weight, so both terms are means
-                weighted by class and by hour, and an hour of weight 0 counts as if it weren't there.
+                None for 1 each. It scales the hour's share of the loss, which is normalised by
+                the class weights alone: so a batch of low-weight hours weighs less than one of
+                high-weight hours, as reweighting needs (fit rescales the weights to average 1,
+                so the loss keeps its size), and an hour of weight 0 learns nothing.
 
         Returns:
             LossResult(total, {label: LabelLoss}).
@@ -220,10 +222,11 @@ class MILLoss(nn.Module):
                 hour_term = hour_cost.gather(-1, y).squeeze(-1)                           # (b, H)
                 safety_term = (window_weights @ window_cost).gather(-1, y).squeeze(-1)   # (b, H)
 
-                w = torch.where(valid, self.class_weights(target).to(logits.dtype)[y.squeeze(-1)], 0.0)
-                if sample_weights is not None:
-                    w = w * sample_weights.to(w.dtype)
-                norm = w.sum().clamp_min(EPS)                 # 0 hours: every term below is exactly 0
+                cw = torch.where(valid, self.class_weights(target).to(logits.dtype)[y.squeeze(-1)], 0.0)
+                # The norm is the class weights' only: dividing by the sample-weighted sum would make
+                # every batch weigh the same, whatever its hours' weights.
+                norm = cw.sum().clamp_min(EPS)                # 0 hours: every term below is exactly 0
+                w = cw if sample_weights is None else cw * sample_weights.to(cw.dtype)
                 hour_mean = torch.where(valid, hour_term, 0.0).mul(w).sum() / norm
                 safety_mean = torch.where(valid, safety_term, 0.0).mul(w).sum() / norm
                 weight = self.label_weights.get(label, 1.0)

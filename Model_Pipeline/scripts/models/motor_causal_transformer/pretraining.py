@@ -31,7 +31,7 @@ scattered through the past. The data step marks them, from the fold's training p
 
 Defaults are the final recipe's (pretraining run 181900): the horizons above, min_windows 180.
 
-Changes from the prototype (team-hub/exploration), and why:
+Changes from the prototype, and why:
 - Padding can't lose a target. For the window targets, the prototype searched times padded with
   0, which aren't sorted. On random padded rows it found no target for 43% of the windows that
   had one (none were wrong, only missing), so pretraining had less signal than it should. Here

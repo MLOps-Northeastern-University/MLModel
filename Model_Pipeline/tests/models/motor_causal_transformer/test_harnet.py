@@ -1,4 +1,6 @@
 import json
+import os
+import time
 
 import numpy as np
 import pytest
@@ -7,6 +9,7 @@ from torch import nn
 
 from scripts.core.data import Windows, WindowSpec
 from scripts.core.errors import ConfigError, ModelError
+from scripts.models.motor_causal_transformer import harnet as harnet_module
 from scripts.models.motor_causal_transformer.harnet import FeatureCache, Harnet10, check_spec, windows_key
 
 
@@ -120,3 +123,29 @@ def test_refuses_bad_output_settings_and_specs(tmp_path):
     check_spec(WindowSpec(version=1, seconds=10, rate_hz=30, axes=3))
     with pytest.raises(ConfigError, match="harnet10 reads"):
         check_spec(WindowSpec(version=1, seconds=5, rate_hz=30, axes=3))
+
+
+def test_a_windows_hash_is_remembered_for_files_and_redone_when_the_file_changes(tmp_path):
+    rng = np.random.default_rng(0)
+    path = tmp_path / "signal.npy"
+    np.save(path, rng.normal(size=(20, 3, 300)).astype(np.float32))
+    time_s, worn = np.arange(20) * 10.0, np.ones(20, bool)
+    first = harnet_module.windows_key(Windows(time_s, worn, np.load(path, mmap_mode="r")))
+    assert len(harnet_module._WINDOWS_KEYS) == 1
+    assert harnet_module.windows_key(Windows(time_s, worn, np.load(path, mmap_mode="r"))) == first
+    changed = rng.normal(size=(20, 3, 300)).astype(np.float32)
+    np.save(path, changed)                                     # same size, new contents and time
+    os.utime(path, ns=(time.time_ns(), time.time_ns() + 10_000_000))
+    assert harnet_module.windows_key(Windows(time_s, worn, np.load(path, mmap_mode="r"))) != first
+    in_memory = Windows(time_s, worn, changed)                 # plain arrays: hashed every time, never stored
+    harnet_module.windows_key(in_memory)
+    assert len(harnet_module._WINDOWS_KEYS) == 2
+
+
+def test_a_damaged_cached_features_file_is_recomputed(tmp_path):
+    cache = harnet_module.FeatureCache(tmp_path, harnet_module.Harnet10(Fake(), "fake-weights"))
+    windows = Windows(np.arange(5) * 10.0, np.ones(5, bool), np.random.default_rng(0).normal(
+        size=(5, 3, 300)).astype(np.float32))
+    good = np.array(cache.get("A", windows))
+    (tmp_path / "A.npy").write_bytes(b"truncated")
+    np.testing.assert_allclose(np.array(cache.get("A", windows)), good)

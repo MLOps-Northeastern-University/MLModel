@@ -165,6 +165,18 @@ def test_blocks_only_hold_keys_in_reach():
     assert all(b.allowed.shape == (1, 1, b.end - b.start, b.end - b.first_key) for b in reach.blocks)
 
 
+def test_a_short_padded_row_doesnt_widen_the_blocks_of_the_others():
+    model = small(history_s=100.0, query_block=10)
+    full = model.reach(times(1, 40))
+    valid = torch.ones(2, 40, dtype=torch.bool)
+    valid[1, 12:] = False                                  # row 2 ends after 12 tokens
+    padded = model.reach(times(2, 40), valid)
+    assert [b.first_key for b in padded.blocks] == [b.first_key for b in full.blocks]
+    tokens = torch.randn(2, 40, 16, dtype=torch.float64)   # and the result is still the plain one
+    assert torch.allclose(model(tokens, times(2, 40), valid)[valid],
+                          reference(model, tokens, times(2, 40), valid)[valid], atol=1e-10)
+
+
 def test_dropout_only_while_training():
     model = small(dropout=0.3)
     tokens = torch.randn(1, 12, 16, dtype=torch.float64)

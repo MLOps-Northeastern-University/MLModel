@@ -233,35 +233,27 @@ def test_refuses_bad_settings_and_inputs():
         loss(pooled, logits, members, targets, has[:, :2])
 
 
-def test_an_hour_of_weight_zero_counts_as_if_it_had_no_answer():
+def test_sample_weights_scale_a_batch_so_low_weight_batches_weigh_less():
+    """The bug this guards against: dividing by the batch's own weighted sum made every batch weigh the same."""
     loss = MILLoss()
     pooled, logits, members, targets, has = batch()
-    weights = torch.ones(3, 3)
-    weights[2, 1] = 0.0
-    weighted = loss(pooled, logits, members, targets, has, weights)
-    without = {label: y.clone() for label, y in targets.items()}
-    for y in without.values():
-        y[2, 1] = math.nan
-    assert torch.allclose(weighted.total, loss(pooled, logits, members, without, has).total, atol=1e-6)
-    ones = loss(pooled, logits, members, targets, has, torch.ones(3, 3))      # all 1: the unweighted loss
-    assert torch.equal(ones.total, loss(pooled, logits, members, targets, has).total)
+    plain = loss(pooled, logits, members, targets, has).total
+    assert torch.equal(loss(pooled, logits, members, targets, has, torch.ones(3, 3)).total, plain)
+    for w in (0.5, 2.0):
+        scaled = loss(pooled, logits, members, targets, has, torch.full((3, 3), w)).total
+        assert torch.allclose(scaled, w * plain, rtol=1e-6)
 
 
-def test_an_hour_of_weight_two_counts_twice():
+def test_an_hour_of_weight_zero_learns_nothing():
     loss = MILLoss()
-    pooled, logits, members, targets, has = batch()
+    pooled, logits, members, targets, has = batch(requires_grad=True)
     weights = torch.ones(3, 3)
-    weights[1, 2] = 2.0
-    # The same hour twice: row 1 copied as a fourth row, graded only at hour 2.
-    copy = {label: torch.cat([y, torch.full((1, 3), math.nan)]) for label, y in targets.items()}
-    for label in copy:
-        copy[label][3, 2] = targets[label][1, 2]
-    pooled2 = {label: Pooled(torch.cat([p.attention, p.attention[1:2]]), torch.cat([p.mean, p.mean[1:2]]),
-                             torch.cat([p.weights, p.weights[1:2]])) for label, p in pooled.items()}
-    logits2 = {label: torch.cat([x, x[1:2]]) for label, x in logits.items()}
-    members2, has2 = torch.cat([members, members[1:2]]), torch.cat([has, has[1:2]])
-    twice = loss(pooled2, logits2, members2, copy, has2)
-    assert torch.allclose(loss(pooled, logits, members, targets, has, weights).total, twice.total, atol=1e-6)
+    weights[2, :] = 0.0                                              # row 2's hours all weigh 0
+    loss(pooled, logits, members, targets, has, weights).total.backward()
+    for label in LABELS:
+        assert torch.count_nonzero(logits[label].grad[2]) == 0
+        assert torch.count_nonzero(pooled[label].attention.grad[2]) == 0
+        assert torch.count_nonzero(logits[label].grad[0]) > 0
 
 
 def test_sample_weights_must_match_the_hours():

@@ -196,10 +196,14 @@ class Decoder(nn.Module):
 
         # The earliest key each block of queries can reach: the first key less than history_s older
         # than its first query (the earliest, as times increase), found by binary search, then the
-        # earliest over the batch.
+        # earliest over the batch. A row whose block starts in its padding needs nothing before the
+        # block (padding only sees itself), so it doesn't widen the block for the rest of the batch:
+        # without this, one short row in a batch made late blocks attend to almost every key.
         starts = list(range(0, t, self.query_block))
         oldest = filled[:, starts] - self.history_s
-        first_key = torch.searchsorted(filled.contiguous(), oldest.contiguous(), right=True).min(dim=0).values
+        first_key = torch.searchsorted(filled.contiguous(), oldest.contiguous(), right=True)
+        block_start = torch.tensor(starts, device=device, dtype=first_key.dtype).expand_as(first_key)
+        first_key = torch.where(valid[:, starts], first_key, block_start).min(dim=0).values
 
         # Every check and every block bound in one GPU-to-CPU copy.
         problems = torch.stack((

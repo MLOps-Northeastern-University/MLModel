@@ -157,8 +157,8 @@ def test_refuses_unknown_kinds_and_sources():
 
 
 def test_patient_fields():
-    assert patient_fields(True, False).tolist() == [1.0, 0.0]
-    assert patient_fields(np.bool_(False), np.bool_(True)).tolist() == [0.0, 1.0]
+    assert patient_fields(True, False).tolist() == [1.0, -1.0]
+    assert patient_fields(np.bool_(False), np.bool_(True)).tolist() == [-1.0, 1.0]
     for bad in (np.nan, None, 1, "yes"):
         with pytest.raises(SchemaError, match="True or False"):
             patient_fields(bad, False)
@@ -220,3 +220,20 @@ def test_refuses_mismatched_parts():
 def test_refuses_bad_settings(kw, match):
     with pytest.raises(ConfigError, match=match):
         TokenBuilder(**kw)
+
+
+def test_every_patient_gets_a_patient_part_of_the_same_size_and_a_sane_gradient():
+    """A "no, no" patient used to get a zero input, so LayerNorm gave 0 and a ~60x gradient."""
+    torch.manual_seed(0)
+    builder = TokenBuilder(movement_dim=8, d_model=16, dropout=0.0)
+    norms, grads = [], []
+    for side in (True, False):
+        for dbs in (True, False):
+            builder.zero_grad()
+            x = torch.as_tensor(patient_fields(side, dbs)).view(1, 1, 2)
+            part = builder.patient(x)
+            (part * torch.randn_like(part)).sum().backward()
+            norms.append(float(part.norm()))
+            grads.append(float(builder.patient[0].bias.grad.norm()))
+    assert min(norms) > 0.9 * max(norms)                       # each about sqrt(d_model)
+    assert max(grads) < 5 * min(grads)

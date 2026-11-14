@@ -123,7 +123,7 @@ def prepare(dataset: Dataset, cache, labels: Sequence[str], window_s: float,
             weights = {int(h): float(w) for h, w in zip(rows[HOUR_INDEX].to_numpy()[keep],
                                                         rows["_weight"].to_numpy()[keep])}
         out[pid] = Recording(pid, time_s, features, fields.fields,
-                             patient_fields(bool(row["more_affected_side"]), bool(row["dbs"])), answers, labels,
+                             patient_fields(row["more_affected_side"], row["dbs"]), answers, labels,
                              weights)
     return out
 

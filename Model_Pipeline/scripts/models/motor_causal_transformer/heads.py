@@ -26,7 +26,7 @@ Speed: each horizon's three output layers are a single Linear (12 outputs) whose
 into views, with no copy. That is 0.7 ms less per training step than three separate layers
 (forward + backward, 4 x 3,240 windows, RTX 4060), with the same maths. The state dict therefore
 has one out.weight per horizon. Rows 0-1 are sleep, 2-8 state and 9-11 tremor; the prototype
-(team-hub/exploration) had separate out.sleep, out.state and out.tremor layers.
+had separate out.sleep, out.state and out.tremor layers.
 
 set_priors starts each output predicting the training hours' class mix, so the first steps
 don't spend themselves learning the base rates.

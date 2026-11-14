@@ -136,3 +136,20 @@ def test_register_needs_a_name_and_input_group():
 
     with pytest.raises(ConfigError, match="needs a name"):
         register(Nameless)
+
+
+def test_fitting_in_blocks_matches_the_whole_and_is_fitted_survives_a_reload(monkeypatch):
+    rng = np.random.default_rng(3)
+    x = rng.normal(2.0, 3.0, size=(1000, 1024)).astype(np.float32)
+    whole = Harnet10Projection()
+    whole.fit(x)
+    monkeypatch.setattr(Harnet10Projection, "FIT_BLOCK", 7)            # many small blocks
+    blocks = Harnet10Projection()
+    blocks.fit(x)
+    assert torch.allclose(whole.scale, blocks.scale) and torch.allclose(whole.shift, blocks.shift)
+    fresh = Harnet10Projection()
+    assert not fresh.is_fitted
+    fresh.load_state_dict(whole.state_dict())
+    assert fresh.is_fitted
+    fresh.load_state_dict(Harnet10Projection().state_dict())           # an unfitted state makes it unfitted
+    assert not fresh.is_fitted

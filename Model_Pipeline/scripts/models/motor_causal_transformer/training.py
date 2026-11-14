@@ -167,7 +167,7 @@ def pretrain(net: MotorNetwork, forecast: MovementForecast, recordings: Dict[str
             out.total.backward()
             torch.nn.utils.clip_grad_norm_(learning, settings.grad_clip)
             opt.step()
-            parts.append(out.parts)
+            parts.append({k: p._replace(loss=p.loss.detach()) for k, p in out.parts.items()})   # no graph kept
         line = {"epoch": epoch, **_with_skill(_mean_parts(parts))}
         if val:
             line.update({f"val/{k}": v for k, v in _with_skill(_forecast_error(
@@ -206,13 +206,19 @@ VAL_SEED = 0
 
 @torch.no_grad()
 def _forecast_error(net, forecast, recordings, settings, device, future_h, pin, amp):
-    """Each target's loss and bar on recordings, without learning: dropout off, the same chunks each time."""
+    """Each target's loss and bar on recordings, without learning: dropout off, the same chunks each time.
+
+    No simulated check-ins: they would put these patients' own diary answers in the input, and the
+    pass measures how well the movement alone is forecast (as the diary step's validation, too,
+    has none).
+    """
     rng = np.random.default_rng(VAL_SEED)
+    movement_only = replace(settings, check_ins_per_day=0.0)
     net.eval()
     forecast.eval()
     try:
         parts = [_forecast_step(net, forecast, c, device, pin, amp).parts
-                 for c in _pretrain_batches(net, recordings, settings, future_h, rng, pin)]
+                 for c in _pretrain_batches(net, recordings, movement_only, future_h, rng, pin)]
     finally:
         net.train()
         forecast.train()
@@ -434,20 +440,24 @@ def prefetch(items: Iterable, depth: int = 2) -> Iterator:
     q: "queue.Queue" = queue.Queue(maxsize=depth)
     done, stop = object(), threading.Event()
 
+    def put(item):
+        """Put item unless the consumer has left (stop set): never blocks forever on a full queue."""
+        while not stop.is_set():
+            try:
+                q.put(item, timeout=0.1)
+                return True
+            except queue.Full:
+                continue
+        return False
+
     def work():
         try:
             for item in items:
-                while not stop.is_set():
-                    try:
-                        q.put(item, timeout=0.1)
-                        break
-                    except queue.Full:
-                        continue
-                if stop.is_set():
+                if not put(item):
                     return
-            q.put(done)
+            put(done)
         except BaseException as e:            # handed to the consumer, raised there
-            q.put(e)
+            put(e)
 
     thread = threading.Thread(target=work, daemon=True)
     thread.start()

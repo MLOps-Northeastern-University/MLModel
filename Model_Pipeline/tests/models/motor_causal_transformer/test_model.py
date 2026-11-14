@@ -197,3 +197,14 @@ def test_refuses_a_spec_harnet10_cant_read():
     other = WindowSpec(version=1, seconds=5, rate_hz=30, axes=3)
     with pytest.raises(ConfigError, match="harnet10 reads"):
         MotorCausalTransformer(["state"], params=TINY, spec=other)._fit(data, None, None, 0)
+
+
+def test_a_cache_that_cant_be_written_costs_the_speed_up_not_the_fit(tmp_path, monkeypatch):
+    from scripts.models.motor_causal_transformer import pretrained_cache
+
+    def full_disk(*args, **kwargs):
+        raise OSError("no space left on device")
+
+    monkeypatch.setattr(pretrained_cache.torch, "save", full_disk)
+    model = MotorCausalTransformer(["state"], params=TINY, spec=SPEC).fit(dataset().subset(["A", "B"]), seed=0)
+    assert model.is_fitted and not list((tmp_path / "pretrained_cache").glob("*"))

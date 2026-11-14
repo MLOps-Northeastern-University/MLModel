@@ -3,7 +3,7 @@
 A token is three parts, each d_model numbers, added together:
 
     movement   LayerNorm(Linear(movement embedding))    what the movement encoder read (movement.py)
-    patient    LayerNorm(Linear(patient fields))        watch on the more affected side; DBS
+    patient    LayerNorm(Linear(patient fields))        watch on the more affected side; DBS (each +1 or -1)
     events     Linear(event fields), no bias            a dose or check-in at this window, else exactly 0
 
 Each part is brought to the same size, and the two that are always present are normalised, so
@@ -11,6 +11,11 @@ neither outweighs the other at the start: the 256 movement numbers don't drown t
 ones. Each part's Linear learns which directions of the token it writes to, so later layers can
 still read each part back from the sum, as transformers add word and position embeddings
 (Vaswani et al. 2017). The event part isn't normalised, so "nothing happened" stays exactly 0.
+
+The patient fields are +1 for yes and -1 for no, never 0/1: with 0/1, a patient with both fields "no"
+gives the Linear a zero input, so LayerNorm gets a constant vector. Its output is then 0 (not the
+size the other patients get) and its gradient is about 1/sqrt(eps), some 60 times the others',
+which, through gradient clipping, would shrink every other weight's update early in training.
 
 Event fields, 0 except where something happened:
 
@@ -190,7 +195,8 @@ def mark_check_ins(fields: np.ndarray, at, kinesia_score, tremor_score) -> np.nd
 
 
 def _mark(fields, at, kinesia, tremor):
-    """Mark check-ins in place: the flag, and each answer scaled. Two on one token: the later answer wins."""
+    """Mark check-ins in place: the flag, and each answer scaled. Two on one token: for each question, the
+    later answer wins (a later check-in that answers only tremor keeps the earlier kinesia answer)."""
     fields[at, _F["check_in"]] = 1.0
     for score, field, scale in ((kinesia, "kinesia", KINESIA_SCALE), (tremor, "tremor", TREMOR_SCALE)):
         answered = ~np.isnan(score)
@@ -198,7 +204,9 @@ def _mark(fields, at, kinesia, tremor):
 
 
 def patient_fields(more_affected_side, dbs) -> np.ndarray:
-    """One participant's patient fields: (len(PATIENT_FIELDS),) float32, each 1 or 0.
+    """One participant's patient fields: (len(PATIENT_FIELDS),) float32, +1 for yes and -1 for no.
+
+    Never 0/1: see the top of this file (a "no, no" patient would give LayerNorm a constant input).
 
     Raises:
         SchemaError: a field that isn't True or False (a missing value is not "no").
@@ -207,7 +215,7 @@ def patient_fields(more_affected_side, dbs) -> np.ndarray:
     for name, value in zip(PATIENT_FIELDS, (more_affected_side, dbs)):
         if not isinstance(value, (bool, np.bool_)):
             raise SchemaError(f"patients.{name} must be True or False, not {value!r}")
-        values.append(float(value))
+        values.append(1.0 if value else -1.0)
     return np.array(values, dtype=np.float32)
 
 

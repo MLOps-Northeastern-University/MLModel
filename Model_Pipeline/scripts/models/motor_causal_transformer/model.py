@@ -124,10 +124,13 @@ class MotorCausalTransformer(Model):
 
     def _fit(self, train, val, sample_weight, seed):
         check_spec(self.spec)
-        torch.manual_seed(seed)
-        rng = np.random.default_rng(seed)
         device = _device()
         cache = self._cache(device)
+        # Seeded after harnet10 is ready: loading it builds a network, which draws from PyTorch's
+        # random numbers, so seeding first would make the starting weights depend on whether it
+        # was loaded in this process or already there.
+        torch.manual_seed(seed)
+        rng = np.random.default_rng(seed)
         net = self._build_network()
         train_recs = self._recordings(train, cache, sample_weight)
         val_recs = self._recordings(val, cache) if val is not None else None

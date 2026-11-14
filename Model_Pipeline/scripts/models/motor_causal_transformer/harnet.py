@@ -122,8 +122,43 @@ def check_spec(spec: WindowSpec) -> None:
         raise ConfigError(f"harnet10 reads windows of {INPUT}, but the window spec is {got}")
 
 
+# Each windows hash already worked out in this process, for windows read from files (memory-mapped):
+# {(signal file, its size, its modification time, a hash of time_s and worn): the hash}. Hashing reads
+# every worn window's raw signal, about 3.6 KB a window, and every fit and predict asks again for
+# the same patients; a file rewritten in place gets a new modification time, so it's hashed again.
+_WINDOWS_KEYS: dict = {}
+
+
 def windows_key(windows: Windows) -> str:
-    """A hash of the windows a participant's features come from: time_s, worn, the worn signal."""
+    """A hash of the windows a participant's features come from: time_s, worn, the worn signal.
+
+    Remembered for the rest of the process when the signal is memory-mapped from a file (see
+    _WINDOWS_KEYS); in-memory windows are hashed every time.
+    """
+    identity = _file_identity(windows)
+    if identity is not None and identity in _WINDOWS_KEYS:
+        return _WINDOWS_KEYS[identity]
+    key = _hash_windows(windows)
+    if identity is not None:
+        _WINDOWS_KEYS[identity] = key
+    return key
+
+
+def _file_identity(windows: Windows):
+    filename = getattr(windows.signal, "filename", None)
+    if not filename:
+        return None
+    try:
+        stat = os.stat(filename)
+    except OSError:
+        return None
+    small = hashlib.blake2b(digest_size=16)
+    small.update(np.ascontiguousarray(windows.time_s, dtype=np.float64).tobytes())
+    small.update(np.asarray(windows.worn, dtype=bool).tobytes())
+    return (os.path.abspath(filename), stat.st_size, stat.st_mtime_ns, small.hexdigest())
+
+
+def _hash_windows(windows: Windows) -> str:
     digest = hashlib.blake2b(digest_size=20)
     worn = np.asarray(windows.worn, dtype=bool)
     digest.update(np.ascontiguousarray(windows.time_s, dtype=np.float64).tobytes())
@@ -162,8 +197,11 @@ class FeatureCache:
             except (OSError, ValueError):
                 same = False
             if same:
-                cached = np.load(features_file, mmap_mode="r")
-                if cached.shape == tuple(key["shape"]) and cached.dtype == np.float32:
+                try:
+                    cached = np.load(features_file, mmap_mode="r")
+                except (OSError, ValueError):            # a damaged file is recomputed, never a failed fit
+                    cached = None
+                if cached is not None and cached.shape == tuple(key["shape"]) and cached.dtype == np.float32:
                     return cached
         logger.info("computing harnet10 features for %s (%d worn windows)", participant, key["shape"][0],
                     extra={"event": "harnet_features", "participant": participant, "windows": key["shape"][0]})
@@ -191,8 +229,16 @@ def default_device() -> str:
     return os.environ.get("MODEL_DEVICE") or ("cuda" if torch.cuda.is_available() else "cpu")
 
 
+# harnet10 as loaded in this process: {(hub folder, device, the weights file's size and time): Harnet10}.
+# Loading builds the network through torch.hub and hashes the weights file, and every fit and
+# predict would otherwise do it again. A changed weights file is a different key, so it's reloaded.
+_LOADED: dict = {}
+
+
 def feature_cache(device: str, fingerprint: Optional[str] = None) -> FeatureCache:
     """harnet10 and its feature cache, from where the environment says. Every model reading harnet10 uses this.
+
+    harnet10 is loaded once per process (see _LOADED) and its fingerprint is checked every time.
 
     Args:
         device: Where harnet10 runs when a participant's features aren't cached yet.
@@ -201,7 +247,15 @@ def feature_cache(device: str, fingerprint: Optional[str] = None) -> FeatureCach
     Raises:
         ModelError: The weights found aren't the ones named by fingerprint.
     """
-    harnet = Harnet10.load(os.environ.get("MODEL_HARNET_HUB") or DEFAULT_HUB, device=device)
+    hub = Path(os.environ.get("MODEL_HARNET_HUB") or DEFAULT_HUB).expanduser()
+    weights = hub / WEIGHTS
+    if weights.exists():           # only weights on disk can be told apart, so only those are remembered
+        loaded_key = (str(hub.resolve()), str(device), weights.stat().st_size, weights.stat().st_mtime_ns)
+        if loaded_key not in _LOADED:
+            _LOADED[loaded_key] = Harnet10.load(hub, device=device)
+        harnet = _LOADED[loaded_key]
+    else:
+        harnet = Harnet10.load(hub, device=device)
     if fingerprint is not None and harnet.fingerprint != fingerprint:
         raise ModelError("these harnet10 weights aren't the ones this model was trained with")
     return FeatureCache(os.environ.get("MODEL_FEATURE_CACHE") or DEFAULT_CACHE, harnet)

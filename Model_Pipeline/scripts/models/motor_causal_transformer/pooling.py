@@ -4,7 +4,7 @@ The diary is answered once an hour, but the model predicts every 10-s window. Mu
 learning (MIL) treats each hour as a bag of windows with a single label. Pooling turns the bag's
 window predictions into the hour's prediction, and the loss compares that with the diary. This
 is gated attention pooling (Ilse, Tomczak and Welling 2018, "Attention-based Deep Multiple
-Instance Learning", ICML), with two changes, both from the prototype (team-hub/exploration):
+Instance Learning", ICML), with two changes, both from the prototype:
 
     score    = w . (tanh(V h) * sigmoid(U h))    one score per window and output; h is the decoder's
     weights  = softmax(score / temperature)      over the hour's worn windows only
