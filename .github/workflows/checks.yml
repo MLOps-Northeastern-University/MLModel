@@ -91,13 +91,16 @@ jobs:
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v7
         with:
-          # The same Python as the model pipeline's Docker image.
-          python-version: "3.11"
+          # The same Python as the model pipeline's Docker image: 3.13, for PyTorch.
+          python-version: "3.13"
           cache: pip
           cache-dependency-path: Model_Pipeline/requirements.txt
-      # The full requirements, so a broken pin fails here before it fails on someone's machine.
+      # PyTorch's CPU build first (about 200 MB; the default Linux build pulls in GBs of CUDA),
+      # then the full requirements, so a broken pin fails here before it fails on someone's machine.
       - name: Install dependencies
-        run: pip install -r requirements.txt
+        run: |
+          pip install torch==2.12.1 --index-url https://download.pytorch.org/whl/cpu
+          pip install -r requirements.txt
       - name: Lint (flake8)
         run: flake8 scripts tests
       # The floor is 0 while most steps are still being built; it goes up to 85 once they're merged.

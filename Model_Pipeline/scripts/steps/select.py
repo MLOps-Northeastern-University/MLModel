@@ -8,6 +8,7 @@ Raises GateError when no candidate is left.
 """
 
 from scripts.core.errors import GateError
+from scripts.core.metrics import higher_is_better
 from scripts.utils.logging_setup import get_logger
 
 logger = get_logger(__name__)
@@ -19,14 +20,15 @@ def eligible(candidates):
 
 
 def best(candidates, metric):
-    """The candidate with the highest score on metric.
-    If two candidates tie, max keeps the first one in the list.
+    """The candidate with the best score on metric: the highest, or the lowest for an error
+    (core/metrics.higher_is_better). If two candidates tie, the first one in the list is kept.
     Raises GateError if no candidate is eligible."""
 
     if not candidates:
         raise GateError("selection", "no eligible candidates found")
 
-    return max(candidates, key=lambda c: c["metrics"][metric])
+    pick = max if higher_is_better(metric) else min
+    return pick(candidates, key=lambda c: c["metrics"][metric])
 
 
 class SelectModel:

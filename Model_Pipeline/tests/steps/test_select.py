@@ -56,3 +56,10 @@ def test_run_with_no_eligible_candidate_stops_the_run():
 def test_reads_the_metric_from_the_real_config():
     step = SelectModel(load_config(), MemoryTracker())
     assert step.metric == METRIC
+
+
+def test_best_takes_the_lowest_score_for_an_error():
+    error = "cv/state_now/score_mae"
+    candidates = [{"name": n, "metrics": {error: v}, "gates_passed": True, "exportable": True}
+                  for n, v in (("a", 0.9), ("b", 0.6), ("c", 0.7))]
+    assert best(candidates, error)["name"] == "b"

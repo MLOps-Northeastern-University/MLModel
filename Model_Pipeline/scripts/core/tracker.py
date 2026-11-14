@@ -149,9 +149,17 @@ class Tracker(ABC):
         finally:
             # Runs even on errors, so a run is never left open.
             self._stack.reset(token)
-            self._end_run(run_id, status)
-            logger.info("tracking run %s ended %s", name, status.value, extra={
-                "event": "tracking_run_ended", "tracker_run_id": run_id, "status": status.value})
+            try:
+                self._end_run(run_id, status)
+            except Exception as end_error:
+                if status is RunStatus.FINISHED:
+                    raise                      # the work succeeded but its run couldn't be closed: say so
+                # The block already failed: closing the run failing too must not hide why it failed.
+                logger.error("couldn't mark tracking run %s %s: %s", name, status.value, end_error, extra={
+                    "event": "tracking_run_end_failed", "tracker_run_id": run_id, "status": status.value})
+            else:
+                logger.info("tracking run %s ended %s", name, status.value, extra={
+                    "event": "tracking_run_ended", "tracker_run_id": run_id, "status": status.value})
 
     def log_params(self, params):
         """Record parameters. Nested dicts are flattened to dotted keys."""

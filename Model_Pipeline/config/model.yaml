@@ -24,8 +24,19 @@ windows:
   axes: 3
 
 paths:
-  # The data pipeline's output. Get it with `dvc pull` in ../Data_Pipeline.
+  # The data pipeline's outputs, read by data/loaders.py. Get them with `dvc pull` in
+  # ../Data_Pipeline. Only the files a model needs are read (see core/data.py, GROUPS).
+  # Every diary hour, Sleep and No Data included: the labels and the bias columns.
+  hours_csv: ../Data_Pipeline/data/processed/hourly_all.csv
+  # The 7 hourly features, for the baselines.
   features_csv: ../Data_Pipeline/data/processed/hourly_features.csv
+  # 10-s windows: <participant>/signal.npy, time_s.npy, worn.npy, and manifest.json.
+  windows_folder: ../Data_Pipeline/data/processed/windows
+  events_csv: ../Data_Pipeline/data/processed/events.csv
+  patients_csv: ../Data_Pipeline/data/processed/patients.csv
+  # The patient split: the fixed test patients and the folds (scripts/data/folds.py). It names
+  # patients, so it's kept with the data (git-ignored there) and versioned by DVC, never in Git.
+  split_file: ../Data_Pipeline/data/processed/patient_split.json
   # Everything a run writes: predictions, reports and the model bundle. Not in Git.
   artifacts_dir: artifacts
   log_file: logs/model_pipeline.log
@@ -45,10 +56,70 @@ logging:
   file: true
 
 split:
-  # Held-out participants, never used for training or tuning.
-  test_fraction: 0.3
-  # Participant-grouped folds on the rest, so no one is in both train and validation.
+  # The patient split is a file (paths.split_file), made once and only added to, never
+  # recomputed, so the test patients never change (scripts/data/folds.py). These two are
+  # used when it's made or when development patients are added (which remakes the folds).
+  # Folds by patient over the development patients, so no one is in both train and validation.
   cv_folds: 5
+  seed: 42
+
+models:
+  # The candidates train trains and select chooses from (scripts/models/registry.py).
+  # Every candidate predicts these targets at these horizons unless it sets its own.
+  targets: [sleep, state, tremor]
+  horizons: [now, next_hour]
+  candidates:
+    # The baselines: each 10-s window on its own, no past (MODEL.md, Experiment order, stage 0).
+    - name: window_logistic
+      family: window_logistic
+    - name: window_boosting
+      family: window_boosting
+    # The window model (MODEL.md, Architecture and Training). Its settings are the defaults in
+    # scripts/models/motor_causal_transformer/model.py; a block set here is merged into them.
+    - name: motor_causal_transformer
+      family: motor_causal_transformer
+    # The same model without pretraining: whether pretraining earns its place.
+    - name: motor_causal_transformer_no_pretrain
+      family: motor_causal_transformer
+      params: {pretrain: {epochs: 0}}
+
+train:
+  # scripts/steps/train.py. Every candidate trains with each seed on every fold; the cv
+  # scores are the mean over seeds.
+  seeds: [0]
+  # Train the candidates tune.py tuned with the settings it chose (artifacts/tuned_params.json),
+  # merged over their config. Refused if they were tuned on another split, data or config.
+  use_tuned: false
+  # The test patients are scored once, with the final models, at the very end of model
+  # work. Leave false; set true only for that one run (it's tagged test_scored in MLflow).
+  score_test: false
+  leakage_check:
+    # Trained on labels shuffled among the training hours, these candidates must score
+    # near chance: every AUC between 1 - max_auc and max_auc, or the run stops.
+    candidates: [window_boosting]
+    max_auc: 0.6
+
+tune:
+  # scripts/steps/tune.py. Each trial is a full cross-validation with this seed, scored by
+  # selection.metric (so tuning maximises what selection chooses by). A candidate not listed
+  # here isn't tuned. Settings are dotted names into the candidate's params.
+  # DRAFT search spaces, around the prototype's values: for Sam to set before the real run.
+  seed: 0
+  candidates:
+    window_boosting:
+      trials: 30
+      space:
+        learning_rate: {type: float, low: 0.01, high: 0.3, log: true}
+        leaves: {type: int, low: 7, high: 63}
+        iterations: {type: int, low: 100, high: 500, step: 50}
+    motor_causal_transformer:
+      # Diary-step settings only, so every trial reuses each fold's cached pretrained body.
+      trials: 20
+      space:
+        diary.lr: {type: float, low: 1.0e-4, high: 3.0e-3, log: true}
+        diary.weight_decay: {type: float, low: 0.01, high: 0.3, log: true}
+        diary.feature_noise: {type: float, low: 0.0, high: 0.3}
+        diary.class_weight_power: {type: float, low: 0.0, high: 1.0}
 
 mlflow:
   # Local MLflow from docker-compose. CI sets MLFLOW_TRACKING_URI to the shared server.
@@ -71,9 +142,9 @@ release_gate:
   rules:
     - {metric: cv/state_now/off_auc, must_improve: true}
     - {metric: cv/state_now/off_auc_no_dbs, must_improve: false}
-    - {metric: cv/tremor_now/auc, must_improve: false}
+    - {metric: cv/tremor_now/any_tremor_auc, must_improve: false}
     - {metric: cv/state_now/dyskinetic_auc, must_improve: false}
-    - {metric: cv/state_now/asleep_auc, must_improve: false}
+    - {metric: cv/sleep_now/asleep_auc, must_improve: false}
     - {metric: cv/state_next_hour/off_auc, must_improve: false}
 
 bias:
