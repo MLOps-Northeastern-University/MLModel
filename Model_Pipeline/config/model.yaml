@@ -27,9 +27,9 @@ paths:
   # The data pipeline's outputs, read by data/loaders.py. Get them with `dvc pull` in
   # ../Data_Pipeline. Only the files a model needs are read (see core/data.py, GROUPS).
   # Every diary hour, Sleep and No Data included: the labels and the bias columns.
-  hours_csv: ../Data_Pipeline/data/processed/hourly_all.csv
-  # The 7 hourly features, for the baselines.
-  features_csv: ../Data_Pipeline/data/processed/hourly_features.csv
+  hours_csv: ../Data_Pipeline/data/processed/hours.csv
+  # The 7 hourly features, for the baselines: the W_ columns of the same table.
+  features_csv: ../Data_Pipeline/data/processed/hours.csv
   # 10-s windows: <participant>/signal.npy, time_s.npy, worn.npy, and manifest.json.
   windows_folder: ../Data_Pipeline/data/processed/windows
   events_csv: ../Data_Pipeline/data/processed/events.csv
@@ -130,11 +130,18 @@ selection:
   # The metric that picks the best candidate: the release gate's main rule.
   metric: cv/state_now/off_auc
 
-gates:
-  # Placeholder: the validation gate's lowest PR-AUC.
-  min_pr_auc: 0.0
-  # Placeholder: how much PR-AUC a new model may lose against the active one.
-  max_drop_vs_production: 0.0
+evaluation:
+  # scripts/steps/evaluate.py: the pooled AUC's interval, patients resampled this many
+  # times (ARCHITECTURE.md, Evaluation protocol).
+  bootstrap_resamples: 1000
+  interval: 0.95
+
+validation_gate:
+  # A candidate fails when one of these is missing or below its value. 0.5 is chance:
+  # PLACEHOLDER until the baselines set a real floor.
+  min:
+    cv/state_now/off_auc: 0.5
+    cv/tremor_now/any_tremor_auc: 0.5
 
 release_gate:
   # MODEL.md, "Release gate and retraining". Each metric is a cross-validation

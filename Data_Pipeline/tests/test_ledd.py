@@ -7,7 +7,7 @@ import pytest
 import yaml
 
 from scripts.ledd import LeddError, LeddTable, dose_events, normalise_name
-from scripts.utils.config import PROJECT_ROOT
+from scripts.utils import PROJECT_ROOT
 from tests.helpers import make_config
 
 TABLE = PROJECT_ROOT / "config" / "ledd.yaml"
@@ -167,7 +167,7 @@ def test_a_name_for_an_unknown_drug_is_refused():
 
 
 def test_on_real_table_if_present(table, cfg):
-    path = Path(__file__).resolve().parents[1] / "data/processed/hourly_all.csv"
+    path = Path(__file__).resolve().parents[1] / "data/processed/hours.csv"
     if not path.exists():
         pytest.skip("data pipeline output not pulled")
     hours = pd.read_csv(path, low_memory=False)

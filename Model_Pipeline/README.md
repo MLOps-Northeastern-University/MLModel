@@ -4,8 +4,8 @@ Trains the model behind Careportal's symptom timeline. From the watch's movement
 
 > **Status:** in progress.
 >
-> - **Built:** the contracts in `core/` (with the shared scores, `core/metrics.py`), the data loader, the patient split, three model families and the registry, training, tuning, hyperparameter sensitivity, the MLflow tracker, and selection, export, registry and the release gate (P4).  The bias step (slices, gate, reweighing) and the explain step (Shapley values over input groups, ablation), tested on synthetic data and a small test model family (P3).
-> - **Still a docstring:** the evaluate, bias and explain steps, and `models/composite.py`.
+> - **Built:** the contracts in `core/` (with the shared scores, `core/metrics.py`), the data loader, the patient split, three model families and the registry, training, tuning, hyperparameter sensitivity, the MLflow tracker, and selection, export, registry and the release gate (P4), and evaluate with the validation gate (P1).
+> - **Still a docstring:** the bias and explain steps, and `models/composite.py`.
 > - **Not run on the real data yet:** training, tuning and sensitivity are tested on synthetic data only.
 >
 > Each module says what it's for and who owns it.
@@ -202,6 +202,10 @@ The families:
 
 There's no `to_keras()` or phone export: the model runs on the server.
 
+### Evaluate (P1)
+
+`scripts/steps/evaluate.py` runs after train, on its `candidates.json` and predictions files, on the same hours train scores (labelled, worn, out of fold). Per candidate it adds a 95% interval for each pooled AUC by resampling patients (1,000 times, `evaluation` in the config), each question's AUC per fold and per patient (`evaluation.json`) and the ROC curves (`roc.png`), all in `artifacts/evaluation/<candidate>/`. It sets `gates_passed` to false when a metric in `validation_gate.min` is missing or below its value, so select skips that candidate.
+
 ### 4. Bundle folder (P1, P3 → P4 → CI) (Open)
 
 `artifacts/bundle/`, which `register.py` copies into the registry as `<family>/v<N>/`. The proposal, now that the model runs on the server:
@@ -211,7 +215,7 @@ There's no `to_keras()` or phone export: the model runs on the server.
 | `model/` | P4 | The folder `model.save()` wrote: `manifest.json` and `weights/` (for the transformer: `network.pt` and `training.json`, with the harnet10 fingerprint). This replaces a phone model file |
 | `manifest.json` | P4 | What the Backend needs to run and check the model: family, version, window spec version, labels, and the model folder's sha256 |
 | `stats.json` | P4 | The training data's statistics for drift, starting with the 7 hourly features |
-| `metrics.json` | P1 | Held-out metrics, which the next run's release gate compares against |
+| `metrics.json` | P1 | The chosen candidate's `artifacts/evaluation/<name>/metrics.json`: train's `cv/` scores plus evaluate's 95% intervals (`_auc_lo`, `_auc_hi`), which the next run's release gate compares against |
 | `bias.json` | P3 | Metrics per slice and the mitigation result |
 
 harnet10 isn't in the bundle: its licence limits redistribution. The server loads its own pinned copy, and the model refuses one whose sha256 differs from training.
