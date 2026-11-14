@@ -46,9 +46,56 @@ def test_a_model_no_better_than_production_is_not_exported_or_released(tmp_path)
         tracker.find("export")
 
 
-def test_main_exits_0_on_release_and_1_on_a_failed_gate(tmp_path, monkeypatch):
+@pytest.fixture
+def alerts(monkeypatch):
+    """Records alerts instead of sending them, whatever the machine's .env holds."""
+    sent = []
+    monkeypatch.setattr(run_model_pipeline, "notify", lambda subject, body, cfg=None: sent.append((subject, body)))
+    monkeypatch.delenv("GITHUB_RUN_ID", raising=False)
+    return sent
+
+
+@pytest.fixture
+def main_with(tmp_path, monkeypatch):
+    """main(), reading a config whose outputs are under tmp_path."""
     cfg = make_config(tmp_path)
     monkeypatch.setattr(run_model_pipeline, "load_config", lambda path=None: cfg)
-    assert run_model_pipeline.main(["--no-mlflow", "--no-register"]) == 0
-    assert run_model_pipeline.main(["--no-mlflow"]) == 0
-    assert run_model_pipeline.main(["--no-mlflow"]) == 1
+    return run_model_pipeline.main
+
+
+def test_main_exits_0_on_release_and_1_on_a_failed_gate(main_with, alerts):
+    assert main_with(["--no-mlflow", "--no-register"]) == 0
+    assert main_with(["--no-mlflow"]) == 0
+    assert main_with(["--no-mlflow"]) == 1
+
+
+def test_a_check_only_run_sends_no_alert(main_with, alerts):
+    main_with(["--no-mlflow", "--no-register"])
+    assert alerts == []
+
+
+def test_a_release_and_a_failed_gate_are_alerted(main_with, alerts):
+    main_with(["--no-mlflow"])
+    main_with(["--no-mlflow"])
+    (released, _), (failed, body) = alerts
+    assert released == "[MedNOVA model] parkinsons-risk v1 released"
+    assert failed == "[MedNOVA model] The production gate failed"
+    assert "cv/state_now/off_auc: 0.500 vs 0.500" in body and "a local run on" in body
+
+
+def test_a_crash_is_alerted_with_its_stack_trace_and_re_raised(main_with, alerts, monkeypatch):
+    def broken(cfg, dataset):
+        raise KeyError("missing column")
+    monkeypatch.setattr(run_model_pipeline, "stand_in_train", broken)
+    with pytest.raises(KeyError):
+        main_with(["--no-mlflow"])
+    (subject, body), = alerts
+    assert subject == "[MedNOVA model] Run crashed: KeyError"
+    assert "Traceback" in body and "missing column" in body
+
+
+def test_alerts_link_to_the_github_actions_run(monkeypatch):
+    monkeypatch.setenv("GITHUB_SERVER_URL", "https://github.com")
+    monkeypatch.setenv("GITHUB_REPOSITORY", "MLOps-Northeastern-University/MLModel")
+    monkeypatch.setenv("GITHUB_RUN_ID", "42")
+    assert run_model_pipeline.where() == "https://github.com/MLOps-Northeastern-University/MLModel/actions/runs/42"

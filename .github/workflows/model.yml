@@ -39,6 +39,12 @@ jobs:
       IMAGE: us-central1-docker.pkg.dev/${{ vars.GCP_PROJECT_ID }}/ml/training
       # Only a push to dev or main releases; every other run just checks.
       RELEASE: ${{ github.event_name == 'push' && (github.ref == 'refs/heads/dev' || github.ref == 'refs/heads/main') }}
+      # Email alerts (scripts/alerts.py). Unset ones are skipped, never an error.
+      ALERT_EMAIL: ${{ secrets.ALERT_EMAIL }}
+      SMTP_HOST: ${{ secrets.SMTP_HOST }}
+      SMTP_PORT: ${{ secrets.SMTP_PORT }}
+      SMTP_USER: ${{ secrets.SMTP_USER }}
+      SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v7
@@ -62,10 +68,12 @@ jobs:
       # dvc pull goes here once the shared DVC remote is set up (P5_Setup_Plan.md, step 4).
       # Until then the load step is a stand-in and reads nothing.
       - name: Run the model pipeline
+        id: pipeline
         env:
           MLFLOW_TRACKING_URI: ${{ vars.MLFLOW_TRACKING_URI }}
           MLFLOW_TRACKING_TOKEN: ${{ steps.auth.outputs.id_token }}
-        # A failed gate exits 1 and fails the job.
+        # A failed gate exits 1 and fails the job. The pipeline emails the team itself on
+        # a failed gate, a crash or a release.
         run: python -m scripts.run_model_pipeline ${{ env.RELEASE != 'true' && '--no-register' || '' }}
       - name: Upload the reports and bundle
         if: always()
@@ -85,3 +93,12 @@ jobs:
           gcloud auth configure-docker us-central1-docker.pkg.dev --quiet
           docker build -t "$IMAGE:${{ github.sha }}" .
           docker push "$IMAGE:${{ github.sha }}"
+      # The pipeline already emailed about its own failure, so this covers every other
+      # step: installing, logging in to GCP, pushing the image.
+      - name: Email the team about a failed step
+        if: failure() && steps.pipeline.outcome != 'failure'
+        env:
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          pip install -q requests==2.33.0 PyYAML==6.0.2
+          python -c "import os; from scripts.alerts import notify; notify('[MedNOVA model] CI job failed', 'A step outside the pipeline failed (install, GCP login or image push).\n\nRun: ' + os.environ['RUN_URL'])"

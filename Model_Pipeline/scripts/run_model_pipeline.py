@@ -14,13 +14,20 @@ outputs in the shape the next step expects: one candidate with placeholder
 metrics and a fake model file. Each stand-in is replaced by the real step once
 its owner merges it. A step that can't go on raises a core/errors.py error; the
 run then stops with exit code 1.
+
+Alerts (scripts/alerts.py) go to the team when a gate fails, when the run
+crashes, and when a model is released. Runs that only check send none on success.
 """
 
 import argparse
+import os
+import platform
 import sys
+import traceback
 import uuid
 
-from scripts.core.errors import PipelineError
+from scripts.alerts import notify
+from scripts.core.errors import GateError, PipelineError
 from scripts.steps.compare_production import CompareProduction
 from scripts.steps.export import ExportModel
 from scripts.steps.register import RegisterModel, active_metrics
@@ -34,6 +41,8 @@ logger = get_logger("run_model_pipeline")
 
 # Every stand-in metric gets this score, so the stand-in candidate passes select.
 STAND_IN_SCORE = 0.5
+# Starts every alert's subject, to filter them in the inbox.
+ALERT_PREFIX = "[MedNOVA model]"
 
 
 # ---- stand-ins, until P1, P2 and P3 merge their steps ------------------------------------
@@ -106,6 +115,29 @@ def run(cfg, tracker, release=True):
             return register.run(bundle_dir)
 
 
+def where():
+    """Where the run happened, for alerts: the GitHub Actions run's page, or this machine."""
+    run_id = os.environ.get("GITHUB_RUN_ID")
+    if run_id:
+        return (f"{os.environ.get('GITHUB_SERVER_URL', 'https://github.com')}/"
+                f"{os.environ.get('GITHUB_REPOSITORY')}/actions/runs/{run_id}")
+    return f"a local run on {platform.node()}"
+
+
+def alert_failure(cfg, exc):
+    """Tell the team the run stopped, and why."""
+    if isinstance(exc, GateError):
+        subject = f"{ALERT_PREFIX} The {exc.gate} gate failed"
+    elif isinstance(exc, PipelineError):
+        subject = f"{ALERT_PREFIX} Run stopped: {type(exc).__name__}"
+    else:
+        subject = f"{ALERT_PREFIX} Run crashed: {type(exc).__name__}"
+    body = f"{exc}\n\nRun: {where()}"
+    if not isinstance(exc, PipelineError):   # an unexpected error: the stack trace says where
+        body += "\n\n" + "".join(traceback.format_exception(exc))
+    notify(subject, body, cfg)
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description="Parkinson's risk model pipeline")
     parser.add_argument("--config", default=None, help="Path to a config YAML")
@@ -125,8 +157,15 @@ def main(argv=None):
             version = run(cfg, tracker, release=not args.no_register)
         except PipelineError as exc:
             logger.error("Model pipeline stopped: %s", exc)
+            alert_failure(cfg, exc)
             return 1
+        except Exception as exc:
+            alert_failure(cfg, exc)
+            raise
         logger.info("Model pipeline finished: %s", f"released v{version}" if version else "nothing released")
+        if version:
+            notify(f"{ALERT_PREFIX} {cfg['export']['family']} v{version} released",
+                   f"It passed every gate and is now the active version.\n\nRun: {where()}", cfg)
     return 0
 
 
