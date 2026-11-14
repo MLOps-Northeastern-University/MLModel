@@ -456,8 +456,7 @@ def main(argv=None):
     cfg = load_config(args.config)
     configure_logging(cfg)
     artifacts = Path(cfg["resolved_paths"]["artifacts_dir"])
-    path = artifacts / "bias" / "candidates.json"
-    path = path if path.exists() else artifacts / "candidates.json"
+    path = artifacts / "candidates.json"
     if not path.exists():
         raise SchemaError(f"no {path}: run train first")
     results = ExplainModels(cfg, MlflowTracker.from_config(cfg)).run(read_json(path))
