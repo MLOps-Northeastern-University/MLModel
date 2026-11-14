@@ -123,12 +123,15 @@ names:
     levodopa/benserazid re: levodopa_cr             # "retard" (Madopar Depot): controlled release
     levodopa/benserazid er: levodopa_cr             # extended Madopar tablet (HBS/Depot): controlled release; Rytary has no benserazide form
     levodopa/carbidopa: levodopa_ir
+    levodopa/carbidopa er: levodopa_cr             # COPS doses are 100 mg: a controlled-release strength (Sinemet CR 100/25), not a Rytary one (95, 145, 195, 245)
     levodopa/carbidopa/entacapone: levodopa_carbidopa_entacapone
     opicapone: opicapone
     amantadine: amantadine
     ropinirole: ropinirole
     ropinirole er: ropinirole                       # Table 1 has one ropinirole row
     pramipexole re: pramipexole_base                # COPS is a German cohort: EU labels give the base
+    pramipexole er: pramipexole_base                # COPS doses are 2.1 mg, an EU base strength (= 3 mg salt)
     piribedil er: piribedil                         # Table 1 has one piribedil row
     rasagiline: rasagiline
+    rotigotine: rotigotine                          # a patch, dosed in mg per 24 h (COPS: 4 and 6 mg); Table 1 has one row
     safinamide: safinamide

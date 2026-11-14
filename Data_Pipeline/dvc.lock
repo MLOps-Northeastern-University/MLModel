@@ -1,68 +1,64 @@
 schema: '2.0'
 stages:
   build_dataset:
-    cmd: python -m scripts.run_pipeline --mode sample
+    cmd: python -m scripts.pipeline --mode sample
     deps:
+    - path: config/ledd.yaml
+      hash: md5
+      md5: b64e0b85fef948bcbf15a3ca7bc11074
+      size: 9003
     - path: config/pipeline.yaml
       hash: md5
-      md5: 11d3ee0e74639a41a824589fa63fc1dc
-      size: 4599
+      md5: dd9a104da851ce93b982dc86141c18c8
+      size: 5880
     - path: scripts
       hash: md5
-      md5: 7c66f85a4ad33409674ef45a4350f60e.dir
-      size: 76165
-      nfiles: 18
+      md5: 40eaf9e94af6d938d599cff3cb3aa96b.dir
+      size: 74018
+      nfiles: 9
     outs:
-    - path: data/processed/hourly_all.csv
+    - path: data/processed/dataset_meta.json
       hash: md5
-      md5: 409d57c0d178d832b00c7aa1cfead6c1
-      size: 197279
-    - path: data/processed/hourly_features.csv
+      md5: f793da27703da29403641e48f1d8be50
+      size: 293
+    - path: data/processed/events.csv
       hash: md5
-      md5: 5ec95ab0ab261e225f94e21437b4361e
-      size: 91065
-    - path: data/processed/label_issues.json
+      md5: 1f68ddcee43f36c0f96b95a75bd47f07
+      size: 8579
+    - path: data/processed/hours.csv
       hash: md5
-      md5: 9f00af1d755d3e6353a1e25c17c0375d
-      size: 3632
-    - path: data/reports/anomalies.json
+      md5: 81e517d8c5bac929e5f6a7d7c9a85957
+      size: 261547
+    - path: data/processed/patients.csv
       hash: md5
-      md5: bda3b98bb551c56efe9501c4d34700ad
-      size: 1306
+      md5: 90ee91956a34dc3e6a47febc368c5607
+      size: 499
+    - path: data/processed/windows
+      hash: md5
+      md5: ea3dd503d8100c6c3820fb974c5862c6.dir
+      size: 1124917243
+      nfiles: 31
     - path: data/reports/bias_report.json
       hash: md5
-      md5: 1605440a725c91a11218ccb3ffd3b69b
-      size: 4903
+      md5: 4078f79ad1c761ed7985994f45d88dd2
+      size: 2693
     - path: data/reports/bias_report.md
       hash: md5
-      md5: a5089b5b0b08e32d6232182652289999
-      size: 2488
-    - path: data/reports/cleaning_summary.json
+      md5: eb83ee0dfd9b4aff87abcba905363d74
+      size: 1585
+    - path: data/reports/checks.json
       hash: md5
-      md5: a1a364e46fa86addd4352efd43781863
-      size: 158
+      md5: d3e9e973b04c4a130f9790b9eb9be588
+      size: 1380
     - path: data/reports/failed_participants.json
       hash: md5
       md5: d751713988987e9331980363e24189ce
       size: 2
-    - path: data/reports/schema_baseline.json
+    - path: data/reports/label_issues.json
       hash: md5
-      md5: ed6d42106010c188aeff66dc124bbb57
-      size: 9913
-    - path: data/reports/schema_latest.json
+      md5: 368727bc8cdffe41722f0ed2ad868191
+      size: 3935
+    - path: data/reports/wrist_agreement.csv
       hash: md5
-      md5: f2ff262b00a1bfc59be7f4400f4f3406
-      size: 9913
-    - path: data/reports/stats
-      hash: md5
-      md5: da532eaddbc177f2c6c602700e487495.dir
-      size: 37434
-      nfiles: 2
-    - path: data/reports/stats_history.csv
-      hash: md5
-      md5: b86c20cfc31d89acef8959deefe512da
-      size: 450
-    - path: data/reports/validation_report.json
-      hash: md5
-      md5: d751713988987e9331980363e24189ce
-      size: 2
+      md5: e6b1e3fc34ac777e75fd0ace6df3821d
+      size: 907

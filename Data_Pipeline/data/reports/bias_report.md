@@ -1,102 +1,48 @@
-# Bias report
+# Bias report: label balance per group
 
-Slices: sex, age_group, visit, dbs, hoehn_yahr, pd_subtype
+Usable labelled hours (drop_reason empty). Shares of off, on, dyskinetic and asleep per group.
 
-## Data level
+## sex
 
-### sex
+| sex | rows | participants | asleep | dyskinetic | off | on |
+|---|---|---|---|---|---|---|
+| female | 110 | 3 | 0.436 | 0.136 | 0.191 | 0.236 |
+| male | 679 | 7 | 0.318 | 0.052 | 0.446 | 0.184 |
 
-| sex | rows | participants | dyskinetic | off | on |
-|---|---|---|---|---|---|
-| female | 32 | 2 | 0.094 | 0.562 | 0.344 |
-| male | 86 | 3 | 0.372 | 0.523 | 0.105 |
+## age_group
 
-### age_group
+| age_group | rows | participants | asleep | dyskinetic | off | on |
+|---|---|---|---|---|---|---|
+| 55-64 | 363 | 6 | 0.292 | 0.105 | 0.521 | 0.083 |
+| 65+ | 426 | 4 | 0.371 | 0.028 | 0.317 | 0.284 |
 
-| age_group | rows | participants | dyskinetic | off | on |
-|---|---|---|---|---|---|
-| 55-64 | 89 | 4 | 0.393 | 0.427 | 0.18 |
-| 65+ | 29 | 1 | 0.0 | 0.862 | 0.138 |
+## visit
 
-### visit
+| visit | rows | participants | asleep | dyskinetic | off | on |
+|---|---|---|---|---|---|---|
+| inpatient | 405 | 10 | 0.314 | 0.123 | 0.422 | 0.141 |
+| mixed | 79 | 4 | 0.291 | 0.0 | 0.494 | 0.215 |
+| outpatient | 305 | 3 | 0.374 | 0.0 | 0.374 | 0.252 |
 
-| visit | rows | participants | dyskinetic | off | on |
-|---|---|---|---|---|---|
-| inpatient | 116 | 5 | 0.302 | 0.526 | 0.172 |
-| mixed | 2 | 1 | 0.0 | 1.0 | 0.0 |
+## dbs
 
-### dbs
+| dbs | rows | participants | asleep | dyskinetic | off | on |
+|---|---|---|---|---|---|---|
+| False | 593 | 5 | 0.342 | 0.025 | 0.417 | 0.216 |
+| True | 196 | 5 | 0.311 | 0.179 | 0.393 | 0.117 |
 
-| dbs | rows | participants | dyskinetic | off | on |
-|---|---|---|---|---|---|
-| no | 25 | 1 | 0.12 | 0.44 | 0.44 |
-| yes | 93 | 4 | 0.344 | 0.559 | 0.097 |
+## hoehn_yahr
 
-### hoehn_yahr
+| hoehn_yahr | rows | participants | asleep | dyskinetic | off | on |
+|---|---|---|---|---|---|---|
+| 2.0 | 180 | 2 | 0.389 | 0.0 | 0.067 | 0.544 |
+| 3.0 | 514 | 6 | 0.3 | 0.068 | 0.58 | 0.053 |
+| 4.0 | 95 | 2 | 0.421 | 0.158 | 0.147 | 0.274 |
 
-| hoehn_yahr | rows | participants | dyskinetic | off | on |
-|---|---|---|---|---|---|
-| 2.0 | 7 | 1 | 0.0 | 1.0 | 0.0 |
-| 3.0 | 86 | 3 | 0.372 | 0.523 | 0.105 |
-| 4.0 | 25 | 1 | 0.12 | 0.44 | 0.44 |
+## pd_subtype
 
-### pd_subtype
-
-| pd_subtype | rows | participants | dyskinetic | off | on |
-|---|---|---|---|---|---|
-| akinetic-rigid | 46 | 2 | 0.065 | 0.674 | 0.261 |
-| equivalence-type | 72 | 3 | 0.444 | 0.444 | 0.111 |
-
-## Model level (baseline: off vs not off)
-
-Overall recall: 0.889
-
-### sex
-
-| group | n | positives | recall | precision | false_positive_rate |
-|---|---|---|---|---|---|
-| male | 50 | 45 | 0.889 | 0.909 | 0.8 |
-
-Recall gap: nan -> within limit
-
-### age_group
-
-| group | n | positives | recall | precision | false_positive_rate |
-|---|---|---|---|---|---|
-| 55-64 | 21 | 20 | 0.9 | 0.947 | 1.0 |
-| 65+ | 29 | 25 | 0.88 | 0.88 | 0.75 |
-
-Recall gap: 0.020 -> within limit
-
-### visit
-
-| group | n | positives | recall | precision | false_positive_rate |
-|---|---|---|---|---|---|
-| inpatient | 50 | 45 | 0.889 | 0.909 | 0.8 |
-
-Recall gap: nan -> within limit
-
-### dbs
-
-| group | n | positives | recall | precision | false_positive_rate |
-|---|---|---|---|---|---|
-| yes | 50 | 45 | 0.889 | 0.909 | 0.8 |
-
-Recall gap: nan -> within limit
-
-### hoehn_yahr
-
-| group | n | positives | recall | precision | false_positive_rate |
-|---|---|---|---|---|---|
-| 3.0 | 50 | 45 | 0.889 | 0.909 | 0.8 |
-
-Recall gap: nan -> within limit
-
-### pd_subtype
-
-| group | n | positives | recall | precision | false_positive_rate |
-|---|---|---|---|---|---|
-| akinetic-rigid | 21 | 20 | 0.9 | 0.947 | 1.0 |
-| equivalence-type | 29 | 25 | 0.88 | 0.88 | 0.75 |
-
-Recall gap: 0.020 -> within limit
+| pd_subtype | rows | participants | asleep | dyskinetic | off | on |
+|---|---|---|---|---|---|---|
+| akinetic-rigid | 356 | 5 | 0.379 | 0.051 | 0.18 | 0.39 |
+| equivalence-type | 265 | 4 | 0.253 | 0.121 | 0.596 | 0.03 |
+| tremordominant | 168 | 1 | 0.369 | 0.0 | 0.607 | 0.024 |

@@ -1,17 +1,13 @@
-"""Airflow DAG for the COPS Parkinson's data pipeline.
+"""Airflow DAG for the COPS data pipeline: the same steps as `python -m scripts.pipeline`.
 
-Flow:
-    fetch_manifest -> download_demographics ---------------------------------------------+
-                   -> process_participant (one mapped task per person) -> check_failures -+-> merge
-    merge -> clean -> validate -> detect_anomalies -> bias_report -> dvc_version -> notify
+    fetch_manifest -> patients -> process_participant (one mapped task per participant)
+        -> check_failures -> build -> run_checks -> dvc_version -> notify_success
 
-check_failures runs when every participant has finished or failed, and stops
-the run only if more than data.max_failed_fraction failed.
-
-process_participant downloads, extracts features and deletes the zip in one
-task. Splitting download and processing into two mapped tasks would make
-Airflow download every zip before processing any, filling the disk in full
-mode. max_active_tis_per_dag limits how many participants run at once.
+patients comes first because each participant's wrist comes from the demographics.
+process_participant downloads, processes and deletes one zip in one task, so the
+disk never holds every zip at once; max_active_tis_per_dag limits how many run
+at once. check_failures runs when every participant has finished or failed, and
+stops the run only if more than data.max_failed_fraction failed.
 
 Trigger with config {"mode": "sample"} or {"mode": "full"}.
 """
@@ -28,79 +24,58 @@ PIPELINE_ROOT = Path(__file__).resolve().parents[1]
 if str(PIPELINE_ROOT) not in sys.path:
     sys.path.insert(0, str(PIPELINE_ROOT))
 
-from scripts import pipeline_steps as steps  # noqa: E402
-from scripts.alerts import airflow_failure_callback, notify  # noqa: E402
-from scripts.utils.config import load_config  # noqa: E402
+from scripts import acquire, checks, pipeline  # noqa: E402
+from scripts.utils import airflow_failure_callback, load_config, notify  # noqa: E402
 
-# How many participants run at once: the same setting as the command-line run.
+# How many participants run at once: the same setting as the command line.
 PARALLEL_PARTICIPANTS = load_config()["run"]["parallel_participants"]
-
-default_args = {
-    "owner": "mednova",
-    "retries": 1,
-    "retry_delay": timedelta(minutes=2),
-    "on_failure_callback": airflow_failure_callback,
-}
 
 
 @dag(
     dag_id="cops_data_pipeline",
-    description="COPS accelerometry + diary -> hourly features for kinesia prediction",
+    description="COPS diary + wrist accelerometry -> hours, doses, patients and 10-s windows for the model",
     start_date=datetime(2026, 1, 1),
     schedule=None,
     catchup=False,
-    default_args=default_args,
-    params={"mode": Param("sample", enum=["sample", "full"], description="sample = 5 smallest participants")},
+    default_args={"owner": "mednova", "retries": 1, "retry_delay": timedelta(minutes=2),
+                  "on_failure_callback": airflow_failure_callback},
+    params={"mode": Param("sample", enum=["sample", "full"],
+                          description="sample = the smallest participants, full = all 66. "
+                                      "Ignored while data.participants names a list in the config.")},
     tags=["mlops", "parkinsons", "data-pipeline"],
 )
 def cops_data_pipeline():
 
     @task
     def fetch_manifest(params=None):
-        cfg = load_config()
-        return steps.step_manifest(cfg, params["mode"])
+        return acquire.fetch_manifest(load_config(), params["mode"])
+
+    @task
+    def patients(manifest):
+        return pipeline.patients_step(load_config(), manifest)
 
     @task
     def list_participants(manifest):
         return manifest["participants"]
 
-    @task
-    def download_demographics(manifest):
-        return steps.step_demographics(load_config(), manifest)
-
     @task(max_active_tis_per_dag=PARALLEL_PARTICIPANTS, retries=2)
-    def process_participant(entry):
-        return steps.step_participant(load_config(), entry)
+    def process_participant(entry, patients_path):
+        return pipeline.participant_step(load_config(), entry, patients_path)
 
-    # Runs once every participant has finished or failed ("all_done"), so one
-    # participant that fails after its retries doesn't fail the whole run.
-    # Like the command line, it stops only if too many failed.
+    # Runs once every participant has finished or failed, so one participant that
+    # still fails after its retries doesn't fail the whole run.
     @task(trigger_rule="all_done")
     def check_failures(manifest, results):
-        return steps.step_check_failures(load_config(), manifest, list(results))
+        return pipeline.check_failures(load_config(), manifest, list(results))
 
     @task
-    def merge(results, demographics_path):
-        return steps.step_merge(load_config(), list(results), demographics_path)
+    def build(results, patients_path, params=None):
+        return str(pipeline.build(load_config(), list(results), patients_path, params["mode"]))
 
-    @task
-    def clean(merged_path):
-        return steps.step_clean(load_config(), merged_path)
-
-    @task
-    def validate(features_path, run_id=None):
-        # run_id is filled in by Airflow from the task context.
-        steps.step_validate(load_config(), features_path, run_id or "airflow")
-        return features_path
-
-    @task(retries=0)
-    def detect_anomalies(features_path):
-        steps.step_anomalies(load_config(), features_path)
-        return features_path
-
-    @task
-    def bias_report(features_path):
-        return steps.step_bias(load_config(), features_path)
+    @task(retries=0)  # bad data won't get better by retrying
+    def run_checks(processed):
+        checks.run_checks(load_config())
+        return processed
 
     dvc_version = BashOperator(
         task_id="dvc_version",
@@ -113,17 +88,14 @@ def cops_data_pipeline():
     )
 
     @task
-    def notify_success(report_path):
-        cfg = load_config()
-        notify("[COPS pipeline] Run succeeded", f"Bias report: {report_path}", cfg)
+    def notify_success(processed):
+        notify("[COPS pipeline] Run succeeded", f"Dataset: {processed}", load_config())
 
     manifest = fetch_manifest()
-    demographics = download_demographics(manifest)
-    results = process_participant.expand(entry=list_participants(manifest))
-    succeeded = check_failures(manifest, results)
-    features = validate(clean(merge(succeeded, demographics)))
-    report = bias_report(detect_anomalies(features))
-    report >> dvc_version >> notify_success(report)
+    patients_path = patients(manifest)
+    results = process_participant.partial(patients_path=patients_path).expand(entry=list_participants(manifest))
+    processed = run_checks(build(check_failures(manifest, results), patients_path))
+    processed >> dvc_version >> notify_success(processed)
 
 
 cops_data_pipeline()

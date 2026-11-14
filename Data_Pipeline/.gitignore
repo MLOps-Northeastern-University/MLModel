@@ -13,7 +13,6 @@ data/reports/*
 !data/interim/.gitkeep
 !data/processed/.gitkeep
 !data/reports/.gitkeep
-!data/reports/cleaning_summary.json
 !data/reports/bias_report.md
 *.part
 *.zip
@@ -27,5 +26,6 @@ __pycache__/
 *.pyc
 .pytest_cache/
 .coverage
+.coverage.*
 htmlcov/
 .venv/
