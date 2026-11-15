@@ -276,3 +276,21 @@ def test_the_leakage_check_refuses_unknown_targets(tmp_path):
     cfg["train"]["leakage_check"]["targets"] = ["mood"]
     with pytest.raises(ConfigError, match="leakage_check.targets"):
         TrainModels(cfg, MemoryTracker())
+
+
+def test_within_only_judges_only_the_within_patient_aucs(tmp_path, monkeypatch):
+    from scripts.steps import train as train_module
+
+    def scores(_):        # pooled AUC far from chance (patients differ), within-patient at chance
+        return {"state_now": {"off_auc": 0.36, "off_auc_within": 0.51}, "tremor_now": {"any_tremor_auc_within": 0.48}}
+
+    monkeypatch.setattr(train_module, "score", scores)
+    cfg = config(tmp_path, max_auc=0.6)
+    cfg["train"]["leakage_check"]["targets"] = ["state", "tremor"]
+    with pytest.raises(GateError, match="state_now/off_auc 0.360"):           # pooled judged: it stops
+        TrainModels(cfg, MemoryTracker()).run(data(), SPLIT)
+    cfg["train"]["leakage_check"]["within_only"] = True
+    TrainModels(cfg, MemoryTracker()).run(data(), SPLIT)                     # within only: it passes
+    monkeypatch.setattr(train_module, "score", lambda _: {"state_now": {"off_auc_within": 0.7}})
+    with pytest.raises(GateError, match="state_now/off_auc_within 0.700"):  # a within-patient leak still stops it
+        TrainModels(cfg, MemoryTracker()).run(data(), SPLIT)

@@ -21,18 +21,19 @@ Datasets ──▶ Data pipeline ──▶ Model pipeline ──▶ Model regist
 
 Every model and baseline is scored the same way, so their numbers can be compared.
 
-- **Folds:** 5 folds, fixed by hand. Each holds out 2 test patients who are never used for training or for any choice.
-- **Early stopping:** inside each fold, one of the remaining patients is the validation patient. The rest are for training.
-- **Normalisation:** statistics come from training patients only.
-- **Hyper-parameters:** fixed before the run, never tuned on test patients.
-- **Baselines on the same folds:** predict the training average, activity features, signal features, and harnet embeddings alone, each with logistic regression (tremor) and ridge regression (akinesia).
-- **Leakage check:** the same model trained on shuffled labels must fall to chance.
-- **Metrics:**
-  - Fold AUC: any-tremor AUC inside each fold, averaged over folds. This is the main metric because it isn't affected by calibration differences between folds.
-  - Pooled AUC: all test patients scored together, with a 95% confidence interval from resampling patients (1,000 resamples).
-  - Within-patient tracking: Spearman correlation between the prediction and the diary for each patient, averaged over patients whose diary varies.
-  - Non-DBS patients are reported separately.
-- **Seeds:** the model runs with 3 seeds, and the spread between seeds is reported.
+_Updated 2026-11-15 to the protocol the model pipeline runs. It replaces the first plan of 5 folds with 2 test patients each, which was made for the 15-patient prototype._
+
+- **Patients:** of the 66 COPS patients, 10 are test patients, 6 are kept for the app's demo, and 50 are for development. The split is fixed in `Data_Pipeline/data/processed/patient_split.json` (DVC), with the rule that picked it. The demo patients are never in the model's data.
+- **Folds:** the 50 development patients in 2 folds of 25 (`cv_folds`). Each fold trains on one half and is scored on the other, so every development patient is scored once, by a model that never saw them.
+- **Test patients:** scored once, at the end, by the final models (`train.score_test`). Never used for training, tuning or any choice.
+- **Early stopping:** on the fold's validation patients.
+- **Normalisation:** the cohort statistics come from training patients only. Each patient's features are also compared with their own past 7 days (the patient baseline, in [Model_Pipeline/README.md](Model_Pipeline/README.md#what-changed-the-scores)), which only ever looks back.
+- **Hyper-parameters:** tuned with Optuna on the development folds, never on test patients.
+- **Baselines on the same folds:** `window_logistic` and `window_boosting`, which score each window on its own with the same harnet10 features and patient baseline as the transformer.
+- **Leakage check:** boosting fitted to shuffled labels must score near chance (AUC within 0.4–0.6) on state and tremor, within patients.
+- **Metrics:** every diary question as an AUC, pooled (all hours together) and within patients (each patient's hours against each other, averaged over patients). Evaluate adds a 95% interval for each pooled AUC from resampling patients. Selection uses within-patient OFF AUC (`cv/state_now/off_auc_within`), the score that matters for telling one patient's OFF hours from their good ones.
+- **Bias:** the same AUCs per patient group (sex, age group, visit, DBS, Hoehn & Yahr, PD subtype), judged on groups of 5 or more patients.
+- **Seeds:** a list in the config. The 2026-11-15 run used one seed (42); the folds give the spread.
 
 ---
 

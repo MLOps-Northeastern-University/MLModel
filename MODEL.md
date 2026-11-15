@@ -245,6 +245,7 @@ Movement features, raw accelerometer, medication values, LEDD. Section 4.
 
   The cost: in the morning the history is mostly sleep, so the previous evening's movement and doses have dropped out.
 - **No time since waking or time of day (2026-11-11):** with sleep in the history, the model can see when the patient woke and roughly where in the day it is. A clock input could also teach shortcuts ("8 am means OFF") that fail for patients with other routines. Add time of day only if the errors show a time-of-day pattern, such as missed early-morning OFF.
+  - **Tested (2026-11-15), still out.** A simple model on harnet10 with the patient baseline went from 0.625 to 0.649 within-patient OFF with time of day, but time of day alone scored 0.639: the clock did the work, not the movement. Tremor-band frequency features (0.624) and the data pipeline's 7 hourly movement features (0.636, and 0.628 against 0.630 on patients with 5+ hours of each answer) added nothing either: harnet10 already holds them.
 
 **Update (2026-11-12): a dose marks 30 minutes, not one window.**
 
@@ -424,6 +425,16 @@ Both steps use: batch 4, gradient clip 1, bf16 on a GPU, weight decay on weight 
   - pretraining no longer loses short-range targets on padded rows. In the prototype it found none for about 43% of those windows that had one.
 
 **Why:** Pretraining learns from every worn hour, not only the answered ones. In one fold that is 370,000 worn windows, against 1,140 answered hours. Freezing what it learned keeps a few patients' diaries from overfitting it. In the prototype, pretraining was the only thing that beat the floor on pooled OFF AUC (0.61–0.62, against 0.48 trained end to end on the diary), with within-patient OFF about level (0.76) and some cost in tremor.
+
+**Update (2026-11-15): each patient compared with their own past week.** On the 50 development patients, every model first scored at chance on within-patient OFF (about 0.52). The prototype's 12 patients had overstated it. Patients differ from each other much more than one patient's OFF hours differ from their good hours, so the models learned who the patient was. Now each harnet10 feature is standardised by the patient's own mean and spread over the past 168 hours, before the hour being scored (`baseline: {mode: rolling}`, `Model_Pipeline/scripts/models/patient_baseline.py`). With little past, the training patients' statistics stand in, weighted as 24 hours of data. All three model families use it.
+
+- Fold 1, within-patient OFF: logistic 0.579 → 0.640, boosting 0.562 → 0.601, transformer 0.522 → 0.636.
+- 3 days of past scored 0.632 for logistic, so 7 days stays.
+- It only looks back, so it works the same on live data. A new patient starts from the cohort and becomes their own normal after a few days.
+
+**Update (2026-11-15): early stopping by OFF.** The diary step keeps the epoch with the best within-patient OFF AUC (`diary.select_by: off_auc_within`), up to 30 epochs, stopping after 6 without a better one. With the mean of OFF, dyskinetic and tremor, one fold kept an epoch with OFF at 0.56 because the other two improved.
+
+**Update (2026-11-15): the frozen body is confirmed.** Letting the whole network learn in the diary step scored 0.58 and falling (lr 3e-4), or 0.61 at best and then 0.57 (lr 1e-4), against 0.642 frozen. It memorised the training patients.
 
 ### On the phone
 
