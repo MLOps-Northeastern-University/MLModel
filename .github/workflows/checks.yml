@@ -35,7 +35,7 @@ jobs:
           fixtures='(^|/)tests?/fixtures/'
           # The pipeline's data folders hold dataset-derived files of any type (JSON reports
           # name participants), so nothing in them may be committed except these. DVC versions the rest;
-          # its .dvc pointer files (a hash and a size, no data) are how Git records those versions.
+          # its .dvc pointer files (a hash and a size, no data) are allowed, such as the patient split's.
           data_dirs='(^|/)data/(raw|interim|processed|reports)/'
           allowed_in_data='/(\.gitkeep|bias_report\.md|[^/]+\.dvc)$'
           fail=0

@@ -23,6 +23,7 @@ torch==2.12.1
 fairlearn==0.13.0
 
 # P4: selection, export and registry
+gcsfs==2026.8.2
 
 # P5: platform
 

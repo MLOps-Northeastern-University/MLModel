@@ -3,6 +3,7 @@ import json
 import pytest
 
 from scripts.core.errors import PipelineError
+from scripts.steps import register as register_module
 from scripts.steps.register import (
     RegisterModel, active_metrics, active_version, next_version, notify_backend, publish, set_active, versions)
 from scripts.tracking.memory_tracker import MemoryTracker
@@ -90,7 +91,7 @@ def test_run_releases_versions_in_order(tmp_path, step):
     assert register.run(make_bundle(tmp_path / "b1")) == 1
     assert register.run(make_bundle(tmp_path / "b2")) == 2
     family_dir = tmp_path / "artifacts" / "registry" / "parkinsons-risk"
-    assert register.family_dir == family_dir
+    assert register.family_dir == str(family_dir)
     assert active_version(family_dir) == 2
     assert tracker.runs["run-2"].tags == {"owner": "P4", "model_id": "parkinsons-risk-v2", "version": "2"}
 
@@ -111,3 +112,71 @@ def test_rollback_needs_an_earlier_version(tmp_path, step):
     register.run(make_bundle(tmp_path / "b1"))
     with pytest.raises(PipelineError, match="nothing to roll back to"):
         register.rollback()
+
+
+# ---- the registry in a bucket ------------------------------------------------------------
+# fsspec's memory:// filesystem stands in for gs://: the same calls, no cloud needed.
+
+@pytest.fixture
+def bucket():
+    import fsspec
+    fs = fsspec.filesystem("memory")
+    yield "memory://registry/parkinsons-risk"
+    fs.rm("/registry", recursive=True) if fs.exists("/registry") else None
+
+
+def test_a_bucket_registry_releases_and_rolls_back(tmp_path, bucket):
+    publish(make_bundle(tmp_path / "b1", off_auc=0.70), bucket, 1)
+    publish(make_bundle(tmp_path / "b2", off_auc=0.74), bucket, 2)
+    set_active(bucket, 2)
+    assert versions(bucket) == [1, 2] and active_version(bucket) == 2
+    assert active_metrics(bucket) == {"cv/state_now/off_auc": 0.74}
+    set_active(bucket, 1)
+    assert active_metrics(bucket) == {"cv/state_now/off_auc": 0.70}
+
+
+def test_a_bucket_release_holds_every_file(tmp_path, bucket):
+    import fsspec
+    publish(make_bundle(tmp_path / "b1"), bucket, 1)
+    fs = fsspec.filesystem("memory")
+    names = sorted(p.rsplit("/", 1)[-1] for p in fs.find("/registry/parkinsons-risk/v1"))
+    assert names == ["manifest.json", "metrics.json", "model.bin", "stats.json"]
+    with pytest.raises(PipelineError, match="never overwritten"):
+        publish(make_bundle(tmp_path / "b2"), bucket, 1)
+
+
+def test_model_registry_replaces_the_local_folder(tmp_path, bucket, monkeypatch):
+    monkeypatch.setenv("MODEL_REGISTRY", "memory://registry")
+    register = RegisterModel(make_config(tmp_path), MemoryTracker())
+    assert register.family_dir == bucket
+    assert register.run(make_bundle(tmp_path / "b1")) == 1
+    assert active_version(bucket) == 1
+
+
+# ---- the command -------------------------------------------------------------------------
+
+def test_status_prints_the_versions_and_the_active_one(tmp_path, bucket, monkeypatch, capsys):
+    monkeypatch.setenv("MODEL_REGISTRY", "memory://registry")
+    monkeypatch.setattr(register_module, "load_config", lambda path=None: make_config(tmp_path))
+    for n in (1, 2):
+        publish(make_bundle(tmp_path / f"b{n}"), bucket, n)
+    set_active(bucket, 2)
+    assert register_module.main(["status"]) == 0
+    assert "versions [1, 2], active v2" in capsys.readouterr().out
+
+
+def test_rollback_command_steps_back_one_version(tmp_path, bucket, monkeypatch, capsys):
+    monkeypatch.setenv("MODEL_REGISTRY", "memory://registry")
+    monkeypatch.setattr(register_module, "load_config", lambda path=None: make_config(tmp_path))
+    for n in (1, 2):
+        publish(make_bundle(tmp_path / f"b{n}"), bucket, n)
+    set_active(bucket, 2)
+    assert register_module.main(["rollback"]) == 0
+    assert active_version(bucket) == 1 and "active v1" in capsys.readouterr().out
+
+
+def test_rollback_command_fails_with_nothing_to_go_back_to(tmp_path, bucket, monkeypatch, capsys):
+    monkeypatch.setenv("MODEL_REGISTRY", "memory://registry")
+    monkeypatch.setattr(register_module, "load_config", lambda path=None: make_config(tmp_path))
+    assert register_module.main(["rollback"]) == 1
+    assert "nothing to roll back to" in capsys.readouterr().err
