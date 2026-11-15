@@ -3,7 +3,6 @@
 import datetime as dt
 import functools
 import json
-import tarfile
 from types import SimpleNamespace
 
 import pytest
@@ -12,7 +11,7 @@ from scripts import run_model_pipeline
 from scripts.core.errors import GateError
 from scripts.core.tracker import RunStatus
 from scripts.models import registry
-from scripts.run_model_pipeline import ready_for_selection, run
+from scripts.run_model_pipeline import run
 from scripts.steps import bias, train
 from scripts.steps.register import active_version, versions
 from scripts.tracking.memory_tracker import MemoryTracker
@@ -94,8 +93,8 @@ def test_the_release_holds_the_chosen_model_its_metrics_and_training_stats(cfg):
     run_once(cfg)
     release = family_dir(cfg) / "v1"
     manifest = json.loads((release / "manifest.json").read_text(encoding="utf-8"))
-    with tarfile.open(release / manifest["file"]) as archive:
-        assert "./manifest.json" in archive.getnames()                 # the saved model folder, whole
+    assert (release / "model" / "manifest.json").is_file()               # the saved model folder, whole
+    assert manifest["runs_on"] == "server" and manifest["model_id"] == "parkinsons-risk-v1"
     metrics = json.loads((release / "metrics.json").read_text(encoding="utf-8"))
     assert 0.5 < metrics["cv/state_now/off_auc"] <= 1
     stats = json.loads((release / "stats.json").read_text(encoding="utf-8"))
@@ -130,13 +129,6 @@ def test_a_model_no_better_than_production_is_not_exported_or_released(cfg):
     assert tracker.find("model_pipeline").status == RunStatus.FAILED
     with pytest.raises(Exception, match="expected one run named 'export'"):
         tracker.find("export")
-
-
-# ---- what joins the steps ---------------------------------------------------------------
-
-def test_only_a_saved_model_is_exportable(tmp_path):
-    assert ready_for_selection({"name": "m", "model_dir": str(tmp_path)})["exportable"]
-    assert not ready_for_selection({"name": "m", "model_dir": str(tmp_path / "gone")})["exportable"]
 
 
 # ---- the command and its alerts -----------------------------------------------------------

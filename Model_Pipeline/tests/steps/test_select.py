@@ -8,22 +8,36 @@ from scripts.utils.config import load_config
 METRIC = "cv/state_now/off_auc"
 
 
-def candidate(name, score, gates_passed=True, exportable=True):
-    return {"name": name, "metrics": {METRIC: score}, "gates_passed": gates_passed, "exportable": exportable}
+def candidate(name, score, gates_passed=True, exportable=None):
+    c = {"name": name, "metrics": {METRIC: score}, "gates_passed": gates_passed}
+    if exportable is not None:
+        c["exportable"] = exportable
+    return c
 
 
-def make_step():
+def make_step(need_device=False):
     tracker = MemoryTracker()
-    return SelectModel({"selection": {"metric": METRIC}}, tracker), tracker
+    cfg = {"selection": {"metric": METRIC}, "export": {"device": {"required": need_device}}}
+    return SelectModel(cfg, tracker), tracker
 
 
-def test_eligible_drops_failed_gates_and_unexportable_models():
-    kept = eligible([
-        candidate("good", 0.70),
-        candidate("failed_bias", 0.90, gates_passed=False),
-        candidate("no_phone_format", 0.95, exportable=False),
-    ])
+def test_eligible_drops_failed_gates():
+    kept = eligible([candidate("good", 0.70), candidate("failed_bias", 0.90, gates_passed=False)])
     assert [c["name"] for c in kept] == ["good"]
+
+
+def test_a_server_model_needs_no_exportable_field():
+    assert [c["name"] for c in eligible([candidate("server_only", 0.70)])] == ["server_only"]
+
+
+def test_a_candidate_without_gates_passed_is_not_eligible():
+    assert eligible([{"name": "unchecked", "metrics": {METRIC: 0.9}}]) == []
+
+
+def test_needing_the_device_drops_models_that_cant_be_exported():
+    kept = eligible([candidate("phone_ok", 0.70, exportable=True), candidate("server_only", 0.95)],
+                    need_device=True)
+    assert [c["name"] for c in kept] == ["phone_ok"]
 
 
 def test_best_picks_the_highest_score():
@@ -50,7 +64,13 @@ def test_run_returns_the_best_eligible_candidate():
 def test_run_with_no_eligible_candidate_stops_the_run():
     step, _ = make_step()
     with pytest.raises(GateError, match="no eligible candidates"):
-        step.run([candidate("a", 0.90, exportable=False)])
+        step.run([candidate("a", 0.90, gates_passed=False)])
+
+
+def test_run_needing_the_device_picks_an_exportable_model():
+    step, _ = make_step(need_device=True)
+    chosen = step.run([candidate("server_only", 0.95), candidate("phone_ok", 0.70, exportable=True)])
+    assert chosen["name"] == "phone_ok"
 
 
 def test_reads_the_metric_from_the_real_config():

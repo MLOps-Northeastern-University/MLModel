@@ -2,9 +2,11 @@
 
 Owner: Ayush
 
-Keeps only the candidates that passed the validation and bias gates and can
-be exported to the phone, then picks the one with the best selection metric.
-Raises GateError when no candidate is left.
+Keeps only the candidates that passed the validation and bias gates, then picks
+the one with the best selection metric. The model runs on the server (MODEL.md,
+"On the phone", so every saved model can be released.
+When export.device.required is true, a candidate must also be exportable to the
+phone. Raises GateError when no candidate is left.
 """
 
 from scripts.core.errors import GateError
@@ -14,9 +16,10 @@ from scripts.utils.logging_setup import get_logger
 logger = get_logger(__name__)
 
 
-def eligible(candidates):
-    """The candidates that passed both gates and can run on the phone."""
-    return [c for c in candidates if c["gates_passed"] and c["exportable"]]
+def eligible(candidates, need_device=False):
+    """The candidates that passed the gates, and, with need_device, can run on the phone too."""
+    return [c for c in candidates
+            if c.get("gates_passed", False) and (not need_device or c.get("exportable", False))]
 
 
 def best(candidates, metric):
@@ -36,12 +39,13 @@ class SelectModel:
 
     def __init__(self, cfg, tracker):
         self.metric = cfg["selection"]["metric"]
+        self.need_device = cfg["export"]["device"]["required"]
         self.tracker = tracker
 
     def run(self, candidates):
         """The chosen candidate. Raises GateError when none is eligible."""
         with self.tracker.run("select_model", tags={"owner": "P4"}):
-            kept = eligible(candidates)
+            kept = eligible(candidates, self.need_device)
             chosen = best(kept, self.metric)
             self.tracker.set_tags({"selected_model": chosen["name"]})
             logger.info("Selected %s: %s %.3f, from %d of %d candidates", chosen["name"],

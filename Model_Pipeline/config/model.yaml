@@ -230,14 +230,17 @@ explain:
     - {label: sleep_now, question: asleep}
 
 export:
-  # The phone model's entry in the Backend's model_versions table.
+  # The release bundle's model family: the registry folder and the model_id prefix.
   family: parkinsons-risk
-  feature_spec_version: 3
-  output_name: off_risk
-  nudge_above: 0.8
-  # PLACEHOLDER: the phone runtime, set once the conversion spike picks one of
-  # executorch, onnx or litert (MODEL.md, "On the phone").
-  format: null
+  # The model runs on the server (MODEL.md, "On the phone", update of 2026-11-13). Exporting
+  # to the phone as well is optional, for testing whether on-device scoring can work.
+  device:
+    # Also build a phone file in the bundle's device/ folder.
+    enabled: false
+    # Only candidates that can be exported to the phone may be selected.
+    required: false
+    # PLACEHOLDER: executorch, onnx or litert, once a conversion is tested.
+    format: null
 
 registry:
   # PLACEHOLDER: the Backend's endpoint for registering a model version. None exists
