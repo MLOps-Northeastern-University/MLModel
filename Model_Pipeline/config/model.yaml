@@ -127,20 +127,20 @@ tune:
     motor_causal_transformer:
       # Diary-step settings only, so every trial reuses each fold's cached pretrained body.
       # Not diary.learn: the pooling only ever learns in the diary step, so it must stay learnable.
-      # 15 trials: about 4 per setting, sized to the run's time budget (each trial is 3 diary fits).
-      trials: 15
+      # 6 trials, sized to the run's time budget (each trial is 3 diary fits of ~11 min).
+      trials: 6
       space:
         diary.lr: {type: float, low: 1.0e-4, high: 3.0e-3, log: true}
         diary.weight_decay: {type: float, low: 0.01, high: 0.3, log: true}
         diary.feature_noise: {type: float, low: 0.0, high: 0.3}
         diary.class_weight_power: {type: float, low: 0.0, high: 1.0}
     window_logistic:
-      trials: 10
+      trials: 6
       space:
         c: {type: float, low: 1.0e-4, high: 1.0, log: true}
         class_weight_power: {type: float, low: 0.0, high: 1.0}
     window_boosting:
-      trials: 15
+      trials: 8
       space:
         learning_rate: {type: float, low: 0.01, high: 0.3, log: true}
         leaves: {type: int, low: 7, high: 63}
