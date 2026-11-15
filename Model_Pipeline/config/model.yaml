@@ -118,6 +118,10 @@ train:
     # moves, and sleep hours barely move, so sleep AUC lands far from 0.5 with no leak (0.71 on the
     # real data). A leak through events or check-ins would show in state and tremor.
     targets: [state, tremor]
+    # Only the within-patient AUCs: the pooled ones follow how much each patient moves (patients who
+    # move less are OFF more often), so a model fitted to random labels scored pooled OFF AUC 0.36 on
+    # the real data with no leak. A leak would still raise the within-patient AUC.
+    within_only: true
 
 tune:
   # scripts/steps/tune.py. Each trial is a full cross-validation with this seed, scored by
@@ -186,7 +190,9 @@ bias:
   # A group is judged only with at least this many scored hours and this many patients. Most
   # slices describe the person, so a group of one patient measures that person, not the group.
   min_slice_rows: 20
-  min_slice_participants: 2
+  # 5: a group of 2 to 4 patients mostly measures those people (with 50 development patients only the
+  # Hoehn & Yahr 4+ group falls below). Smaller groups are still in the report, not judged.
+  min_slice_participants: 5
   # Which predictions are sliced: cv (every development patient's out-of-fold hours) or test
   # (only after train.score_test has scored the test patients, once).
   predictions: cv

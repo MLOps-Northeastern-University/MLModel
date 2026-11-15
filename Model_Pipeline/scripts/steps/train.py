@@ -208,9 +208,15 @@ class TrainModels:
         fitted to random labels still gives outputs that follow how much the wrist moves, and sleep hours
         barely move, so its sleep AUC lands far from 0.5 in a random direction with no leak at all. A leak
         through the inputs (events or check-ins built from the diary) would show in state and tremor.
+
+        within_only (train.leakage_check.within_only) judges only the within-patient AUCs. The pooled
+        ones mix patients, and patients who move less are OFF more often: a model fitted to random labels
+        still follows how much each patient moves, so its pooled AUC lands far from 0.5 (0.36 on the real
+        data) with no leak. Within one patient that effect is gone, and a leak would still raise the AUC.
         """
         limit = self.settings["leakage_check"]["max_auc"]
         targets = set(self.settings["leakage_check"]["targets"])
+        judged = ("_auc_within",) if self.settings["leakage_check"]["within_only"] else ("_auc", "_auc_within")
         seed = self.settings["seeds"][0]
         rng = np.random.default_rng(seed)
         with self.tracker.run(f"leakage_check-{name}", tags={"family": template.family}), \
@@ -227,7 +233,7 @@ class TrainModels:
             self.tracker.log_metrics(named("cv", scores))
             off = [(f"{label}/{m}", v) for label, s in scores.items() if parse_label(label)[0] in targets
                    for m, v in s.items()
-                   if m.endswith(("_auc", "_auc_within")) and math.isfinite(v) and abs(v - 0.5) > limit - 0.5]
+                   if m.endswith(judged) and math.isfinite(v) and abs(v - 0.5) > limit - 0.5]
             if off:
                 raise GateError("leakage", f"{name} trained on shuffled labels scored "
                                 + ", ".join(f"{m} {v:.3f}" for m, v in off) + f", beyond {1 - limit:.2f}-{limit:.2f}")
@@ -263,9 +269,12 @@ def _settings(cfg):
     if not isinstance(targets, list) or not targets or set(targets) - set(TARGETS):
         raise ConfigError(f"train.leakage_check.targets must be a list of targets from {sorted(TARGETS)}, "
                           f"not {targets!r}")
+    within_only = check.get("within_only", False)
+    if not isinstance(within_only, bool):
+        raise ConfigError("train.leakage_check.within_only must be true or false")
     return {"seeds": seeds, "score_test": section["score_test"], "use_tuned": section.get("use_tuned", False),
             "leakage_check": {"candidates": names, "max_auc": float(limit) if names else None,
-                              "targets": list(targets)}}
+                              "targets": list(targets), "within_only": within_only}}
 
 
 def main(argv=None):
