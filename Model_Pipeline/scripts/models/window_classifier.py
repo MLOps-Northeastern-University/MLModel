@@ -51,6 +51,7 @@ from scripts.core.data import SECONDS_PER_HOUR
 from scripts.core.errors import ConfigError, ModelError, SchemaError
 from scripts.core.model import Model, Predictions, WindowPredictions
 from scripts.core.targets import HORIZONS, HOUR_INDEX, PARTICIPANT, get_target, parse_label
+from scripts.models import patient_baseline
 from scripts.models.motor_causal_transformer.harnet import check_spec, default_device, feature_cache
 from scripts.models.motor_causal_transformer.loss import balanced_weights
 from scripts.utils.logging_setup import get_logger
@@ -69,13 +70,16 @@ class WindowClassifier(Model):
 
     @classmethod
     def default_params(cls):
-        return {"windows_per_hour": 60, "class_weight_power": 1.0, "class_weight_cap": 10.0}
+        return {"windows_per_hour": 60, "class_weight_power": 1.0, "class_weight_cap": 10.0,
+                "baseline": dict(patient_baseline.DEFAULTS)}
 
     def __init__(self, targets, horizons=tuple(HORIZONS), params=None, spec=None):
         super().__init__(targets, horizons, params, spec)
         _check_number(self.params, "windows_per_hour", whole=True, low=1)
         _check_number(self.params, "class_weight_power", low=0)
         _check_number(self.params, "class_weight_cap", low=1)
+        self._baseline_settings = patient_baseline.check_settings(self.params["baseline"])
+        self._cohort = None            # (mean, sd) the patient baselines shrink towards (models/patient_baseline.py)
         self._check_params()
         self._classifiers = None       # {label: fitted pipeline, or None if training had one class}
         self._prior = None             # {label: class mix of the training hours}
@@ -104,6 +108,11 @@ class WindowClassifier(Model):
         labels = train.labels.reset_index(drop=True).reindex(columns=list(self.labels))
         hour_weight = np.ones(len(hours)) if sample_weight is None else np.asarray(sample_weight, dtype=float)
         answered = labels.notna().any(axis=1).to_numpy()
+        self._cohort = None
+        if self._baseline_settings["mode"] != "none":
+            # The cohort's normal, from every training patient's worn windows.
+            self._cohort = patient_baseline.feature_stats(cache.get(pid, train.windows[pid])
+                                                          for pid in train.participants)
 
         x, hour_of_row = self._training_windows(train, hours, answered, cache, rng)
         y_hours = labels.to_numpy(dtype=float)
@@ -157,7 +166,7 @@ class WindowClassifier(Model):
             starts = np.flatnonzero(np.r_[True, group[1:] != group[:-1]])
             rank = np.arange(len(group)) - np.repeat(starts, np.diff(np.r_[starts, len(group)]))
             chosen = np.sort(in_hour[order][rank < per_hour])
-            xs.append(np.asarray(cache.get(pid, windows)[chosen], dtype=np.float32))
+            xs.append(np.asarray(self._features(cache, pid, windows)[chosen], dtype=np.float32))
             rows.append(hour_row[chosen])
         if not xs:
             raise SchemaError(f"{self.family}: the training data has no worn windows in answered hours")
@@ -175,7 +184,7 @@ class WindowClassifier(Model):
         for pid in data.participants:
             windows = data.windows[pid]
             time_s = windows.time_s[windows.worn]
-            features = cache.get(pid, windows)
+            features = self._features(cache, pid, windows)
             probs = {label: self._window_probs(label, features, k[label]) for label in self.labels}
             mine = np.flatnonzero((hours[PARTICIPANT] == pid).to_numpy())
             hour_row = _hour_rows(time_s, hours[HOUR_INDEX].to_numpy()[mine], mine)
@@ -194,6 +203,15 @@ class WindowClassifier(Model):
             p[empty] = self._prior[label]
             hourly[label] = p / p.sum(axis=1, keepdims=True) if len(p) else p
         return Predictions(data.hours, hourly, windows_out)
+
+    def _features(self, cache, pid, windows):
+        """A patient's worn windows' features, relative to their own past if the baseline is on."""
+        features = cache.get(pid, windows)
+        if self._cohort is None:
+            return features
+        time_s = np.asarray(windows.time_s[windows.worn])
+        return patient_baseline.Normalised(features, time_s, patient_baseline.rolling_baseline(
+            time_s, features, self._cohort, self._baseline_settings, self.spec.seconds))
 
     def _window_probs(self, label, features, classes):
         """Every worn window's class probabilities for one label, (windows, classes)."""
@@ -217,7 +235,8 @@ class WindowClassifier(Model):
         joblib.dump(self._classifiers, Path(folder) / CLASSIFIERS_FILE)
         (Path(folder) / INFO_FILE).write_text(json.dumps(
             {"harnet10": self._fingerprint, "prior": self._prior, "result": self._result,
-             "classifiers_sha256": _sha256(Path(folder) / CLASSIFIERS_FILE), "scikit_learn": sklearn.__version__},
+             "classifiers_sha256": _sha256(Path(folder) / CLASSIFIERS_FILE), "scikit_learn": sklearn.__version__,
+             "cohort": None if self._cohort is None else [v.tolist() for v in self._cohort]},
             indent=1), encoding="utf-8")
 
     def _load_weights(self, folder):
@@ -234,6 +253,12 @@ class WindowClassifier(Model):
         if set(self._classifiers) != set(self.labels):
             raise ModelError(f"{folder}: the saved classifiers don't match the model's labels")
         self._fingerprint, self._prior, self._result = info["harnet10"], info["prior"], info["result"]
+        cohort = info.get("cohort")
+        if (cohort is None) != (self._baseline_settings["mode"] == "none"):
+            state = "off" if cohort is None else "on"
+            raise ModelError(f"{folder}: saved with the patient baseline {state}, but the settings say mode "
+                             f"{self._baseline_settings['mode']!r}")
+        self._cohort = None if cohort is None else tuple(np.asarray(v, dtype=np.float64) for v in cohort)
 
 
 class WindowLogistic(WindowClassifier):

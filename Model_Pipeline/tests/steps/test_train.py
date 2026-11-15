@@ -250,3 +250,29 @@ def test_charts_can_be_turned_off_or_kept_off_the_folds(tmp_path):
     cfg["train"]["charts"] = {"enabled": False}
     TrainModels(cfg, MemoryTracker()).run(data(), SPLIT)
     assert not (tmp_path / "charts").exists()                           # the last run's charts are cleared too
+
+
+def test_the_leakage_check_judges_only_its_targets(tmp_path, monkeypatch):
+    from scripts.steps import train as train_module
+
+    def scores(_):        # the shuffled-label model: sleep far from chance, state and tremor at chance
+        return {"sleep_now": {"asleep_auc": 0.75, "asleep_auc_within": 0.78},
+                "state_now": {"off_auc": 0.51, "off_auc_within": 0.49},
+                "tremor_now": {"any_tremor_auc": 0.52}}
+
+    monkeypatch.setattr(train_module, "score", scores)
+    cfg = config(tmp_path, max_auc=0.6)
+    with pytest.raises(GateError, match="sleep_now/asleep_auc 0.750"):        # every target: sleep stops the run
+        TrainModels(cfg, MemoryTracker()).run(data(), SPLIT)
+    cfg["train"]["leakage_check"]["targets"] = ["state", "tremor"]
+    TrainModels(cfg, MemoryTracker()).run(data(), SPLIT)                     # sleep isn't judged: it passes
+    monkeypatch.setattr(train_module, "score", lambda _: {"state_now": {"off_auc_within": 0.7}})
+    with pytest.raises(GateError, match="state_now/off_auc_within 0.700"):
+        TrainModels(cfg, MemoryTracker()).run(data(), SPLIT)
+
+
+def test_the_leakage_check_refuses_unknown_targets(tmp_path):
+    cfg = config(tmp_path)
+    cfg["train"]["leakage_check"]["targets"] = ["mood"]
+    with pytest.raises(ConfigError, match="leakage_check.targets"):
+        TrainModels(cfg, MemoryTracker())

@@ -208,3 +208,34 @@ def test_a_cache_that_cant_be_written_costs_the_speed_up_not_the_fit(tmp_path, m
     monkeypatch.setattr(pretrained_cache.torch, "save", full_disk)
     model = MotorCausalTransformer(["state"], params=TINY, spec=SPEC).fit(dataset().subset(["A", "B"]), seed=0)
     assert model.is_fitted and not list((tmp_path / "pretrained_cache").glob("*"))
+
+
+def test_the_patient_baseline_trains_saves_and_predicts_the_same(tmp_path):
+    data = dataset()
+    params = {**TINY, "baseline": {"mode": "rolling", "window_h": 4, "warmup_h": 1}}
+    model = MotorCausalTransformer(["sleep", "state", "tremor"], params=params, spec=SPEC)
+    model.fit(data.subset(["A", "B"]), val=data.subset(["C"]), seed=0)
+    assert model._cohort is not None and model._cohort[0].shape == (1024,)
+    out = model.predict(data)                                    # the base class checks the contract
+    model.save(tmp_path / "m")
+    loaded = MotorCausalTransformer.load(tmp_path / "m")
+    for label in model.labels:
+        np.testing.assert_allclose(out.probs[label], loaded.predict(data).probs[label], rtol=1e-6, atol=1e-7)
+    plain = MotorCausalTransformer(["sleep", "state", "tremor"], params=TINY, spec=SPEC)
+    plain.fit(data.subset(["A", "B"]), val=data.subset(["C"]), seed=0)
+    assert not np.allclose(out.probs["state_now"], plain.predict(data).probs["state_now"])
+    # Another baseline is another pretraining: two cache entries, not one shared.
+    assert len(list((tmp_path / "pretrained_cache").glob("*.pt"))) == 2
+
+
+def test_a_saved_model_refuses_settings_that_disagree_about_the_baseline(tmp_path):
+    data = dataset()
+    model = MotorCausalTransformer(["state"], params=TINY, spec=SPEC).fit(data.subset(["A", "B"]), seed=0)
+    model.save(tmp_path / "m")
+    import json
+    manifest = tmp_path / "m" / "manifest.json"
+    info = json.loads(manifest.read_text(encoding="utf-8"))
+    info["params"]["baseline"] = {"mode": "rolling", "window_h": 168, "warmup_h": 24}
+    manifest.write_text(json.dumps(info), encoding="utf-8")
+    with pytest.raises(ModelError, match="baseline"):
+        MotorCausalTransformer.load(tmp_path / "m")

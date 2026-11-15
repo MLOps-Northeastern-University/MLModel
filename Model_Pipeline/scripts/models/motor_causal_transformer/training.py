@@ -15,7 +15,8 @@ own random numbers, so measuring never changes the training.
 Step 2, the diary step. The pretrained parts are frozen (no dropout either, network.py), and the
 heads and pooling learn the diary's answers. The heads start at the training hours' class mix,
 and the loss weighs classes by their rarity (balanced, capped). With validation patients it keeps
-the epoch with the best within-patient score and stops after `patience` epochs without a better
+the epoch with the best within-patient score (select_by: the mean of OFF, dyskinetic and any-tremor
+AUC, or one of them) and stops after `patience` epochs without a better
 one. Without them (the final fit), it trains a fixed number of epochs, chosen by cross-validation.
 
 Validation scores every answered hour on its own, with exactly L hours of past in front of it,
@@ -106,8 +107,14 @@ class DiarySettings:
     eval_past_h: Tuple[int, ...] = (1, 2, 4, 8)
     eval_batch: int = 16
     amp: bool = True
+    # The validation score that picks the epoch kept and drives early stopping: the mean within-patient
+    # AUC, or one question's. OFF alone keeps the epoch best at OFF, which the mean can trade away for
+    # dyskinetic or tremor.
+    select_by: str = "within_auc"
 
     def __post_init__(self):
+        if self.select_by not in SELECT_BY:
+            raise ConfigError(f"select_by must be one of {list(SELECT_BY)}, not {self.select_by!r}")
         object.__setattr__(self, "learn", tuple(self.learn))
         object.__setattr__(self, "eval_past_h", tuple(self.eval_past_h))
         _check(self)
@@ -119,9 +126,12 @@ class DiarySettings:
             raise ConfigError(f"eval_past_h must be whole hours of 0 or more, not {list(self.eval_past_h)}")
 
 
+SELECT_BY = ("within_auc", "off_auc_within", "dyskinetic_auc_within", "tremor_any_auc_within")
+
+
 def _check(settings):
     for name, value in asdict(settings).items():
-        if isinstance(value, bool) or isinstance(value, (tuple, list)):
+        if isinstance(value, (bool, str)) or isinstance(value, (tuple, list)):
             continue
         whole = name in ("epochs", "max_epochs", "patience", "chunk_h", "past_h", "batch", "eval_batch")
         lowest = 0 if name in ("past_h", "epochs") else 1          # 0 epochs: skip pretraining
@@ -251,7 +261,7 @@ def _mean_parts(parts):
 @dataclass
 class DiaryResult:
     best_epoch: int                       # the epoch kept (the last, without validation)
-    best_score: float                     # its mean within-patient AUC (NaN without validation)
+    best_score: float                     # its select_by score (NaN without validation)
     history: List[dict] = field(default_factory=list)
 
 
@@ -327,7 +337,7 @@ def train_diary(net: MotorNetwork, train: Dict[str, Recording], val: Optional[Di
         if val:
             rows = score_hours(net, val, settings.eval_past_h, device, settings.eval_batch, amp=settings.amp)
             line.update(within_scores(rows))
-            score = line["within_auc"]
+            score = line[settings.select_by]
             if math.isfinite(score) and not score <= result.best_score:     # NaN best: anything finite wins
                 result.best_epoch, result.best_score = epoch, score
                 best_state = {k: v.detach().to("cpu", copy=True) for k, v in net.state_dict().items()}

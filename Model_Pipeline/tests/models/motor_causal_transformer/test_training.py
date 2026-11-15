@@ -199,3 +199,16 @@ def test_score_hours_gives_each_answered_hour_at_each_past_length():
     assert len(rows) == 12 and sorted(rows.past_h.unique()) == [0, 2]
     assert rows.state_now_p.iloc[0].shape == (7,) and np.isclose(rows.state_now_p.iloc[0].sum(), 1)
     assert (rows.state_now_y.to_numpy() == [recs["A"].answer("state_now", h) for h in rows.hour_index]).all()
+
+
+def test_select_by_keeps_the_epoch_best_at_that_question_and_refuses_unknown_ones():
+    recs = make()
+    train, val = {k: recs[k] for k in ("A", "B", "C")}, {"D": recs["D"]}
+    net = network()
+    net.movement.fit(r.features for r in train.values())
+    settings = DiarySettings(max_epochs=4, patience=4, chunk_h=4, eval_past_h=(1,), lr=3e-3, select_by="off_auc_within")
+    result = train_diary(net, train, val, settings, "cpu", np.random.default_rng(0))
+    offs = [line["off_auc_within"] for line in result.history]
+    assert result.best_score == max(offs) and result.history[result.best_epoch - 1]["off_auc_within"] == max(offs)
+    with pytest.raises(ConfigError, match="select_by"):
+        DiarySettings(select_by="loss")
