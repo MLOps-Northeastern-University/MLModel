@@ -485,7 +485,7 @@ The transformer's test scorecard: [`transformer_scorecard_test.png`](docs/result
 | Bias | **Failed** for both (details below) |
 | Release | No candidate passed, so select stopped the run. Logistic was then released by hand as version 1 of `parkinsons-risk`, with the best within-patient OFF AUC. That run is `manual_release` in MLflow, tagged as an override with both gate failures |
 
-The validation gate judges pooled AUC, which the patient baseline now pushes below 0.5. The next change is to judge within-patient AUC, the score selection uses, as the leakage check already does.
+The validation gate judges pooled AUC, which the patient baseline pushes below 0.5, while selection and the leakage check judge within patients.
 
 **Bias.** Each group's OFF AUC is pooled within that group, so most sit below 0.5 for the reason above. The gaps between groups are still real:
 
@@ -493,7 +493,7 @@ The validation gate judges pooled AUC, which the patient baseline now pushes bel
 - **Visit type:** mixed visits 0.30 against inpatients 0.49.
 - **Hoehn & Yahr:** any tremor scored 0.60 at stage 2 against 0.77 at stage 3.
 
-Reweighing was off in this run to save time. Without DBS, OFF may simply show less clearly in the movement, which reweighing can't fix. The full tables are in `artifacts/bias/bias_report.md`.
+**Mitigation:** the bias step retrains a failing candidate with reweighing (`bias.mitigation`, see [Bias and explanations](#bias-and-explanations-p3)). It weights each group's answers as if group and answer were independent, using each fold's training patients only, and reports the gap and selection score before and after. It was switched off for this run (`mitigation.enabled: false`) to fit the time. Reweighing closes a gap that comes from imbalance. It can't close one where OFF shows less clearly in the movement, which may be the case without DBS. The full tables are in `artifacts/bias/bias_report.md`.
 
 ![Logistic regression's OFF AUC per patient group](docs/results/logistic_bias_off.png)
 
@@ -504,13 +504,6 @@ Tremor per group: [`logistic_bias_tremor.png`](docs/results/logistic_bias_tremor
 ![The transformer's Shapley values by input group](docs/results/transformer_shap.png)
 
 **Tuning.** 3 trials each for logistic regression and boosting. For logistic regression, how strongly rare answers are weighted (`class_weight_power`, importance 0.62) mattered more than the regularisation strength (`c`, 0.38). With only 3 trials, that's a rough guide: [`logistic_sensitivity.png`](docs/results/logistic_sensitivity.png).
-
-**Next:**
-
-- Judge the validation and bias gates on within-patient AUC.
-- Run with more folds and seeds, and boosting back in.
-- Turn reweighing on.
-- Check whether the transformer's weak fold 2 comes from a few patients.
 
 ## Adding your step
 
