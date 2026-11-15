@@ -86,10 +86,11 @@ models:
 train:
   # scripts/steps/train.py. Every candidate trains with each seed on every fold; the cv
   # scores are the mean over seeds.
-  seeds: [0]
+  seeds: [42, 43, 44]
   # Train the candidates tune.py tuned with the settings it chose (artifacts/tuned_params.json),
-  # merged over their config. Refused if they were tuned on another split, data or config.
-  use_tuned: false
+  # merged over their config. Refused if they were tuned on another split, data or config, or if
+  # tune hasn't run yet: run tune first.
+  use_tuned: true
   # The test patients are scored once, with the final models, at the very end of model
   # work. Leave false; set true only for that one run (it's tagged test_scored in MLflow).
   score_test: false
@@ -112,23 +113,34 @@ tune:
   # scripts/steps/tune.py. Each trial is a full cross-validation with this seed, scored by
   # selection.metric (so tuning maximises what selection chooses by). A candidate not listed
   # here isn't tuned. Settings are dotted names into the candidate's params.
-  # DRAFT search spaces, around the prototype's values: for Sam to set before the real run.
-  seed: 0
+  # Every family is tuned, with trials of about 8-10 per setting, so the comparison is fair.
+  seed: 42
   candidates:
+    window_logistic:
+      trials: 25
+      space:
+        c: {type: float, low: 1.0e-4, high: 1.0, log: true}
+        class_weight_power: {type: float, low: 0.0, high: 1.0}
     window_boosting:
-      trials: 30
+      trials: 40
       space:
         learning_rate: {type: float, low: 0.01, high: 0.3, log: true}
         leaves: {type: int, low: 7, high: 63}
         iterations: {type: int, low: 100, high: 500, step: 50}
+        pca_components: {type: categorical, choices: [32, 64, 128]}
+        class_weight_power: {type: float, low: 0.0, high: 1.0}
     motor_causal_transformer:
       # Diary-step settings only, so every trial reuses each fold's cached pretrained body.
-      trials: 20
+      # Not diary.learn: the pooling only ever learns in the diary step, so it must stay learnable.
+      # Trials to be set from a timing test on the training machine.
+      trials: 25
       space:
         diary.lr: {type: float, low: 1.0e-4, high: 3.0e-3, log: true}
         diary.weight_decay: {type: float, low: 0.01, high: 0.3, log: true}
         diary.feature_noise: {type: float, low: 0.0, high: 0.3}
         diary.class_weight_power: {type: float, low: 0.0, high: 1.0}
+    # motor_causal_transformer_no_pretrain isn't tuned: after tuning, give it the transformer's
+    # tuned diary settings in its params, so the two differ only in pretraining.
 
 mlflow:
   # Local MLflow from docker-compose. CI sets MLFLOW_TRACKING_URI to the shared server.
@@ -136,8 +148,9 @@ mlflow:
   experiment: parkinsons-risk
 
 selection:
-  # The metric that picks the best candidate: the release gate's main rule.
-  metric: cv/state_now/off_auc
+  # The metric that picks the best candidate, and that tuning maximises: OFF within each patient,
+  # what the dashboard shows (following one patient through the day). Pooled is still logged.
+  metric: cv/state_now/off_auc_within
 
 evaluation:
   # scripts/steps/evaluate.py: the pooled AUC's interval, patients resampled this many
