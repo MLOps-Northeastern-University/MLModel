@@ -68,6 +68,7 @@ def cfg(tmp_path):
     config = make_config(tmp_path, evaluation={"bootstrap_resamples": 50}, release_gate={"rules": RULES},
                          **sections)
     config["validation_gate"]["min"] = {"cv/state_now/off_auc": 0.5}   # replaced, not merged into
+    config["train"].update(use_tuned=False, charts={"enabled": False})  # nothing tuned here
     return config
 
 
@@ -133,28 +134,9 @@ def test_a_model_no_better_than_production_is_not_exported_or_released(cfg):
 
 # ---- what joins the steps ---------------------------------------------------------------
 
-def candidate(tmp_path, **fields):
-    return {"name": "m", "metrics": {"cv/state_now/off_auc": 0.7, "cv/tremor_now/any_tremor_auc": 0.6},
-            "model_dir": str(tmp_path), **fields}
-
-
-def test_a_candidate_must_pass_both_the_validation_and_the_bias_gate(cfg, tmp_path):
-    assert ready_for_selection(cfg, candidate(tmp_path, gates_passed=True, gates={"bias": True}))["gates_passed"]
-    assert not ready_for_selection(cfg, candidate(tmp_path, gates_passed=True, gates={"bias": False}))["gates_passed"]
-    assert not ready_for_selection(cfg, candidate(tmp_path, gates_passed=False, gates={"bias": True}))["gates_passed"]
-
-
-def test_a_reweighted_candidate_gets_the_validation_gate_checked_on_its_metrics(cfg, tmp_path):
-    passing = ready_for_selection(cfg, candidate(tmp_path, gates={"bias": True}))
-    assert passing["gates_passed"] and passing["validation_failures"] == []
-    failing = ready_for_selection(cfg, candidate(tmp_path, gates={"bias": True},
-                                                 metrics={"cv/state_now/off_auc": 0.4}))
-    assert not failing["gates_passed"] and failing["validation_failures"] == ["cv/state_now/off_auc: 0.400 < 0.5"]
-
-
-def test_only_a_saved_model_is_exportable(cfg, tmp_path):
-    assert ready_for_selection(cfg, candidate(tmp_path, gates={"bias": True}))["exportable"]
-    assert not ready_for_selection(cfg, candidate(tmp_path / "gone", gates={"bias": True}))["exportable"]
+def test_only_a_saved_model_is_exportable(tmp_path):
+    assert ready_for_selection({"name": "m", "model_dir": str(tmp_path)})["exportable"]
+    assert not ready_for_selection({"name": "m", "model_dir": str(tmp_path / "gone")})["exportable"]
 
 
 # ---- the command and its alerts -----------------------------------------------------------

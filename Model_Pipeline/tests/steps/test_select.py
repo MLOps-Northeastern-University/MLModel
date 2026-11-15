@@ -54,8 +54,9 @@ def test_run_with_no_eligible_candidate_stops_the_run():
 
 
 def test_reads_the_metric_from_the_real_config():
-    step = SelectModel(load_config(), MemoryTracker())
-    assert step.metric == METRIC
+    cfg = load_config()
+    step = SelectModel(cfg, MemoryTracker())
+    assert step.metric == cfg["selection"]["metric"]
 
 
 def test_best_takes_the_lowest_score_for_an_error():

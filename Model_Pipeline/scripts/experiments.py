@@ -150,8 +150,12 @@ class CVResult:
         return {**named("cv", self.cv), **named("cv", self.fold_sd, suffix="_fold_sd"), **self.pretraining}
 
 
-def cross_validate(name, template, dev, split, seeds: Sequence[int], tracker) -> CVResult:
-    """Fit, predict and score a fresh copy of template on every fold, for every seed (see the top of this file)."""
+def cross_validate(name, template, dev, split, seeds: Sequence[int], tracker, charts=None) -> CVResult:
+    """Fit, predict and score a fresh copy of template on every fold, for every seed (see the top of this file).
+
+    charts: a reporting.writer.ChartWriter to give each fold's run its own charts (if its folds flag is
+    on), or None for none (tuning trials).
+    """
     fold_scores, seed_scores, frames, best_epochs, pretraining = {}, {}, [], [], []
     for seed in seeds:
         seed_frames = []
@@ -167,6 +171,9 @@ def cross_validate(name, template, dev, split, seeds: Sequence[int], tracker) ->
                 tracker.log_metrics({**named("val", scores), "run/fit_s": t1 - t0,
                                      "run/predict_s": time.perf_counter() - t1})
                 log_curves(tracker, model)
+                if charts is not None and charts.folds:
+                    charts.predictions(fold_frames, scores, f"{name}/seed-{seed}-fold-{k}",
+                                       f"{name}, seed {seed}, fold {k} (validation patients)")
                 best = (_training_result(model) or {}).get("best_epoch")
                 if best is not None:
                     best_epochs.append(int(best))

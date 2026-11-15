@@ -176,8 +176,10 @@ def test_a_gap_from_imbalance_fails_the_gate_alerts_and_reweighing_fixes_it(tmp_
     text = (folder / "bias_report.md").read_text(encoding="utf-8")
     assert "# Bias report" in text and "Trade-off" in text and "**fail**" in text
     assert (folder / "plots" / "fake_hourly__state_now__off_recall.png").stat().st_size > 0
-    saved = json.loads((folder / "candidates.json").read_text(encoding="utf-8"))
+    saved = json.loads((tmp_path / "candidates.json").read_text(encoding="utf-8"))   # the shared file
     assert [c["name"] for c in saved] == ["fake_hourly", "fake_hourly_reweighted"]
+    assert [c["gates_passed"] for c in saved] == [False, True]                       # what select reads
+    assert not (folder / "candidates.json").exists()
 
     run = tracker.find("bias")
     assert run.tags["owner"] == "P3"
@@ -232,7 +234,43 @@ def test_other_gates_on_a_candidate_are_kept(tmp_path, alerts):
     cfg, data, candidates = trained(tmp_path, max_recall_gap=1.0)
     candidates[0]["gates"] = {"validation": True}
     out = CheckBias(cfg, MemoryTracker()).run(candidates, data=data, split=SPLIT)
-    assert out[0]["gates"] == {"validation": True, "bias": True}
+    assert out[0]["gates"] == {"validation": True, "bias": True} and out[0]["gates_passed"] is True
+
+
+def test_gates_passed_needs_every_gate_so_a_failed_validation_still_blocks(tmp_path, alerts):
+    cfg, data, candidates = trained(tmp_path, max_recall_gap=1.0)
+    candidates[0]["gates"] = {"validation": False}
+    out = CheckBias(cfg, MemoryTracker()).run(candidates, data=data, split=SPLIT)   # bias itself passes
+    assert out[0]["gates"] == {"validation": False, "bias": True} and out[0]["gates_passed"] is False
+
+
+def test_a_validation_failure_set_by_evaluate_is_never_overwritten(tmp_path, alerts):
+    cfg, data, candidates = trained(tmp_path, max_recall_gap=1.0)
+    candidates[0]["gates_passed"] = False                           # how evaluate (P1) reports a failure
+    out = CheckBias(cfg, MemoryTracker()).run(candidates, data=data, split=SPLIT)
+    assert out[0]["gates"] == {"validation": False, "bias": True} and out[0]["gates_passed"] is False
+
+
+def test_the_reweighted_candidate_is_held_to_the_validation_gate(tmp_path, alerts):
+    cfg, data, candidates = trained(tmp_path, kind="imbalance", seed=1)
+    cfg["validation_gate"] = {"min": {"cv/state_now/off_auc": 0.99}}  # higher than any model here
+    CheckBias(cfg, MemoryTracker()).run(candidates, data=data, split=SPLIT)    # bias passes; select blocks it
+    saved = json.loads((tmp_path / "candidates.json").read_text(encoding="utf-8"))
+    mitigated = saved[1]
+    assert mitigated["gates"] == {"validation": False, "bias": True} and mitigated["gates_passed"] is False
+    assert "cv/state_now/off_auc" in mitigated["validation_failures"][0]
+
+
+def test_a_gate_that_judged_nothing_blocks_and_isnt_mitigated(tmp_path, alerts):
+    # Every group needs 7 patients; none has that many, so no check can be judged.
+    cfg, data, candidates = trained(tmp_path, max_recall_gap=1.0, min_slice_participants=7)
+    with pytest.raises(GateError, match="no candidate passed"):
+        CheckBias(cfg, MemoryTracker()).run(candidates, data=data, split=SPLIT)
+    saved = json.loads((tmp_path / "candidates.json").read_text(encoding="utf-8"))
+    assert [c["name"] for c in saved] == ["fake_hourly"]            # no pointless reweighted retrain
+    assert saved[0]["gates"]["bias"] is False and saved[0]["bias"]["judged"] == 0
+    assert any("nothing could be judged" in body for _, body in alerts)
+    assert "fail** (nothing judged)" in (tmp_path / "bias" / "bias_report.md").read_text(encoding="utf-8")
 
 
 def test_missing_predictions_say_to_run_train(tmp_path):

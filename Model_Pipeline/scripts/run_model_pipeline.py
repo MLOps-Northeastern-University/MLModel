@@ -41,7 +41,7 @@ from scripts.data.folds import read_split
 from scripts.data.loaders import load_dataset
 from scripts.steps.bias import CheckBias
 from scripts.steps.compare_production import CompareProduction
-from scripts.steps.evaluate import EvaluateModel, gate_failures
+from scripts.steps.evaluate import EvaluateModel
 from scripts.steps.explain import ExplainModels
 from scripts.steps.export import ExportModel
 from scripts.steps.register import RegisterModel, active_metrics
@@ -60,24 +60,14 @@ ALERT_PREFIX = "[MedNOVA model]"
 
 # ---- what joins the steps ----------------------------------------------------------------
 
-def ready_for_selection(cfg, candidate):
-    """The candidate with the two fields select.py reads, from what evaluate and bias wrote.
+def ready_for_selection(candidate):
+    """The candidate with exportable, which select.py reads and no step sets yet.
 
-    gates_passed: evaluate sets it from the validation gate, and bias records its own gate in
-    gates["bias"], so a candidate passes only both. A reweighted candidate bias added never went
-    through evaluate, so the validation gate is checked on its metrics here.
-
-    exportable: the model runs on the server (MODEL.md, "On the phone"), so nothing is converted
-    and every saved model can be exported. PLACEHOLDER until P4 settles the check (README,
-    Interfaces 4).
+    The model runs on the server (MODEL.md, "On the phone"), so nothing is converted and every
+    saved model can be exported. PLACEHOLDER until P4 settles the check (README, Interfaces 4).
+    gates_passed, the other field select reads, is set by bias from every gate.
     """
-    c = dict(candidate)
-    if "gates_passed" not in c:
-        c["validation_failures"] = gate_failures(c["metrics"], cfg["validation_gate"]["min"])
-        c["gates_passed"] = not c["validation_failures"]
-    c["gates_passed"] = c["gates_passed"] and (c.get("gates") or {}).get("bias", False)
-    c["exportable"] = Path(c["model_dir"]).is_dir()
-    return c
+    return {**candidate, "exportable": Path(candidate["model_dir"]).is_dir()}
 
 
 def package_model(cfg, candidate):
@@ -131,7 +121,7 @@ def run(cfg, tracker, release=True, data=None, split=None):
         with log_step(logger, "explain", owner="P3"):
             ExplainModels(cfg, tracker).run(candidates, data, split)
         with log_step(logger, "select a model", owner="P4"):
-            chosen = SelectModel(cfg, tracker).run([ready_for_selection(cfg, c) for c in candidates])
+            chosen = SelectModel(cfg, tracker).run([ready_for_selection(c) for c in candidates])
         with log_step(logger, "compare with production", owner="P4"):
             CompareProduction(cfg, tracker).run(chosen["metrics"], active_metrics(register.family_dir))
         with log_step(logger, "export", owner="P4"):

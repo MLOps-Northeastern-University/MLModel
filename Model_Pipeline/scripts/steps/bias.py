@@ -18,11 +18,23 @@ For every candidate train trained, from its predictions (artifacts/predictions/<
 By default the out-of-fold predictions are sliced, so every development patient counts, and the test
 patients stay unseen until the one run that scores them (bias.predictions: test reads those instead).
 
+A candidate passes only when at least one check was judged and none failed: a gate that could judge
+nothing (too few patients in every group) blocks, rather than passing by default.
+
 Writes artifacts/bias/: bias.json (every group's scores, each check, the mitigation and its cost),
-bias_report.md, plots/, and candidates.json (the candidates with their bias gate, mitigated ones
-added). Each candidate gets candidate["gates"]["bias"] (True or False) and candidate["bias"] (a summary).
-A failing candidate sends an alert; if no candidate passes, even after mitigation, the step raises
-GateError, which blocks the release.
+bias_report.md and plots/. The candidates go on in the one shared file, artifacts/candidates.json,
+which train writes and each later step reads and updates. Every candidate gets:
+
+    gates["bias"]   True or False
+    gates_passed    True only when every gate in gates passed: the field select reads
+    bias            a summary: what failed, and how many checks were judged
+
+Evaluate runs first and sets gates_passed for validation. That verdict is kept as gates["validation"],
+so a validation failure is never overwritten. A mitigated candidate, which evaluate never saw, is held
+to the same validation_gate.min with evaluate's own gate_failures.
+
+A failing candidate sends an alert. If no candidate passes the bias gate, even after mitigation, the
+step raises GateError, which blocks the release.
 
     python -m scripts.steps.bias [--config config/model.yaml]
 """
@@ -318,7 +330,9 @@ def evaluate_candidate(frames, slices, opts):
         overall[label] = overall_scores(scored, label, opts["threshold"])
         by_label[label] = {c: slice_scores(scored, label, c, opts["threshold"]) for c in columns}
     checks = check_gaps(by_label, opts["checks"], columns, opts)
-    return {"passed": not any(c["status"] == "fail" for c in checks), "checks": checks,
+    judged = sum(c["status"] != "not_judged" for c in checks)
+    failed = any(c["status"] == "fail" for c in checks)
+    return {"passed": judged > 0 and not failed, "judged": judged, "checks": checks,
             "overall": overall, "slices": by_label}
 
 
@@ -483,7 +497,9 @@ class CheckBias:
                     results[c["name"]] = result
                     self._log(c["name"], result)
                 out.append(with_gate(c, result))
-                if not result["passed"] and self._should_mitigate(c["name"]):
+                # Only a failed check has groups and answers to reweigh; "nothing judged" has none.
+                failed = any(r["status"] == "fail" for r in result["checks"])
+                if failed and self._should_mitigate(c["name"]):
                     mitigated, mit_result, summary = self._mitigate(c, result, data, split, templates)
                     results[mitigated["name"]] = mit_result
                     mitigations[c["name"]] = summary
@@ -492,7 +508,7 @@ class CheckBias:
             report = {"predictions": self.opts["predictions"], "split_hash": split.hash,
                       "settings": self.opts, "candidates": results, "mitigation": mitigations}
             write_json(report, self.out / "bias.json")
-            write_json(out, self.out / "candidates.json")
+            write_json(out, self.artifacts / "candidates.json")
             (self.out / "bias_report.md").write_text(render_report(report), encoding="utf-8")
             plot_dir = plot_results(results, self.opts, self.out / "plots")
             for path in (self.out / "bias.json", self.out / "bias_report.md", plot_dir):
@@ -543,6 +559,12 @@ class CheckBias:
             mit_result = evaluate_candidate(frames, slice_values(dev, self.opts["slice_columns"]),
                                             {**self.opts, "predictions": "cv"})
             self._log(mitigated["name"], mit_result)
+        minimums = (self.cfg.get("validation_gate") or {}).get("min")
+        if minimums:
+            # Evaluate never saw this candidate: hold it to the same validation gate.
+            from scripts.steps.evaluate import gate_failures
+            failures = gate_failures(mitigated["metrics"], minimums)
+            mitigated["gates_passed"], mitigated["validation_failures"] = not failures, failures
         summary = mitigation_summary(candidate, mitigated, result, mit_result, self.selection_metric)
         logger.info("mitigated %s: %s", name, "; ".join(
             f"{g['check']} gap {_fmt(g['before'])} -> {_fmt(g['after'])}" for g in summary["gaps"]),
@@ -561,15 +583,27 @@ class CheckBias:
         lines = [f"{name}: {c['label']}/{c['metric']} by {c['column']}: {c['worst_group']} {c['worst']:.3f} "
                  f"vs {c['best_group']} {c['best']:.3f}, gap {c['gap']:.3f} > {c['max_gap']}"
                  for name, r in results.items() for c in r["checks"] if c["status"] == "fail"]
+        lines += [f"{name}: nothing could be judged (too few hours or patients in every group)"
+                  for name, r in results.items() if not r["judged"]]
         if lines:
             notify("[Model pipeline] Bias gate failed", "\n".join(lines), self.cfg)
 
 
 def with_gate(candidate, result):
-    """A copy of the candidate with gates["bias"] and a short bias summary."""
+    """A copy of the candidate with gates["bias"], gates_passed and a short bias summary.
+
+    gates_passed is True only when every gate in gates passed (validation, bias, ...): the one field
+    select reads, so a failed bias check blocks the model. Evaluate runs first and sets gates_passed
+    for validation; that verdict is kept as gates["validation"], so it's never overwritten.
+    """
     c = dict(candidate)
-    c["gates"] = {**(c.get("gates") or {}), "bias": result["passed"]}
-    c["bias"] = {"passed": result["passed"],
+    gates = dict(c.get("gates") or {})
+    if "gates_passed" in c:
+        gates.setdefault("validation", bool(c["gates_passed"]))
+    gates["bias"] = result["passed"]
+    c["gates"] = gates
+    c["gates_passed"] = all(gates.values())
+    c["bias"] = {"passed": result["passed"], "judged": result["judged"],
                  "failed": [f"{r['label']}/{r['metric']} by {r['column']}: gap {r['gap']:.3f} > {r['max_gap']}"
                             for r in result["checks"] if r["status"] == "fail"],
                  "not_judged": sum(r["status"] == "not_judged" for r in result["checks"])}
@@ -602,7 +636,8 @@ def render_report(report):
     for name, r in report["candidates"].items():
         failed = sum(c["status"] == "fail" for c in r["checks"])
         not_judged = sum(c["status"] == "not_judged" for c in r["checks"])
-        lines.append(f"| {name} | {'pass' if r['passed'] else '**fail**'} | {failed} | {not_judged} |")
+        verdict = "pass" if r["passed"] else "**fail**" if failed else "**fail** (nothing judged)"
+        lines.append(f"| {name} | {verdict} | {failed} | {not_judged} |")
     lines.append("")
 
     for name, r in report["candidates"].items():

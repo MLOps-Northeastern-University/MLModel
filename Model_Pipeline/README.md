@@ -4,7 +4,8 @@ Trains the model behind Careportal's symptom timeline. From the watch's movement
 
 > **Status:** in progress.
 >
-> - **Built:** the contracts in `core/` (with the shared scores, `core/metrics.py`), the data loader, the patient split, three model families and the registry, training, tuning, hyperparameter sensitivity, the MLflow tracker, and selection, export, registry and the release gate (P4), evaluate with the validation gate (P1), and bias with its gate and explain (P3).
+> - **Built:** the contracts in `core/` (with the shared scores, `core/metrics.py`), the data loader, the patient split, three model families and the registry, training, tuning, hyperparameter sensitivity, the MLflow tracker, and selection, export, registry and the release gate (P4), and evaluate with the validation gate (P1).
+> - **Built (P3):** the bias step (slices, gate, reweighing) and the explain step (Shapley values over input groups, ablation), tested on synthetic data and a small test model family.
 > - **Wired (P5):** the run command goes through every step with alerts, and runs on GitHub Actions against the team's GCP project, logged to the hosted MLflow. It calls every real step in order: train, evaluate, bias, explain, select, compare, export, register.
 > - **Still a docstring:** `models/composite.py`.
 > - **Not run on the real data yet:** training, tuning and sensitivity are tested on synthetic data only.
@@ -22,7 +23,7 @@ pytest -q                               # synthetic data only, nothing downloade
 python -m scripts.run_model_pipeline --no-mlflow   # every step, without an MLflow server
 ```
 
-The run needs the data pipeline's outputs (`dvc pull` in `../Data_Pipeline`), the patient split (`paths.split_file`, made once with `python -m scripts.data.folds create`) and harnet10's weights (`MODEL_HARNET_HUB`, below). Without them it stops at train with a clear error.
+The run needs the data pipeline's outputs (`dvc pull` in `../Data_Pipeline`), the patient split (`paths.split_file`, made once with `python -m scripts.data.folds create`) harnet10's weights (`MODEL_HARNET_HUB`, below), and, while `train.use_tuned` is true, the tuned settings: run `python -m scripts.steps.tune` first. Without them it stops at train with a clear error.
 
 Or with only Docker: `docker compose up -d mlflow` for a local MLflow at <http://localhost:5001>, then `docker compose run --rm train` for the pipeline and `docker compose run --rm tests` for the tests.
 
@@ -179,6 +180,7 @@ scripts/
 │   └── memory_tracker.py  for tests
 ├── steps/                 one class per step, in the order they run
 ├── experiments.py         what train and tune share: cross-validation, scoring, the tuned-settings file
+├── reporting/             charts (scorecard, confusion matrices, model comparison), saved and attached to runs
 ├── utils/                 config, logging and file helpers
 ├── alerts.py              email (and Slack) alerts
 └── run_model_pipeline.py  runs the steps from the config
@@ -196,7 +198,7 @@ Letters are the components in the team plan.
 | Owner | Components | Files |
 |---|---|---|
 | P1 | A Data loader, B Splits, F Validation + gate | `data/loaders.py`, `data/folds.py`, `steps/evaluate.py` |
-| P2 | C Models + training, D Tuning, E Experiment tracking, G Sensitivity (hyperparameters) | `core/`, `models/`, `tracking/`, `experiments.py`, `steps/train.py`, `steps/tune.py`, `steps/sensitivity_hparams.py` |
+| P2 | C Models + training, D Tuning, E Experiment tracking, G Sensitivity (hyperparameters) | `core/`, `models/`, `tracking/`, `experiments.py`, `reporting/`, `steps/train.py`, `steps/tune.py`, `steps/sensitivity_hparams.py` |
 | P3 | H Bias detection + mitigation, G Sensitivity (SHAP, ablation) | `steps/bias.py`, `steps/explain.py` |
 | P4 | I Selection after bias, J Export + bundle, K Registry + rollback | `steps/select.py`, `steps/export.py`, `steps/compare_production.py`, `steps/register.py` |
 | P5 | L Docker + orchestration, M CI/CD, N Alerts, O Infrastructure | `run_model_pipeline.py`, `alerts.py`, Docker and CI files |
@@ -320,7 +322,7 @@ There's no `to_keras()` or phone export: the model runs on the server.
 | `manifest.json` | P4 | What the Backend needs to run and check the model: family, version, window spec version, labels, and the model folder's sha256 |
 | `stats.json` | P4 | The training data's statistics for drift, starting with the 7 hourly features |
 | `metrics.json` | P1 | The chosen candidate's `artifacts/evaluation/<name>/metrics.json`: train's `cv/` scores plus evaluate's 95% intervals (`_auc_lo`, `_auc_hi`), which the next run's release gate compares against |
-| `bias.json` | P3 | Metrics per slice and the mitigation result |
+| `bias.json` | P3 | Metrics per slice and the mitigation result: `artifacts/bias/bias.json` |
 
 harnet10 isn't in the bundle: its licence limits redistribution. The server loads its own pinned copy, and the model refuses one whose sha256 differs from training.
 
@@ -338,10 +340,36 @@ They share one cross-validation (`scripts/experiments.py`), so a tuning trial an
 | Step | Config | What it does | Writes |
 |---|---|---|---|
 | `tune` | `tune:` | One Optuna study (TPE, seeded) per listed candidate. Each trial is a cross-validation scored by `selection.metric`. Studies resume after a crash, and any change to the split, data, candidate or space starts a new one. Transformer trials that change only diary settings reuse each fold's pretrained body | `artifacts/tuning/` (studies, a trials table per candidate), `artifacts/tuned_params.json` |
-| `train` | `models:`, `train:` | A shuffled-label check first (a model must score near chance on shuffled labels), then every candidate cross-validated, refit on all development patients, and saved. With `use_tuned`, a tuned candidate trains with its tuned settings, refused if they were tuned on another split, data or config | `artifacts/models/`, `artifacts/predictions/`, `artifacts/candidates.json` |
+| `train` | `models:`, `train:` | A shuffled-label check first (a model must score near chance on shuffled labels), then every candidate cross-validated, refit on all development patients, and saved. With `use_tuned`, a tuned candidate trains with its tuned settings, refused if they were tuned on another split, data or config | `artifacts/models/`, `artifacts/predictions/`, `artifacts/candidates.json`, `artifacts/charts/` |
 | `sensitivity_hparams` | (reads the studies) | Each tuned setting's importance (fANOVA), plus plots: importance, score against each setting, score per trial | `artifacts/sensitivity/<candidate>/` |
 
 In MLflow, each step is a run with a child per candidate. train and tune go on to a child per fold (and tune per trial before that), with the scores above, fit times and each epoch's curves. For the transformer that includes pretraining's skill per target on the validation patients, so one pretraining can be compared with another. Runs carry the split's hash and a data fingerprint, so only comparable runs get compared. For a live look at the tuning studies, `optuna-dashboard sqlite:///artifacts/tuning/studies.db`.
+
+Charts (`train.charts`): every train run with predictions gets its own, under `charts/` in its MLflow artifacts and in `artifacts/charts/<candidate>/<run>/`:
+
+- **Scorecard:** every score for every label, pooled and within patients side by side, with what guessing would score marked.
+- **Confusion matrix per label:** for each diary answer, the share of its hours the model predicted as each class.
+- **Comparison** (on the `train` run): the candidates side by side on the metrics in `train.charts.compare`, with each one's spread across folds.
+
+Each fold run gets them (`folds: false` turns that off), each candidate's run gets them for all its folds together, and the final run gets them when the test patients are scored. MLflow's own chart view still compares any logged metric across runs. A chart that fails to draw is a warning, never a failed run.
+
+## Bias and explanations (P3)
+
+```bash
+python -m scripts.steps.bias      # after evaluate: reads artifacts/candidates.json and artifacts/predictions/
+python -m scripts.steps.explain   # after bias: explains each final model by its input groups
+```
+
+| Step | Config | What it does | Writes |
+|---|---|---|---|
+| `bias` | `bias:` | Joins each predicted hour to its patient's groups (`slice_columns`, from the hours table or else the patients table) and scores every group with Fairlearn's `MetricFrame`, using `core/metrics.py`'s scores plus each question's recall, precision and false-positive rate. Each check in `bias.checks` fails when the gap between the best and worst judged group is over its `max_gap`. A group is judged only with `min_slice_rows` hours and `min_slice_participants` patients. A failing candidate alerts and is retrained with reweighing as `<name>_reweighted`, a new candidate. No candidate passing raises `GateError` | `artifacts/bias/`: `bias.json`, `bias_report.md`, `plots/`; the updated `artifacts/candidates.json` |
+| `explain` | `explain:` | Exact Shapley values over each model's input groups (movement, doses and check-ins, patient fields, hourly features) for P(OFF), P(any tremor) and P(asleep), and the AUC drop when one group is left out | `artifacts/explain/<candidate>/` (`shap.json`, `shap.png`, `ablation.png`), `explain_report.md` |
+
+- **One candidates file, passed along.** Bias reads `artifacts/candidates.json` and writes it back with each candidate's `gates["bias"]` and `gates_passed`, which is true only when every gate passed, so select skips a candidate that failed bias. Evaluate's earlier `gates_passed` is kept as `gates["validation"]` and never overwritten. A `_reweighted` candidate, which evaluate never saw, is held to the same `validation_gate.min`.
+- **Nothing judged blocks.** A candidate passes only when at least one check was judged and none failed. If every group is too small to judge, the gate fails and alerts rather than passing by default, and no reweighted retrain is made, since there's nothing to reweigh.
+- **Out-of-fold predictions by default** (`bias.predictions: cv`), so every development patient counts and the test patients stay unseen.
+- **Reweighing fixes imbalance, not weak signal.** It weights each group's answers as if group and answer were independent (Kamiran and Calders), with weights from each fold's training patients only. It closes a gap a model learned from who is usually OFF; it can't close one where the movement shows OFF less clearly for a group. The report shows both gaps and the selection metric's change, so the trade-off is visible.
+- **Leaving a group out** shuffles it (movement within each patient, hourly features within each patient), removes it (events) or swaps it with another patient's (patient fields), repeated `explain.repeats` times.
 
 ## Adding your step
 
