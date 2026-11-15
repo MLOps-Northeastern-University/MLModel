@@ -5,7 +5,7 @@ Trains the model behind Careportal's symptom timeline. From the watch's movement
 > **Status:** in progress.
 >
 > - **Built:** the contracts in `core/` (with the shared scores, `core/metrics.py`), the data loader, the patient split, three model families and the registry, training, tuning, hyperparameter sensitivity, the MLflow tracker, and selection, export, registry and the release gate (P4), evaluate with the validation gate (P1), and bias with its gate and explain (P3).
-> - **Wired (P5):** the run command goes through every step with alerts, and runs on GitHub Actions against the team's GCP project, logged to the hosted MLflow. It still calls stand-ins for loading, training, evaluation and bias; the real steps are swapped in next.
+> - **Wired (P5):** the run command goes through every step with alerts, and runs on GitHub Actions against the team's GCP project, logged to the hosted MLflow. It calls every real step in order: train, evaluate, bias, explain, select, compare, export, register.
 > - **Still a docstring:** `models/composite.py`.
 > - **Not run on the real data yet:** training, tuning and sensitivity are tested on synthetic data only.
 >
@@ -19,8 +19,10 @@ With Python 3.13, from `Model_Pipeline/` (3.13 for PyTorch; the data pipeline st
 pip install torch==2.12.1 --index-url https://download.pytorch.org/whl/cpu   # or a CUDA build for a GPU
 pip install -r requirements.txt
 pytest -q                               # synthetic data only, nothing downloaded
-python -m scripts.run_model_pipeline --no-mlflow   # every step; stand-ins for the unbuilt ones
+python -m scripts.run_model_pipeline --no-mlflow   # every step, without an MLflow server
 ```
+
+The run needs the data pipeline's outputs (`dvc pull` in `../Data_Pipeline`), the patient split (`paths.split_file`, made once with `python -m scripts.data.folds create`) and harnet10's weights (`MODEL_HARNET_HUB`, below). Without them it stops at train with a clear error.
 
 Or with only Docker: `docker compose up -d mlflow` for a local MLflow at <http://localhost:5001>, then `docker compose run --rm train` for the pipeline and `docker compose run --rm tests` for the tests.
 

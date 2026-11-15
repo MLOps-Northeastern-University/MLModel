@@ -5,33 +5,48 @@
     python -m scripts.run_model_pipeline --no-mlflow     # without an MLflow server
     python -m scripts.run_model_pipeline --no-register   # every gate, but release nothing (CI on PRs)
 
-Runs the steps in order: load, train and tune, evaluate, bias, select, compare
-with production, export, register. The comparison comes before export, so a
-model that can't replace the active one is never packaged.
+Runs the steps in order, each logged to MLflow as a child of one model_pipeline run:
 
-Load, train, evaluate and bias aren't built yet (P1, P2, P3), so stand-ins make
-outputs in the shape the next step expects: one candidate with placeholder
-metrics and a fake model file. Each stand-in is replaced by the real step once
-its owner merges it. A step that can't go on raises a core/errors.py error; the
-run then stops with exit code 1.
+    train      every candidate cross-validated, refit and saved (P2)
+    evaluate   intervals, plots, metrics.json and the validation gate (P1)
+    bias       slices, the bias gate, and reweighted candidates for the ones that fail (P3)
+    explain    which input groups drive each model (P3); reports only, never a gate
+    select     the best candidate that passed every gate (P4)
+    compare    the release gate against the active version (P4)
+    export     the release bundle (P4)
+    register   the bundle as the next version, made active (P4)
 
-Alerts (scripts/alerts.py) go to the team when a gate fails, when the run
-crashes, and when a model is released. Runs that only check send none on success.
+The comparison comes before export, so a model that can't replace the active one is never
+packaged. Every step reads the data and the patient split itself (paths in config/model.yaml), so
+the data must be there first: dvc pull in ../Data_Pipeline. Tuning isn't part of a run: run
+scripts/steps/tune.py on its own, and train uses its settings when train.use_tuned is true.
+
+A step that can't go on raises a core/errors.py error; the run then stops with exit code 1.
+Alerts (scripts/alerts.py) go to the team when a gate fails, when the run crashes, and when a
+model is released. Runs that only check send none on success.
 """
 
 import argparse
 import os
 import platform
+import shutil
 import sys
 import traceback
 import uuid
+from pathlib import Path
 
 from scripts.alerts import notify
 from scripts.core.errors import GateError, PipelineError
+from scripts.data.folds import read_split
+from scripts.data.loaders import load_dataset
+from scripts.steps.bias import CheckBias
 from scripts.steps.compare_production import CompareProduction
+from scripts.steps.evaluate import EvaluateModel, gate_failures
+from scripts.steps.explain import ExplainModels
 from scripts.steps.export import ExportModel
 from scripts.steps.register import RegisterModel, active_metrics
 from scripts.steps.select import SelectModel
+from scripts.steps.train import TrainModels
 from scripts.tracking.memory_tracker import MemoryTracker
 from scripts.tracking.mlflow_tracker import MlflowTracker
 from scripts.utils.config import load_config
@@ -39,75 +54,89 @@ from scripts.utils.logging_setup import configure_logging, get_logger, log_conte
 
 logger = get_logger("run_model_pipeline")
 
-# Every stand-in metric gets this score, so the stand-in candidate passes select.
-STAND_IN_SCORE = 0.5
 # Starts every alert's subject, to filter them in the inbox.
 ALERT_PREFIX = "[MedNOVA model]"
 
 
-# ---- stand-ins, until P1, P2 and P3 merge their steps ------------------------------------
+# ---- what joins the steps ----------------------------------------------------------------
 
-def stand_in_load(cfg):
-    """PLACEHOLDER (P1, data/loaders.py): no data is read yet.
+def ready_for_selection(cfg, candidate):
+    """The candidate with the two fields select.py reads, from what evaluate and bias wrote.
 
-    Returns:
-        (None, dict): The dataset, and its training statistics for the bundle.
+    gates_passed: evaluate sets it from the validation gate, and bias records its own gate in
+    gates["bias"], so a candidate passes only both. A reweighted candidate bias added never went
+    through evaluate, so the validation gate is checked on its metrics here.
+
+    exportable: the model runs on the server (MODEL.md, "On the phone"), so nothing is converted
+    and every saved model can be exported. PLACEHOLDER until P4 settles the check (README,
+    Interfaces 4).
     """
-    logger.warning("Stand-in: no data read from %s", cfg["resolved_paths"]["features_csv"])
-    return None, {"rows": 0, "features": {}}
+    c = dict(candidate)
+    if "gates_passed" not in c:
+        c["validation_failures"] = gate_failures(c["metrics"], cfg["validation_gate"]["min"])
+        c["gates_passed"] = not c["validation_failures"]
+    c["gates_passed"] = c["gates_passed"] and (c.get("gates") or {}).get("bias", False)
+    c["exportable"] = Path(c["model_dir"]).is_dir()
+    return c
 
 
-def stand_in_train(cfg, dataset):
-    """PLACEHOLDER (P2, steps/train.py and tune.py): one candidate and a fake model file."""
-    model_path = cfg["resolved_paths"]["artifacts_dir"] / "stand_in" / "model.bin"
-    model_path.parent.mkdir(parents=True, exist_ok=True)
-    model_path.write_bytes(b"stand-in model")
-    metrics = {rule["metric"]: STAND_IN_SCORE for rule in cfg["release_gate"]["rules"]}
-    metrics[cfg["selection"]["metric"]] = STAND_IN_SCORE
-    logger.warning("Stand-in: one candidate with every metric at %.1f", STAND_IN_SCORE)
-    return [{"name": "stand-in", "metrics": metrics, "model_path": model_path,
-             "gates_passed": False, "exportable": True}]
+def package_model(cfg, candidate):
+    """The saved model folder as one .tar.gz, the single file export.py bundles.
+
+    PLACEHOLDER until export.py takes the model folder itself (README, Interfaces 4).
+    """
+    folder = Path(cfg["resolved_paths"]["artifacts_dir"]) / "package"
+    folder.mkdir(parents=True, exist_ok=True)
+    archive = shutil.make_archive(str(folder / candidate["name"]), "gztar", root_dir=candidate["model_dir"])
+    return Path(archive)
 
 
-def stand_in_evaluate(cfg, dataset, candidates):
-    """PLACEHOLDER (P1, steps/evaluate.py): every candidate passes the validation gate."""
-    logger.warning("Stand-in: validation gate not checked")
-    return [{**c, "gates_passed": True} for c in candidates]
-
-
-def stand_in_bias(cfg, dataset, candidates):
-    """PLACEHOLDER (P3, steps/bias.py): every candidate passes the bias gate."""
-    logger.warning("Stand-in: bias gate not checked")
-    return candidates
+def training_stats(cfg, split, data=None):
+    """The 7 hourly features' statistics over the development patients, for drift checks."""
+    if data is None:
+        data = load_dataset(cfg, groups=("features",), participants=split.development)
+    else:
+        data = data.subset(split.development)
+    table = data.features.astype(float)
+    return {"rows": len(table), "participants": len(split.development),
+            "features": {name: {"mean": col.mean(), "std": col.std(), "min": col.min(),
+                                "p50": col.median(), "max": col.max()}
+                         for name, col in table.items()}}
 
 
 # ---- the run -----------------------------------------------------------------------------
 
-def run(cfg, tracker, release=True):
+def run(cfg, tracker, release=True, data=None, split=None):
     """Run every step in order and return the released version.
 
     With release False, the run stops after export: every gate is checked and
     the bundle built, but nothing is registered, and it returns None.
 
+    Args:
+        data, split: A Dataset and patient split to use instead of reading them from
+            the config's paths (tests pass small ones).
+
     Raises:
         PipelineError: A step couldn't go on, such as a failed gate (GateError).
     """
     register = RegisterModel(cfg, tracker)
-    with tracker.run("model_pipeline", tags={"owner": "P5"}):
-        with log_step(logger, "load data", owner="P1"):
-            dataset, training_stats = stand_in_load(cfg)
-        with log_step(logger, "train and tune", owner="P2"):
-            candidates = stand_in_train(cfg, dataset)
+    split = split or read_split(cfg)
+    with tracker.run("model_pipeline", tags={"owner": "P5", "split_hash": split.hash}):
+        with log_step(logger, "train", owner="P2"):
+            candidates = TrainModels(cfg, tracker).run(data, split)
         with log_step(logger, "evaluate", owner="P1"):
-            candidates = stand_in_evaluate(cfg, dataset, candidates)
+            candidates = EvaluateModel(cfg, tracker).run(candidates)
         with log_step(logger, "check bias", owner="P3"):
-            candidates = stand_in_bias(cfg, dataset, candidates)
+            candidates = CheckBias(cfg, tracker).run(candidates, data, split)
+        with log_step(logger, "explain", owner="P3"):
+            ExplainModels(cfg, tracker).run(candidates, data, split)
         with log_step(logger, "select a model", owner="P4"):
-            chosen = SelectModel(cfg, tracker).run(candidates)
+            chosen = SelectModel(cfg, tracker).run([ready_for_selection(cfg, c) for c in candidates])
         with log_step(logger, "compare with production", owner="P4"):
             CompareProduction(cfg, tracker).run(chosen["metrics"], active_metrics(register.family_dir))
         with log_step(logger, "export", owner="P4"):
-            bundle_dir = ExportModel(cfg, tracker).run(chosen, chosen["model_path"], training_stats)
+            bundle_dir = ExportModel(cfg, tracker).run(chosen, package_model(cfg, chosen),
+                                                       training_stats(cfg, split, data))
         if not release:
             logger.info("Not registered: --no-register")
             return None

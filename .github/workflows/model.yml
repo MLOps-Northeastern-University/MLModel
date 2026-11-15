@@ -68,8 +68,8 @@ jobs:
           token_format: id_token
           id_token_audience: ${{ vars.MLFLOW_TRACKING_URI }}
           id_token_include_email: true
-      # dvc pull goes here once the shared DVC remote is set up (P5_Setup_Plan.md, step 4).
-      # Until then the load step is a stand-in and reads nothing.
+      # dvc pull goes here once the data and the patient split are in the bucket (P5_Setup_Plan.md,
+      # step 4). Until then the run stops at train: there's no data on the runner.
       - name: Run the model pipeline
         id: pipeline
         env:
