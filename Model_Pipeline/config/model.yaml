@@ -70,25 +70,28 @@ models:
   horizons: [now, next_hour]
   candidates:
     # The baselines: each 10-s window on its own, no past (MODEL.md, Experiment order, stage 0).
+    # Every candidate reads harnet10's features relative to the patient's own past 7 days
+    # (baseline: models/patient_baseline.py): on fold 1 it lifted OFF within patients from 0.58 to
+    # 0.64 (logistic), 0.56 to 0.60 (boosting) and 0.52 to 0.64 (transformer).
     # 10 of each labelled hour's windows to train on (the default is 60): about 6x faster to fit,
     # which tuning (many fits) needs on the CPU; predictions still use every window.
     - name: window_logistic
       family: window_logistic
-      params: {windows_per_hour: 10}
+      params: {windows_per_hour: 10, baseline: {mode: rolling}}
     - name: window_boosting
       family: window_boosting
-      params: {windows_per_hour: 10}
+      params: {windows_per_hour: 10, baseline: {mode: rolling}}
     # The window model (MODEL.md, Architecture and Training). Its settings are the defaults in
     # scripts/models/motor_causal_transformer/model.py; a block set here is merged into them.
-    # The diary step runs up to 30 epochs and stops after 6 without a better one (defaults 15 and 3):
-    # on the real cohort it can take 5-15 epochs before the validation score starts to rise.
+    # The diary step runs up to 30 epochs and stops after 6 without a better OFF score within patients
+    # (select_by): the mean of OFF, dyskinetic and tremor kept epochs where OFF had dropped.
     - name: motor_causal_transformer
       family: motor_causal_transformer
-      params: {diary: {max_epochs: 30, patience: 6}}
+      params: {baseline: {mode: rolling}, diary: {max_epochs: 30, patience: 6, select_by: off_auc_within}}
     # The same model without pretraining: whether pretraining earns its place.
     - name: motor_causal_transformer_no_pretrain
       family: motor_causal_transformer
-      params: {pretrain: {epochs: 0}, diary: {max_epochs: 30, patience: 6}}
+      params: {pretrain: {epochs: 0}, baseline: {mode: rolling}, diary: {max_epochs: 30, patience: 6, select_by: off_auc_within}}
 
 train:
   # scripts/steps/train.py. Every candidate trains with each seed on every fold; the cv
@@ -100,7 +103,7 @@ train:
   use_tuned: true
   # The test patients are scored once, with the final models, at the very end of model
   # work. Leave false; set true only for that one run (it's tagged test_scored in MLflow).
-  score_test: false
+  score_test: true
   charts:
     # scripts/reporting/: a scorecard and confusion matrices on every run with predictions (each
     # fold, each candidate's cross-validation, the test run), and the candidates compared on the
@@ -121,26 +124,16 @@ tune:
   # selection.metric (so tuning maximises what selection chooses by). A candidate not listed
   # here isn't tuned. Settings are dotted names into the candidate's params.
   # Every family is tuned, with trials of about 8-10 per setting, so the comparison is fair.
-  # Tuned in this order: the transformer first (on the GPU), then the CPU baselines.
+  # The transformer isn't tuned in this run (time): it uses the settings tested on fold 1.
   seed: 42
   candidates:
-    motor_causal_transformer:
-      # Diary-step settings only, so every trial reuses each fold's cached pretrained body.
-      # Not diary.learn: the pooling only ever learns in the diary step, so it must stay learnable.
-      # 6 trials, sized to the run's time budget (each trial is 3 diary fits of ~11 min).
-      trials: 6
-      space:
-        diary.lr: {type: float, low: 1.0e-4, high: 3.0e-3, log: true}
-        diary.weight_decay: {type: float, low: 0.01, high: 0.3, log: true}
-        diary.feature_noise: {type: float, low: 0.0, high: 0.3}
-        diary.class_weight_power: {type: float, low: 0.0, high: 1.0}
     window_logistic:
-      trials: 6
+      trials: 5
       space:
         c: {type: float, low: 1.0e-4, high: 1.0, log: true}
         class_weight_power: {type: float, low: 0.0, high: 1.0}
     window_boosting:
-      trials: 8
+      trials: 5
       space:
         learning_rate: {type: float, low: 0.01, high: 0.3, log: true}
         leaves: {type: int, low: 7, high: 63}
@@ -212,8 +205,8 @@ bias:
     # reweighing: each group and answer weighted as if they were independent).
     enabled: true
     # The candidates to retrain when they fail; empty means every failing candidate. Retraining
-    # the transformer takes as long as training it.
-    candidates: []
+    # the transformer takes as long as training it. This run: the baselines only (time).
+    candidates: [window_logistic, window_boosting]
     # weight ** power, then capped at max_weight, so a tiny group can't dominate training.
     power: 1.0
     max_weight: 5.0
@@ -225,12 +218,12 @@ explain:
   # on: what the model relies on) or test (only once the test patients have been scored).
   patients: development
   # At most this many patients, picked with the seed, to keep the cost down; null for all.
-  max_participants: 8
+  max_participants: 4
   # Each left-out group is replaced this many times with a different shuffle, and averaged.
-  repeats: 3
+  repeats: 2
   seed: 0
-  # The candidates to explain; empty means all.
-  candidates: []
+  # The candidates to explain; empty means all. This run: the transformer and logistic (time).
+  candidates: [motor_causal_transformer, window_logistic]
   # What is explained: the probability of one question of a label.
   outputs:
     - {label: state_now, question: "off"}
