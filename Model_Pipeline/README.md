@@ -483,7 +483,7 @@ The transformer's test scorecard: [`transformer_scorecard_test.png`](docs/result
 | Leakage check | **Passed:** boosting on shuffled labels stayed within 0.40–0.60 within patients |
 | Validation | **Failed** for both: pooled OFF AUC 0.379 and 0.360, under 0.5 (see above) |
 | Bias | **Failed** for both (details below) |
-| Release | No candidate passed, so select stopped the run. Logistic was then released by hand as version 1 of `parkinsons-risk`, with the best within-patient OFF AUC. That run is `manual_release` in MLflow, tagged as an override with both gate failures |
+| Release | No candidate passed, so select stopped the run. Logistic was then released by hand as version 1 of `parkinsons-risk`, with the best within-patient OFF AUC. That run is `manual_release` in MLflow, tagged as an override with both gate failures. The bundle is in the team's registry, `gs://team17-mlops-neu-models/parkinsons-risk/v1/`, and `active.json` names it, so `python -m scripts.steps.register status` and `rollback` work on it |
 
 The validation gate judges pooled AUC, which the patient baseline pushes below 0.5, while selection and the leakage check judge within patients.
 
