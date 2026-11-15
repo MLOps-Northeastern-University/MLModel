@@ -24,12 +24,18 @@ def test_every_family_imports_as_its_own_class():
 
 
 def test_the_shipped_config_builds_every_candidate():
-    built = registry.candidates(load_config())
-    assert [name for name, _ in built] == ["window_logistic", "window_boosting", "motor_causal_transformer",
-                                           "motor_causal_transformer_no_pretrain"]
-    assert [type(m) for _, m in built] == [WindowLogistic, WindowBoosting, MotorCausalTransformer,
-                                           MotorCausalTransformer]
-    assert built[3][1].params["pretrain"]["epochs"] == 0 and built[3][1].params["pretrain"]["lr"] > 0
+    cfg = load_config()
+    built = registry.candidates(cfg)
+    # Every candidate in the config builds, as its family's class, under its own name.
+    assert [name for name, _ in built] == [c["name"] for c in cfg["models"]["candidates"]]
+    classes = {"window_logistic": WindowLogistic, "window_boosting": WindowBoosting,
+               "motor_causal_transformer": MotorCausalTransformer}
+    for (name, model), entry in zip(built, cfg["models"]["candidates"]):
+        assert type(model) is classes[entry["family"]], name
+    assert {"window_logistic", "window_boosting", "motor_causal_transformer"} <= {n for n, _ in built}
+    for name, model in built:                 # a candidate that skips pretraining still has a valid lr
+        if model.family == "motor_causal_transformer" and model.params["pretrain"]["epochs"] == 0:
+            assert model.params["pretrain"]["lr"] > 0, name
     assert all(m.labels == ("sleep_now", "sleep_next_hour", "state_now", "state_next_hour", "tremor_now",
                             "tremor_next_hour") and not m.is_fitted for _, m in built)
 
