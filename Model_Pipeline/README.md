@@ -455,7 +455,62 @@ Every step logged to the team's hosted MLflow in the experiment `parkinsons-risk
 
 ### Results
 
-To be filled in from the 2026-11-15 run: each model's cross-validated and test scores, the chosen model, and the bias and explain findings, with the charts from MLflow.
+The run that produced these (2026-11-15) trained logistic regression and the transformer. Boosting was left out to save time, after its leakage check passed. Everything is in MLflow (experiment `parkinsons-risk`), and the charts below are copied from there into [`docs/results/`](docs/results/).
+
+| | OFF within patients | OFF next hour, within | Tremor (any), pooled | Asleep | OFF pooled |
+|---|---|---|---|---|---|
+| **Logistic**, development patients (2-fold CV) | **0.638** | 0.622 | 0.670 | 0.899 | 0.379 |
+| **Logistic**, the 10 test patients | 0.574 | 0.621 | 0.738 | 0.935 | 0.535 |
+| Transformer, development patients (2-fold CV) | 0.567 | 0.602 | 0.665 | 0.906 | 0.360 |
+| Transformer, the 10 test patients | 0.503 | 0.604 | 0.740 | 0.950 | 0.566 |
+
+All AUCs; 0.5 is guessing.
+
+- **Sleep is easy, tremor works, OFF is hard.** Asleep scores 0.90–0.95 and any tremor 0.67–0.74. OFF within patients is above guessing but modest: 0.64 on the development patients and 0.57 on the test patients for logistic.
+- **Logistic beat the transformer** on the selection metric (0.638 against 0.567). The transformer's two folds disagreed: 0.685 on fold 1 but 0.435 on fold 2.
+- **The pooled OFF AUC is below 0.5** for both. Comparing each patient with their own past removes how much each patient moves, which pooled AUC otherwise rewards. Patients who move less are OFF more often, so pooled hours rank backwards. Within patients, where the app works, it's above 0.5.
+
+![The two models compared on the cross-validated scores](docs/results/comparison.png)
+
+![Logistic regression on the 10 test patients, pooled and within patients](docs/results/logistic_scorecard_test.png)
+
+The transformer's test scorecard: [`transformer_scorecard_test.png`](docs/results/transformer_scorecard_test.png). The ROC curves, with 95% intervals from resampling patients: [`logistic_roc.png`](docs/results/logistic_roc.png).
+
+**The gates:**
+
+| Gate | Result |
+|---|---|
+| Leakage check | **Passed:** boosting on shuffled labels stayed within 0.40–0.60 within patients |
+| Validation | **Failed** for both: pooled OFF AUC 0.379 and 0.360, under 0.5 (see above) |
+| Bias | **Failed** for both (details below) |
+| Release | No candidate passed, so select stopped the run. Logistic was then released by hand as version 1 of `parkinsons-risk`, with the best within-patient OFF AUC. That run is `manual_release` in MLflow, tagged as an override with both gate failures |
+
+The validation gate judges pooled AUC, which the patient baseline now pushes below 0.5. The next change is to judge within-patient AUC, the score selection uses, as the leakage check already does.
+
+**Bias.** Each group's OFF AUC is pooled within that group, so most sit below 0.5 for the reason above. The gaps between groups are still real:
+
+- **DBS:** OFF scored 0.23 for patients without DBS against 0.47 with (logistic), a gap of 0.23 against the 0.15 allowed.
+- **Visit type:** mixed visits 0.30 against inpatients 0.49.
+- **Hoehn & Yahr:** any tremor scored 0.60 at stage 2 against 0.77 at stage 3.
+
+Reweighing was off in this run to save time. Without DBS, OFF may simply show less clearly in the movement, which reweighing can't fix. The full tables are in `artifacts/bias/bias_report.md`.
+
+![Logistic regression's OFF AUC per patient group](docs/results/logistic_bias_off.png)
+
+Tremor per group: [`logistic_bias_tremor.png`](docs/results/logistic_bias_tremor.png).
+
+**What the transformer relies on.** Movement carries most of every answer. Doses and check-ins add a little to OFF and tremor and more to sleep, and the patient fields add nothing. Logistic regression reads movement only, so its chart has one bar.
+
+![The transformer's Shapley values by input group](docs/results/transformer_shap.png)
+
+**Tuning.** 3 trials each for logistic regression and boosting. For logistic regression, how strongly rare answers are weighted (`class_weight_power`, importance 0.62) mattered more than the regularisation strength (`c`, 0.38). With only 3 trials, that's a rough guide: [`logistic_sensitivity.png`](docs/results/logistic_sensitivity.png).
+
+**Next:**
+
+- Judge the validation and bias gates on within-patient AUC.
+- Run with more folds and seeds, and boosting back in.
+- Turn reweighing on.
+- Check whether the transformer's weak fold 2 comes from a few patients.
 
 ## Adding your step
 
