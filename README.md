@@ -78,7 +78,7 @@ Every PR and every push to `dev` or `main` runs [.github/workflows/checks.yml](.
 | Data pipeline tests | flake8, pytest with an 85% coverage floor, and `dvc dag`, on Python 3.11 |
 | Model pipeline tests | flake8 and pytest on Python 3.11. The coverage floor is 0 while the steps are being built, and goes up to 85. |
 
-A second workflow, [.github/workflows/model.yml](.github/workflows/model.yml), runs the model pipeline itself in the team's GCP project and emails the team when it fails and when training finishes. For now it only runs by hand. How it works, its settings, and how to open the hosted MLflow: [Model_Pipeline/README.md, "Running in the cloud"](Model_Pipeline/README.md#running-in-the-cloud).
+A second workflow, [.github/workflows/model.yml](.github/workflows/model.yml), runs the model pipeline itself in the team's GCP project and emails the team when it fails and when training finishes. It runs on the way to `main`: on a pull request into `main` (checks only) and on the merge (trains and releases). How it works, its settings, and how to open the hosted MLflow: [Model_Pipeline/README.md, "Running in the cloud"](Model_Pipeline/README.md#running-in-the-cloud).
 
 Dependabot opens PRs to keep the workflow's actions up to date.
 

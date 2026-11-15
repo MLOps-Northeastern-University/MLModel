@@ -102,9 +102,15 @@ Then open <http://localhost:5001>, and leave the command running while you use i
 2. Signs in to GCP as the `training` service account through Workload Identity Federation, so there's no key file, and gets an ID token for the hosted MLflow.
 3. Runs `python -m scripts.run_model_pipeline`, logged to the hosted MLflow. A failed gate fails the job.
 4. Uploads `artifacts/` and `logs/` as the run's `model-run` artifact, even when it fails.
-5. On a push to `dev` or `main` only: releases the model, and pushes the training image as `ml/training:<commit>`.
+5. On a push to `main` only: releases the model, and pushes the training image as `ml/training:<commit>`.
 
-**For now it only runs by hand:** Actions → Model → Run workflow. That button shows once the workflow is on `main`. The triggers for every pull request and push are in the file, commented out, until the real steps are merged.
+**When it runs:** when `Model_Pipeline/**` or `Data_Pipeline/dvc.lock` changes on the way to `main`:
+
+- a pull request into `main` (`dev` → `main` at release time) checks every gate and releases nothing;
+- the merge into `main` trains, checks and releases;
+- Actions → Model → Run workflow checks any branch, and releases nothing.
+
+Work on `dev` doesn't start it; `checks.yml` tests every pull request. To run it for `dev` too, add `dev` to both `branches` lists in the workflow.
 
 ### Settings
 

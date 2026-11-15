@@ -1,23 +1,24 @@
 name: Model
 
-# Trains and checks the model. Pull requests run every gate but release nothing;
-# a push to dev or main also releases the model and pushes the training image to
-# Artifact Registry.
+# Trains and checks the model, when the model's code or data changes on its way to main:
 #
-# Manual only for now (Actions → Model → Run workflow), so it releases nothing.
-# Once the real steps are in, turn it on for every change by uncommenting:
+#   - a pull request into main (dev → main at release time) runs every gate but releases
+#     nothing, so a broken pipeline shows before main changes;
+#   - a push to main (the merge) also releases the model and pushes the training image to
+#     Artifact Registry;
+#   - Actions → Model → Run workflow checks any branch, and releases nothing.
+#
+# Work on dev doesn't start it: checks.yml tests every PR. A new Data_Pipeline/dvc.lock
+# counts as a change, so new data retrains too. To run it for dev as well, add dev to both
+# branches lists.
 on:
-  # pull_request:
-  #   paths: [Model_Pipeline/**, Data_Pipeline/dvc.lock, .github/workflows/model.yml]
-  # push:
-  #   branches: [dev, main]
-  #   paths: [Model_Pipeline/**, Data_Pipeline/dvc.lock, .github/workflows/model.yml]
-  workflow_dispatch:
-  # TEMPORARY: tests the workflow before it's on main (the Run button only shows there).
-  # Remove before merging.
+  pull_request:
+    branches: [main]
+    paths: [Model_Pipeline/**, Data_Pipeline/dvc.lock, .github/workflows/model.yml]
   push:
-    branches: [basim/cicd-p5]
-    paths: [Model_Pipeline/**, .github/workflows/model.yml]
+    branches: [main]
+    paths: [Model_Pipeline/**, Data_Pipeline/dvc.lock, .github/workflows/model.yml]
+  workflow_dispatch:
 
 permissions:
   contents: read
