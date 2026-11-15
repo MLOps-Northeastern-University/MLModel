@@ -8,29 +8,64 @@ next version and makes it active; rolling back makes the previous version
 active again. The active version's metrics.json is what the next run's release
 gate (compare_production.py) compares against.
 
-PLACEHOLDERS, until the team decides:
-- paths.registry_dir is a local folder. It moves to the models bucket or the
-  Artifact Registry bundles repository.
-- registry.backend_url is empty, because the Backend has no endpoint for new
-  model versions yet, so telling the Backend is skipped with a warning.
+Where it lives: paths.registry_dir, a local folder, on a laptop and in tests;
+MODEL_REGISTRY replaces it, and CI sets that to gs://team17-mlops-neu-models, so
+releases persist between runs. fsspec (with gcsfs for gs://) reads and writes
+both the same way.
+
+    python -m scripts.steps.register status      the versions and the active one
+    python -m scripts.steps.register rollback    the version before the active one
+
+PLACEHOLDER: registry.backend_url is empty, because the Backend has no endpoint
+for new model versions yet, so telling the Backend is skipped with a warning.
 """
 
 
-import shutil
+import argparse
+import json
+import os
+import sys
 from pathlib import Path
 
+import fsspec
+
 from scripts.core.errors import PipelineError
-from scripts.utils.file_io import read_json, write_json
+from scripts.utils.config import load_config
 from scripts.utils.logging_setup import get_logger
 
 logger = get_logger(__name__)
 
 
+def _fs(location):
+    """The filesystem and the path inside it, for a local folder or a gs:// path."""
+    return fsspec.core.url_to_fs(str(location))
+
+
+def _join(location, *parts):
+    """location/part/part, the same way for a folder and a gs:// path."""
+    return "/".join([str(location).rstrip("/"), *parts])
+
+
+def _read_json(location):
+    fs, path = _fs(location)
+    with fs.open(path, "r", encoding="utf-8") as f:
+        return json.load(f)
+
+
+def _write_json(obj, location):
+    fs, path = _fs(location)
+    fs.makedirs(path.rsplit("/", 1)[0], exist_ok=True)
+    with fs.open(path, "w", encoding="utf-8") as f:
+        json.dump(obj, f, indent=2)
+
+
 def versions(family_dir):
     """The released version numbers, oldest first: v1, v2 ... -> [1, 2, ...]."""
-    if not family_dir.is_dir():
+    fs, root = _fs(family_dir)
+    if not fs.isdir(root):
         return []
-    return sorted(int(p.name[1:]) for p in family_dir.glob("v*") if p.name[1:].isdigit())
+    names = [p.rstrip("/").rsplit("/", 1)[-1] for p in fs.ls(root, detail=False)]
+    return sorted(int(n[1:]) for n in names if n.startswith("v") and n[1:].isdigit())
 
 
 def next_version(family_dir):
@@ -40,15 +75,16 @@ def next_version(family_dir):
 
 def active_version(family_dir):
     """The version patients get, or None before the first release."""
-    path = family_dir / "active.json"
-    return read_json(path)["version"] if path.is_file() else None
+    location = _join(family_dir, "active.json")
+    fs, path = _fs(location)
+    return _read_json(location)["version"] if fs.exists(path) else None
 
 
 def set_active(family_dir, version):
     """Make version the one patients get."""
     if version not in versions(family_dir):
         raise PipelineError(f"version {version} isn't in the registry")
-    write_json({"version": version}, family_dir / "active.json")
+    _write_json({"version": version}, _join(family_dir, "active.json"))
 
 
 def active_metrics(family_dir):
@@ -56,19 +92,26 @@ def active_metrics(family_dir):
     version = active_version(family_dir)
     if version is None:
         return None
-    return read_json(family_dir / f"v{version}" / "metrics.json")
+    return _read_json(_join(family_dir, f"v{version}", "metrics.json"))
 
 
 def publish(bundle_dir, family_dir, version):
-    """Copy the bundle in as v<version>, with its version and model_id in its manifest."""
-    target = family_dir / f"v{version}"
-    if target.exists():
+    """Upload the bundle as v<version>, with its version and model_id in its manifest."""
+    bundle_dir = Path(bundle_dir)
+    target = _join(family_dir, f"v{version}")
+    fs, target_path = _fs(target)
+    if fs.exists(target_path):
         raise PipelineError(f"{target} already exists; a released version is never overwritten")
-    shutil.copytree(bundle_dir, target)
-    manifest = read_json(target / "manifest.json")
+    manifest = json.loads((bundle_dir / "manifest.json").read_text(encoding="utf-8"))
     manifest["version"] = version
     manifest["model_id"] = f"{manifest['family']}-v{version}"
-    write_json(manifest, target / "manifest.json")
+    for path in sorted(p for p in bundle_dir.rglob("*") if p.is_file()):
+        if path == bundle_dir / "manifest.json":
+            continue
+        remote = _join(target_path, path.relative_to(bundle_dir).as_posix())
+        fs.makedirs(remote.rsplit("/", 1)[0], exist_ok=True)
+        fs.put_file(str(path), remote)
+    _write_json(manifest, _join(target, "manifest.json"))
     return manifest
 
 
@@ -84,7 +127,9 @@ class RegisterModel:
     """Releases a bundle as the next version, and rolls back."""
 
     def __init__(self, cfg, tracker):
-        self.family_dir = Path(cfg["resolved_paths"]["registry_dir"]) / cfg["export"]["family"]
+        # MODEL_REGISTRY (set in CI to gs://team17-mlops-neu-models) replacing the local folder.
+        root = os.environ.get("MODEL_REGISTRY") or cfg["resolved_paths"]["registry_dir"]
+        self.family_dir = _join(root, cfg["export"]["family"])
         self.backend_url = cfg["registry"]["backend_url"]
         self.tracker = tracker
 
@@ -108,3 +153,26 @@ class RegisterModel:
         set_active(self.family_dir, earlier[-1])
         logger.warning("Rolled back from v%d to v%d", active, earlier[-1])
         return earlier[-1]
+
+
+def main(argv=None):
+    """python -m scripts.steps.register status | rollback"""
+    parser = argparse.ArgumentParser(description="Show the model registry, or roll back one version")
+    parser.add_argument("command", choices=["status", "rollback"])
+    parser.add_argument("--config", default=None, help="Path to a config YAML")
+    args = parser.parse_args(argv)
+
+    register = RegisterModel(load_config(args.config), tracker=None)
+    try:
+        if args.command == "rollback":
+            register.rollback()
+        print(f"{register.family_dir}: versions {versions(register.family_dir)}, "
+              f"active v{active_version(register.family_dir)}")
+    except PipelineError as exc:
+        print(f"Registry: {exc}", file=sys.stderr)
+        return 1
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

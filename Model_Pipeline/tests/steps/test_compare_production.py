@@ -109,3 +109,28 @@ def test_for_an_error_improving_means_going_down():
     rules = [{"metric": "cv/state_now/score_mae", "must_improve": True}]
     assert failed_rules(rules, {"cv/state_now/score_mae": 0.7}, {"cv/state_now/score_mae": 0.8}) == []
     assert failed_rules(rules, {"cv/state_now/score_mae": 0.9}, {"cv/state_now/score_mae": 0.8}) != []
+
+
+def test_a_metric_missing_in_both_models_is_skipped():
+    rules = RULES + [{"metric": "cv/state_now/dyskinetic_auc", "must_improve": False}]
+    new = {"cv/state_now/off_auc": 0.74, "cv/tremor_now/auc": 0.65}
+    assert failed_rules(rules, new, PRODUCTION) == []
+
+
+def test_an_empty_nan_score_counts_as_missing():
+    rules = [{"metric": "cv/state_now/dyskinetic_auc", "must_improve": False}]
+    nan = float("nan")
+    assert failed_rules(rules, {"cv/state_now/dyskinetic_auc": nan}, {"cv/state_now/dyskinetic_auc": nan}) == []
+    assert failed_rules(rules, {"cv/state_now/dyskinetic_auc": nan}, {"cv/state_now/dyskinetic_auc": 0.6}) == [
+        "cv/state_now/dyskinetic_auc: missing"]
+
+
+def test_a_metric_the_active_model_lacks_is_skipped():
+    rules = [{"metric": "cv/state_now/dyskinetic_auc", "must_improve": False}]
+    assert failed_rules(rules, {"cv/state_now/dyskinetic_auc": 0.6}, {}) == []
+
+
+def test_reruns_pass_when_dyskinetic_auc_is_missing_in_both():
+    rules = RULES + [{"metric": "cv/state_now/dyskinetic_auc", "must_improve": True}]
+    gate = CompareProduction({"release_gate": {"rules": rules}}, MemoryTracker())
+    gate.run({"cv/state_now/off_auc": 0.74, "cv/tremor_now/auc": 0.65}, PRODUCTION)

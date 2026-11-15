@@ -101,6 +101,7 @@ Newest first. One row per milestone, not per small change.
 
 | Date | Who | What changed | PR |
 |---|---|---|---|
+| 2026-11-15 | Ayush Varma | Model pipeline (P4): the registry in the models bucket (`MODEL_REGISTRY` in CI), a `status` and `rollback` command, and the release gate skips a metric neither model has | (this PR) |
 | 2026-11-15 | Ayush Varma | Model pipeline (P4): export for the server (the saved model folder, manifest, metrics, stats and bias report; harnet10 not bundled), optional device export off by default, and select no longer needs `exportable` | (this PR) |
 | 2026-11-14 | Tejaswini Sarikonda | Model pipeline (P3): the bias step (slices scored with Fairlearn, the bias gate with an alert, mitigation by reweighing as a new `_reweighted` candidate, `bias.json`, `bias_report.md` and plots) and the explain step (exact Shapley values over each model's input groups, the AUC drop when a group is left out, plots). Tested on synthetic data | (this PR) |
 | 2026-11-14 | Dhruv Puri | Model pipeline (P1): evaluate and the validation gate, after train: a 95% interval for each pooled AUC from resampling patients, AUCs per fold and per patient, ROC plots and each candidate's `metrics.json`, with `gates_passed` set for select. Model pipeline reads the rebuilt data pipeline's output (`hours.csv`, `windows/manifest.json`) | (this PR) |

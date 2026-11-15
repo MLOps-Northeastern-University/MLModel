@@ -70,7 +70,7 @@ Everything runs in the GCP project `team17-mlops-neu`, region `us-central1`. It'
 | MLflow server | Cloud Run service `mlflow`, private |
 | MLflow runs, parameters and metrics | Cloud SQL instance `mednova-db`, database `mlflow` |
 | MLflow files: plots, reports, bundles of each run | `gs://team17-mlops-neu-models/mlflow` |
-| Released bundles | `gs://team17-mlops-neu-models/parkinsons-risk/v<N>/`, once `paths.registry_dir` points there. It's a local folder for now. |
+| Released bundles | `gs://team17-mlops-neu-models/parkinsons-risk/v<N>/` and `active.json`. CI sets `MODEL_REGISTRY` to the bucket; on a laptop it's `paths.registry_dir`, a local folder. `python -m scripts.steps.register status` or `rollback` |
 | Images | Artifact Registry `ml`: `mlflow` (the server, from `mlflow/Dockerfile`) and `training` (this folder's image, one per release) |
 
 To use any of it, a teammate needs Editor on the project, and to run once:
@@ -330,7 +330,6 @@ harnet10 isn't in the bundle: its licence limits redistribution. The server load
 Still open:
 
 - where the server gets harnet10;
-- where the registry lives (`paths.registry_dir`);
 - the Backend endpoint for a new version.
 
 `select.py` needs only `gates_passed`; `exportable` matters only when `export.device.required` is true.
