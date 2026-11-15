@@ -60,7 +60,7 @@ split:
   # recomputed, so the test patients never change (scripts/data/folds.py). These two are
   # used when it's made or when development patients are added (which remakes the folds).
   # Folds by patient over the development patients, so no one is in both train and validation.
-  cv_folds: 3
+  cv_folds: 2
   seed: 42
 
 models:
@@ -88,10 +88,6 @@ models:
     - name: motor_causal_transformer
       family: motor_causal_transformer
       params: {baseline: {mode: rolling}, diary: {max_epochs: 30, patience: 6, select_by: off_auc_within}}
-    # The same model without pretraining: whether pretraining earns its place.
-    - name: motor_causal_transformer_no_pretrain
-      family: motor_causal_transformer
-      params: {pretrain: {epochs: 0}, baseline: {mode: rolling}, diary: {max_epochs: 30, patience: 6, select_by: off_auc_within}}
 
 train:
   # scripts/steps/train.py. Every candidate trains with each seed on every fold; the cv
@@ -132,12 +128,12 @@ tune:
   seed: 42
   candidates:
     window_logistic:
-      trials: 5
+      trials: 3
       space:
         c: {type: float, low: 1.0e-4, high: 1.0, log: true}
         class_weight_power: {type: float, low: 0.0, high: 1.0}
     window_boosting:
-      trials: 5
+      trials: 3
       space:
         learning_rate: {type: float, low: 0.01, high: 0.3, log: true}
         leaves: {type: int, low: 7, high: 63}
