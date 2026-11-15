@@ -80,12 +80,15 @@ models:
       params: {windows_per_hour: 10}
     # The window model (MODEL.md, Architecture and Training). Its settings are the defaults in
     # scripts/models/motor_causal_transformer/model.py; a block set here is merged into them.
+    # The diary step runs up to 30 epochs and stops after 6 without a better one (defaults 15 and 3):
+    # on the real cohort it can take 5-15 epochs before the validation score starts to rise.
     - name: motor_causal_transformer
       family: motor_causal_transformer
+      params: {diary: {max_epochs: 30, patience: 6}}
     # The same model without pretraining: whether pretraining earns its place.
     - name: motor_causal_transformer_no_pretrain
       family: motor_causal_transformer
-      params: {pretrain: {epochs: 0}}
+      params: {pretrain: {epochs: 0}, diary: {max_epochs: 30, patience: 6}}
 
 train:
   # scripts/steps/train.py. Every candidate trains with each seed on every fold; the cv
