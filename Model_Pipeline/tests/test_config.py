@@ -12,8 +12,6 @@ PHONE_INPUTS = ["move_mean", "move_std", "move_p95", "still_fraction", "tremor_m
 def test_the_model_inputs_are_the_phones_in_the_same_order(tmp_path):
     cfg = make_config(tmp_path)
     assert cfg["data"]["features"] == PHONE_INPUTS == FEATURE_NAMES
-    assert cfg["export"]["feature_spec_version"] == 3
-    assert cfg["export"]["output_name"] == "off_risk"
 
 
 def test_output_folders_are_made_but_the_input_table_is_only_read(tmp_path):

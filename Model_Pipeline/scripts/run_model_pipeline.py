@@ -29,11 +29,9 @@ training finishes, saying whether a model was released.
 import argparse
 import os
 import platform
-import shutil
 import sys
 import traceback
 import uuid
-from pathlib import Path
 
 from scripts.alerts import notify
 from scripts.core.errors import GateError, PipelineError
@@ -59,27 +57,6 @@ ALERT_PREFIX = "[MedNOVA model]"
 
 
 # ---- what joins the steps ----------------------------------------------------------------
-
-def ready_for_selection(candidate):
-    """The candidate with exportable, which select.py reads and no step sets yet.
-
-    The model runs on the server (MODEL.md, "On the phone"), so nothing is converted and every
-    saved model can be exported. PLACEHOLDER until P4 settles the check (README, Interfaces 4).
-    gates_passed, the other field select reads, is set by bias from every gate.
-    """
-    return {**candidate, "exportable": Path(candidate["model_dir"]).is_dir()}
-
-
-def package_model(cfg, candidate):
-    """The saved model folder as one .tar.gz, the single file export.py bundles.
-
-    PLACEHOLDER until export.py takes the model folder itself (README, Interfaces 4).
-    """
-    folder = Path(cfg["resolved_paths"]["artifacts_dir"]) / "package"
-    folder.mkdir(parents=True, exist_ok=True)
-    archive = shutil.make_archive(str(folder / candidate["name"]), "gztar", root_dir=candidate["model_dir"])
-    return Path(archive)
-
 
 def training_stats(cfg, split, data=None):
     """The 7 hourly features' statistics over the development patients, for drift checks."""
@@ -121,12 +98,11 @@ def run(cfg, tracker, release=True, data=None, split=None):
         with log_step(logger, "explain", owner="P3"):
             ExplainModels(cfg, tracker).run(candidates, data, split)
         with log_step(logger, "select a model", owner="P4"):
-            chosen = SelectModel(cfg, tracker).run([ready_for_selection(c) for c in candidates])
+            chosen = SelectModel(cfg, tracker).run(candidates)
         with log_step(logger, "compare with production", owner="P4"):
             CompareProduction(cfg, tracker).run(chosen["metrics"], active_metrics(register.family_dir))
         with log_step(logger, "export", owner="P4"):
-            bundle_dir = ExportModel(cfg, tracker).run(chosen, package_model(cfg, chosen),
-                                                       training_stats(cfg, split, data))
+            bundle_dir = ExportModel(cfg, tracker).run(chosen, training_stats(cfg, split, data))
         if not release:
             logger.info("Not registered: --no-register")
             return None

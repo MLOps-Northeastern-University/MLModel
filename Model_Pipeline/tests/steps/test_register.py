@@ -14,7 +14,7 @@ def make_bundle(path, off_auc=0.74):
     """A bundle as export.py writes it."""
     path.mkdir(parents=True)
     (path / "model.bin").write_bytes(b"weights")
-    write_json({"family": "parkinsons-risk", "file": "model.bin"}, path / "manifest.json")
+    write_json({"family": "parkinsons-risk", "candidate": "window_logistic"}, path / "manifest.json")
     write_json({"cv/state_now/off_auc": off_auc}, path / "metrics.json")
     write_json({"rows": 10}, path / "stats.json")
     return path

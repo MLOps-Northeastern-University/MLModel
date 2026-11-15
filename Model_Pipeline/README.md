@@ -312,17 +312,18 @@ There's no `to_keras()` or phone export: the model runs on the server.
 
 `scripts/steps/evaluate.py` runs after train, on its `candidates.json` and predictions files, on the same hours train scores (labelled, worn, out of fold). Per candidate it adds a 95% interval for each pooled AUC by resampling patients (1,000 times, `evaluation` in the config), each question's AUC per fold and per patient (`evaluation.json`) and the ROC curves (`roc.png`), all in `artifacts/evaluation/<candidate>/`. It sets `gates_passed` to false when a metric in `validation_gate.min` is missing or below its value, so select skips that candidate.
 
-### 4. Bundle folder (P1, P3 → P4 → CI) (Open)
+### 4. Bundle folder (P1, P3 → P4 → CI)
 
-`artifacts/bundle/`, which `register.py` copies into the registry as `<family>/v<N>/`. The proposal, now that the model runs on the server:
+`artifacts/bundle/`, written by `export.py` and copied by `register.py` into the registry as `<family>/v<N>/`. The model runs on the server:
 
 | File | From | What it holds |
 |---|---|---|
 | `model/` | P4 | The folder `model.save()` wrote: `manifest.json` and `weights/` (for the transformer: `network.pt` and `training.json`, with the harnet10 fingerprint). This replaces a phone model file |
-| `manifest.json` | P4 | What the Backend needs to run and check the model: family, version, window spec version, labels, and the model folder's sha256 |
+| `manifest.json` | P4 | What the Backend needs to run and check the model: family, version and `model_id` (added by `register.py`), candidate, labels, window spec version, the training run, the model folder's sha256 and the harnet10 sha256 the server must load |
 | `stats.json` | P4 | The training data's statistics for drift, starting with the 7 hourly features |
 | `metrics.json` | P1 | The chosen candidate's `artifacts/evaluation/<name>/metrics.json`: train's `cv/` scores plus evaluate's 95% intervals (`_auc_lo`, `_auc_hi`), which the next run's release gate compares against |
 | `bias.json` | P3 | Metrics per slice and the mitigation result: `artifacts/bias/bias.json` |
+| `device/` | P4 | Only with `export.device.enabled` (off by default): the model in a phone format, for testing on-device scoring later. Its converter is a placeholder that fails the run |
 
 harnet10 isn't in the bundle: its licence limits redistribution. The server loads its own pinned copy, and the model refuses one whose sha256 differs from training.
 
@@ -330,8 +331,9 @@ Still open:
 
 - where the server gets harnet10;
 - where the registry lives (`paths.registry_dir`);
-- the Backend endpoint for a new version;
-- how `select.py`'s "exportable" check and `export.py`'s conversion change now that nothing is converted for the phone.
+- the Backend endpoint for a new version.
+
+`select.py` needs only `gates_passed`; `exportable` matters only when `export.device.required` is true.
 
 ## Training, tuning and sensitivity (P2)
 

@@ -60,7 +60,7 @@ def active_metrics(family_dir):
 
 
 def publish(bundle_dir, family_dir, version):
-    """Copy the bundle in as v<version>, with its version and model_id in the manifest."""
+    """Copy the bundle in as v<version>, with its version and model_id in its manifest."""
     target = family_dir / f"v{version}"
     if target.exists():
         raise PipelineError(f"{target} already exists; a released version is never overwritten")
