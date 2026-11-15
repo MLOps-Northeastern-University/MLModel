@@ -118,6 +118,10 @@ train:
     # near chance: every AUC between 1 - max_auc and max_auc, or the run stops.
     candidates: [window_boosting]
     max_auc: 0.6
+    # The targets judged. Not sleep: a model fitted to random labels still follows how much the wrist
+    # moves, and sleep hours barely move, so sleep AUC lands far from 0.5 with no leak (0.71 on the
+    # real data). A leak through events or check-ins would show in state and tremor.
+    targets: [state, tremor]
 
 tune:
   # scripts/steps/tune.py. Each trial is a full cross-validation with this seed, scored by

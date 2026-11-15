@@ -66,6 +66,7 @@ from pathlib import Path
 import numpy as np
 
 from scripts.core.errors import ConfigError, GateError
+from scripts.core.targets import TARGETS, parse_label
 from scripts.data.folds import read_split
 from scripts.experiments import (
     concat, cross_validate, fresh, load_development, named, provenance, read_tuned, rows, score, write_predictions)
@@ -200,8 +201,16 @@ class TrainModels:
                 concat(frames), result.metrics())
 
     def _leakage_check(self, name, template, dev, split):
-        """Train on labels shuffled among the training hours; every AUC must stay within reach of chance."""
+        """Train on labels shuffled among the training hours; every AUC of the checked targets must stay
+        within reach of chance.
+
+        targets (train.leakage_check.targets) picks which targets are judged. Sleep can be left out: a model
+        fitted to random labels still gives outputs that follow how much the wrist moves, and sleep hours
+        barely move, so its sleep AUC lands far from 0.5 in a random direction with no leak at all. A leak
+        through the inputs (events or check-ins built from the diary) would show in state and tremor.
+        """
         limit = self.settings["leakage_check"]["max_auc"]
+        targets = set(self.settings["leakage_check"]["targets"])
         seed = self.settings["seeds"][0]
         rng = np.random.default_rng(seed)
         with self.tracker.run(f"leakage_check-{name}", tags={"family": template.family}), \
@@ -216,7 +225,8 @@ class TrainModels:
                 parts.append(rows(name, model.predict(val), val, fold="leak", seed=seed))
             scores = score(concat(parts))
             self.tracker.log_metrics(named("cv", scores))
-            off = [(f"{label}/{m}", v) for label, s in scores.items() for m, v in s.items()
+            off = [(f"{label}/{m}", v) for label, s in scores.items() if parse_label(label)[0] in targets
+                   for m, v in s.items()
                    if m.endswith(("_auc", "_auc_within")) and math.isfinite(v) and abs(v - 0.5) > limit - 0.5]
             if off:
                 raise GateError("leakage", f"{name} trained on shuffled labels scored "
@@ -249,8 +259,13 @@ def _settings(cfg):
         raise ConfigError(f"train.leakage_check names unknown candidate(s) {unknown}")
     if names and (isinstance(limit, bool) or not isinstance(limit, (int, float)) or not 0.5 < limit < 1):
         raise ConfigError(f"train.leakage_check.max_auc must be between 0.5 and 1, not {limit!r}")
+    targets = check.get("targets", list(TARGETS))
+    if not isinstance(targets, list) or not targets or set(targets) - set(TARGETS):
+        raise ConfigError(f"train.leakage_check.targets must be a list of targets from {sorted(TARGETS)}, "
+                          f"not {targets!r}")
     return {"seeds": seeds, "score_test": section["score_test"], "use_tuned": section.get("use_tuned", False),
-            "leakage_check": {"candidates": names, "max_auc": float(limit) if names else None}}
+            "leakage_check": {"candidates": names, "max_auc": float(limit) if names else None,
+                              "targets": list(targets)}}
 
 
 def main(argv=None):
