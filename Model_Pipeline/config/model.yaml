@@ -194,12 +194,14 @@ bias:
   threshold: 0.5
   # The gates. metric is any core/metrics.py score of that label, or <question>_recall,
   # _precision or _fpr (questions: off, on, dyskinetic, asleep, any_tremor).
-  # PLACEHOLDER max_gap values, for the team to agree.
+  # Each group is judged on AUC, how well its risky hours rank above its calm ones: unlike recall at
+  # a 0.5 cutoff, it doesn't move with a group's OFF rate or the cutoff. With 2-10 patients per group
+  # a group's AUC is noisy, so the gap allowed is 0.15. Recall, precision and FPR per group are still
+  # in the bias report.
   checks:
-    - {label: state_now, metric: off_recall}
-    - {label: state_now, metric: off_auc}
-    - {label: tremor_now, metric: any_tremor_recall}
-    - {label: sleep_now, metric: asleep_recall}
+    - {label: state_now, metric: off_auc, max_gap: 0.15}
+    - {label: tremor_now, metric: any_tremor_auc, max_gap: 0.15}
+    - {label: sleep_now, metric: asleep_auc, max_gap: 0.15}
   mitigation:
     # Retrain a candidate that fails with reweighted training hours (Kamiran and Calders'
     # reweighing: each group and answer weighted as if they were independent).
