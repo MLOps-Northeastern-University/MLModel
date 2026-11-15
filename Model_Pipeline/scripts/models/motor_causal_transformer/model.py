@@ -34,6 +34,9 @@ Settings (params), each block passed to its part:
     dose_span_s   how long a dose stays marked (1,800 s)
     score_past_h  hours of past each scored hour sees (8)
     final_epochs  diary epochs without validation (None: diary.max_epochs)
+    baseline      each patient's features relative to their own past (models/patient_baseline.py):
+                  {"mode": "none" | "rolling", "window_h": 168, "warmup_h": 24}; the cohort mean and
+                  SD it shrinks towards come from the training windows and are saved with the model
 A block given in params is merged into its defaults, so {"diary": {"lr": 1e-3}} changes only lr.
 
 Where things are, which isn't part of a model (environment variables):
@@ -57,6 +60,7 @@ from scripts.core.model import Model, Predictions, WindowPredictions
 from scripts.core.targets import HOUR_INDEX, PARTICIPANT, get_target, parse_label
 from scripts.models.motor_causal_transformer.data import collate, make_example, prepare
 from scripts.models.motor_causal_transformer.harnet import check_spec, default_device, feature_cache
+from scripts.models import patient_baseline
 from scripts.models.motor_causal_transformer.heads import probabilities
 from scripts.models.motor_causal_transformer.network import MotorNetwork
 from scripts.models.motor_causal_transformer.pretrained_cache import (
@@ -82,7 +86,8 @@ class MotorCausalTransformer(Model):
     @classmethod
     def default_params(cls):
         return {"network": {}, "pretrain": asdict(PretrainSettings()), "diary": _jsonable(asdict(DiarySettings())),
-                "dose_span_s": 1800.0, "score_past_h": 8, "final_epochs": None}
+                "dose_span_s": 1800.0, "score_past_h": 8, "final_epochs": None,
+                "baseline": dict(patient_baseline.DEFAULTS)}
 
     def _merged_params(self, params):
         """As Model's, except that a block (a dict) given in params is merged into its defaults."""
@@ -103,6 +108,7 @@ class MotorCausalTransformer(Model):
         if p["final_epochs"] is not None and (isinstance(p["final_epochs"], bool)
                                               or not isinstance(p["final_epochs"], int) or p["final_epochs"] < 1):
             raise ConfigError(f"final_epochs must be a positive whole number or None, not {p['final_epochs']!r}")
+        self._baseline_settings = patient_baseline.check_settings(p["baseline"])
         network = copy.deepcopy(p["network"])
         heads = network.setdefault("heads", {})
         if "horizons" in heads and tuple(heads["horizons"]) != self.horizons:
@@ -113,6 +119,7 @@ class MotorCausalTransformer(Model):
         self._fingerprint = None                            # harnet10's weights, once fitted
         self._prior = None                                  # {label: class mix}, for hours with no windows
         self._result = None
+        self._cohort = None                                 # (mean, sd) the patient baselines shrink towards
 
     def _build_network(self):
         try:
@@ -132,12 +139,17 @@ class MotorCausalTransformer(Model):
         torch.manual_seed(seed)
         rng = np.random.default_rng(seed)
         net = self._build_network()
+        self._cohort = None
         train_recs = self._recordings(train, cache, sample_weight)
+        if self._baseline_settings["mode"] != "none":
+            # The cohort's normal, from the training windows only, before any recording is normalised.
+            self._cohort = patient_baseline.feature_stats(r.features for r in train_recs.values())
+            train_recs = self._with_baselines(train_recs)
         val_recs = self._recordings(val, cache) if val is not None else None
         logger.info("training %s on %d patients (%d worn windows)", self.family, len(train_recs),
                     sum(len(r.time_s) for r in train_recs.values()),
                     extra={"event": "mct_fit", "train": len(train_recs), "val": len(val_recs or {})})
-        net.movement.fit(r.features for r in train_recs.values())
+        net.movement.fit(_feature_blocks(train_recs.values()))
         history = {"pretrain": [], "diary": []}
         if self._pretrain_settings.epochs:
             history["pretrain"] = self._pretrained(net, train_recs, val_recs, cache, device, rng, seed)
@@ -158,6 +170,7 @@ class MotorCausalTransformer(Model):
         if store is not None:
             material = {"network": self._network_settings, "pretrain": asdict(self._pretrain_settings),
                         "dose_span_s": self.params["dose_span_s"], "seed": seed, "labels": list(net.labels),
+                        "baseline": self._baseline_settings,
                         "device": torch.device(device).type, "harnet10": cache.harnet.fingerprint}
             key = store.key(train_recs, val_recs, cache.keys, material)
             entry = store.load(key)
@@ -189,8 +202,15 @@ class MotorCausalTransformer(Model):
         # Only the model's own labels are graded: the others are left out (NaN) of the answers.
         mine = data.labels.reindex(columns=[c for c in data.labels.columns if c in self.labels])
         data = _with_labels(data, mine)
-        return prepare(data, cache, self._net.labels, window_s=self.spec.seconds,
-                       dose_span_s=self.params["dose_span_s"], sample_weight=sample_weight)
+        recordings = prepare(data, cache, self._net.labels, window_s=self.spec.seconds,
+                             dose_span_s=self.params["dose_span_s"], sample_weight=sample_weight)
+        return self._with_baselines(recordings) if self._cohort is not None else recordings
+
+    def _with_baselines(self, recordings):
+        """Each recording with its patient's rolling baseline (models/patient_baseline.py)."""
+        return {pid: replace(rec, baseline=patient_baseline.rolling_baseline(
+                    rec.time_s, rec.features, self._cohort, self._baseline_settings, self.spec.seconds))
+                for pid, rec in recordings.items()}
 
     # ---- predict -------------------------------------------------------------------------------
 
@@ -260,7 +280,9 @@ class MotorCausalTransformer(Model):
     def _save_weights(self, folder):
         torch.save(self._net.state_dict(), Path(folder) / STATE_FILE)
         (Path(folder) / INFO_FILE).write_text(json.dumps(
-            {"harnet10": self._fingerprint, "prior": self._prior, "result": self._result}, indent=1, default=float),
+            {"harnet10": self._fingerprint, "prior": self._prior, "result": self._result,
+             "cohort": None if self._cohort is None else [v.tolist() for v in self._cohort]},
+            indent=1, default=float),
             encoding="utf-8")
 
     def _load_weights(self, folder):
@@ -269,6 +291,19 @@ class MotorCausalTransformer(Model):
         self._net.eval()
         info = json.loads((Path(folder) / INFO_FILE).read_text(encoding="utf-8"))
         self._fingerprint, self._prior, self._result = info["harnet10"], info["prior"], info["result"]
+        cohort = info.get("cohort")
+        if (cohort is None) != (self._baseline_settings["mode"] == "none"):
+            state = "off" if cohort is None else "on"
+            raise ModelError(f"{folder}: saved with the patient baseline {state}, but the settings say mode "
+                             f"{self._baseline_settings['mode']!r}")
+        self._cohort = None if cohort is None else tuple(np.asarray(v, dtype=np.float64) for v in cohort)
+
+
+def _feature_blocks(recordings, block=patient_baseline.BLOCK):
+    """Every recording's features as the model reads them (normalised if it has a baseline), a block at a time."""
+    for rec in recordings:
+        for start in range(0, len(rec.time_s), block):
+            yield rec.window_features(start, start + block)
 
 
 def _settings(cls, values, name):

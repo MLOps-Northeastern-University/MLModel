@@ -58,6 +58,8 @@ class Recording:
         labels: The label names answers' columns are, in order.
         weights: {hour_index: weight} for the diary step's loss and class balance (bias mitigation
             by reweighting), or None for 1 everywhere. Pretraining and validation don't use them.
+        baseline: The patient's own normal (models/patient_baseline.py), or None to read the
+            features as they are. window_features applies it.
     """
 
     participant: str
@@ -68,6 +70,12 @@ class Recording:
     answers: Dict[int, np.ndarray]
     labels: Tuple[str, ...]
     weights: Optional[Dict[int, float]] = None
+    baseline: Optional[object] = None
+
+    def window_features(self, start: int, stop: int) -> np.ndarray:
+        """Rows start..stop of the features, float32, relative to the patient's normal if there's a baseline."""
+        x = np.asarray(self.features[start:stop], dtype=np.float32)
+        return x if self.baseline is None else self.baseline.apply(self.time_s[start:stop], x)
 
     def hours(self) -> Tuple[int, int]:
         """The first and last diary hour with a worn window."""
@@ -231,7 +239,7 @@ def make_example(rec: Recording, start_hour: int, hours: int, past_h: float, fut
             targets[i] = rec.answers[int(h)]
     weights = (None if rec.weights is None else
                np.array([rec.weights.get(int(h), 1.0) for h in graded], dtype=np.float32))
-    return Example(rec.participant, rec.time_s[a:c], np.asarray(rec.features[a:c], dtype=np.float32),
+    return Example(rec.participant, rec.time_s[a:c], rec.window_features(a, c),
                    np.ascontiguousarray(events, dtype=np.float32), rec.patient, int(b - a), graded, targets,
                    n_check_ins, weights)
 

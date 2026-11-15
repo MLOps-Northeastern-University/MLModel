@@ -185,3 +185,17 @@ def test_a_tampered_pickle_is_refused_before_it_is_unpickled(tmp_path):
         f.write(b"extra")
     with pytest.raises(ModelError, match="SHA-256"):
         WindowLogistic.load(tmp_path / "m")
+
+
+@pytest.mark.parametrize("family, params", FAMILIES)
+def test_the_patient_baseline_trains_saves_and_predicts_the_same(tmp_path, family, params):
+    data = dataset()
+    model, _ = fitted(family, {**params, "baseline": {"mode": "rolling", "window_h": 4, "warmup_h": 1}}, data)
+    assert model._cohort is not None
+    out = model.predict(data)
+    model.save(tmp_path / "m")
+    loaded = family.load(tmp_path / "m")
+    for label in model.labels:
+        np.testing.assert_array_equal(out.probs[label], loaded.predict(data).probs[label])
+    plain, _ = fitted(family, params, data)
+    assert not np.allclose(out.probs["state_now"], plain.predict(data).probs["state_now"])
