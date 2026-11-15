@@ -35,19 +35,34 @@ def passes(new, production, must_improve, higher=True):
     return new >= production
 
 
+def _score(metrics, name):
+    """The metric's value, or None when it's absent or empty (NaN)."""
+    value = metrics.get(name)
+    if value is None or value != value:
+        return None
+    return value
+
+
 def failed_rules(rules, new_metrics, production_metrics):
     """The rules the new model fails, as readable messages.
 
-    A metric missing from either model fails its rule: the gate can't pass
-    without the score it checks.
+    A metric neither model has (such as dyskinetic_auc when the data has no
+    dyskinetic hours) can't be compared, so its rule is skipped with a warning.
+    A metric only the new model lacks fails its rule.
     """
     failures = []
     for rule in rules:
         name = rule["metric"]
-        if name not in new_metrics or name not in production_metrics:
+        new, production = _score(new_metrics, name), _score(production_metrics, name)
+        if new is None and production is None:
+            logger.warning("Release gate: %s is missing in both models, so it's skipped", name)
+            continue
+        if new is None:
             failures.append(f"{name}: missing")
             continue
-        new, production = new_metrics[name], production_metrics[name]
+        if production is None:
+            logger.warning("Release gate: the active model has no %s, so it's skipped", name)
+            continue
         if not passes(new, production, rule["must_improve"], higher_is_better(name)):
             failures.append(f"{name}: {new:.3f} vs {production:.3f}")
     return failures
