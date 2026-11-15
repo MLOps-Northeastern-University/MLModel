@@ -31,5 +31,3 @@ __pycache__/
 .coverage.*
 htmlcov/
 .venv/
-# DVC pointer files for data in processed/ (the patient split) are kept in Git.
-!data/processed/*.dvc
