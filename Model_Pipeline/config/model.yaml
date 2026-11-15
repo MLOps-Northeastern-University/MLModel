@@ -114,8 +114,19 @@ tune:
   # selection.metric (so tuning maximises what selection chooses by). A candidate not listed
   # here isn't tuned. Settings are dotted names into the candidate's params.
   # Every family is tuned, with trials of about 8-10 per setting, so the comparison is fair.
+  # Tuned in this order: the transformer first (on the GPU), then the CPU baselines.
   seed: 42
   candidates:
+    motor_causal_transformer:
+      # Diary-step settings only, so every trial reuses each fold's cached pretrained body.
+      # Not diary.learn: the pooling only ever learns in the diary step, so it must stay learnable.
+      # Trials to be set from a timing test on the training machine.
+      trials: 25
+      space:
+        diary.lr: {type: float, low: 1.0e-4, high: 3.0e-3, log: true}
+        diary.weight_decay: {type: float, low: 0.01, high: 0.3, log: true}
+        diary.feature_noise: {type: float, low: 0.0, high: 0.3}
+        diary.class_weight_power: {type: float, low: 0.0, high: 1.0}
     window_logistic:
       trials: 25
       space:
@@ -129,16 +140,6 @@ tune:
         iterations: {type: int, low: 100, high: 500, step: 50}
         pca_components: {type: categorical, choices: [32, 64, 128]}
         class_weight_power: {type: float, low: 0.0, high: 1.0}
-    motor_causal_transformer:
-      # Diary-step settings only, so every trial reuses each fold's cached pretrained body.
-      # Not diary.learn: the pooling only ever learns in the diary step, so it must stay learnable.
-      # Trials to be set from a timing test on the training machine.
-      trials: 25
-      space:
-        diary.lr: {type: float, low: 1.0e-4, high: 3.0e-3, log: true}
-        diary.weight_decay: {type: float, low: 0.01, high: 0.3, log: true}
-        diary.feature_noise: {type: float, low: 0.0, high: 0.3}
-        diary.class_weight_power: {type: float, low: 0.0, high: 1.0}
     # motor_causal_transformer_no_pretrain isn't tuned: after tuning, give it the transformer's
     # tuned diary settings in its params, so the two differ only in pretraining.
 
