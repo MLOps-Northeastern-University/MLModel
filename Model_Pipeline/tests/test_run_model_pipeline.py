@@ -170,10 +170,10 @@ def main_with(cfg, monkeypatch):
 
 def test_main_exits_0_on_release_and_1_on_a_failed_gate(main_with, alerts):
     assert main_with(["--no-mlflow", "--no-register"]) == 0
-    assert alerts == []                                              # a check-only run that passes is quiet
     assert main_with(["--no-mlflow"]) == 0
     assert main_with(["--no-mlflow"]) == 1
-    (released, _), (failed, body) = alerts
+    (checked, _), (released, _), (failed, body) = alerts
+    assert checked == "[MedNOVA model] Training finished, every gate passed"
     assert released == "[MedNOVA model] parkinsons-risk v1 released"
     assert failed == "[MedNOVA model] The production gate failed"
     assert "cv/state_now/off_auc" in body and "a local run on" in body

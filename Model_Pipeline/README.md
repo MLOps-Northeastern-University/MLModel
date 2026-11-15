@@ -132,10 +132,11 @@ To send alerts from your own machine, put the five alert settings in `Model_Pipe
 |---|---|---|
 | A gate fails | the run command | `The production gate failed`, with the reason, such as `cv/state_now/off_auc: 0.500 vs 0.500` |
 | The run crashes on an unexpected error | the run command | `Run crashed: <error>`, with the stack trace |
-| A model is released | the run command | `parkinsons-risk v<N> released` |
+| Training finishes and a model is released | the run command | `parkinsons-risk v<N> released` |
+| Training finishes, every gate passed, nothing released (`--no-register`) | the run command | `Training finished, every gate passed` |
 | Any other CI step fails: install, GCP sign-in, image push | `model.yml` | `CI job failed` |
 
-A run that only checks (`--no-register`) and passes sends nothing. An alert that can't be sent is logged and never fails the run. Slack works the same way with `SLACK_WEBHOOK_URL`, but the team uses email.
+So every run sends exactly one email: how it finished, or why it stopped. An alert that can't be sent is logged and never fails the run. Slack works the same way with `SLACK_WEBHOOK_URL`, but the team uses email.
 
 ### Training data (DVC)
 

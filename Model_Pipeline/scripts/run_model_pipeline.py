@@ -22,8 +22,8 @@ the data must be there first: dvc pull in ../Data_Pipeline. Tuning isn't part of
 scripts/steps/tune.py on its own, and train uses its settings when train.use_tuned is true.
 
 A step that can't go on raises a core/errors.py error; the run then stops with exit code 1.
-Alerts (scripts/alerts.py) go to the team when a gate fails, when the run crashes, and when a
-model is released. Runs that only check send none on success.
+Alerts (scripts/alerts.py) go to the team when a gate fails, when the run crashes, and when
+training finishes, saying whether a model was released.
 """
 
 import argparse
@@ -194,7 +194,10 @@ def main(argv=None):
         logger.info("Model pipeline finished: %s", f"released v{version}" if version else "nothing released")
         if version:
             notify(f"{ALERT_PREFIX} {cfg['export']['family']} v{version} released",
-                   f"It passed every gate and is now the active version.\n\nRun: {where()}", cfg)
+                   f"Training finished, it passed every gate and is now the active version.\n\nRun: {where()}", cfg)
+        else:
+            notify(f"{ALERT_PREFIX} Training finished, every gate passed",
+                   f"Nothing was released: this run only checks (--no-register).\n\nRun: {where()}", cfg)
     return 0
 
 
