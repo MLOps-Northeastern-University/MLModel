@@ -76,6 +76,9 @@ jobs:
         env:
           MLFLOW_TRACKING_URI: ${{ vars.MLFLOW_TRACKING_URI }}
           MLFLOW_TRACKING_TOKEN: ${{ steps.auth.outputs.id_token }}
+          # The registry in the models bucket, so releases and the active version persist
+          # between runs (scripts/steps/register.py).
+          MODEL_REGISTRY: gs://team17-mlops-neu-models
         # A failed gate exits 1 and fails the job. The pipeline emails the team itself on
         # a failed gate, a crash or a release.
         run: python -m scripts.run_model_pipeline ${{ env.RELEASE != 'true' && '--no-register' || '' }}
