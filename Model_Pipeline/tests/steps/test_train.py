@@ -171,7 +171,8 @@ def test_it_loads_the_split_and_only_the_patients_it_needs_from_files(tmp_path):
     cfg = make_config(tmp_path, features_csv=paths["features_csv"], paths=paths,
                       models={"targets": ["tremor"], "horizons": ["now"],
                               "candidates": [{"name": "window_logistic", "family": "window_logistic"}]},
-                      train={"seeds": [0], "score_test": False, "leakage_check": {"candidates": []}})
+                      train={"seeds": [0], "score_test": False, "use_tuned": False,
+                             "leakage_check": {"candidates": []}})
     tracker = MemoryTracker()
     [result] = TrainModels(cfg, tracker).run()
     assert len(tracker.find("train").tags["data_fingerprint"]) == 16
