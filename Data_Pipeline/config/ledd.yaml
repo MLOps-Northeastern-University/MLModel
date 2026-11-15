@@ -111,6 +111,9 @@ drugs:
   benztropine:
     {rule: none, cite: "jost2023 Table 1: Trihexyphenidyl; footnote c (other anticholinergics)",
      note: "same rule as trihexyphenidyl"}
+  clozapine:
+    {rule: none, cite: "jost2023 Table 1: not listed (clozapine is no antiparkinsonian drug)",
+     note: "an antipsychotic, given for psychosis in Parkinson's; it has no levodopa equivalent and isn't a dose event"}
 
 # How each data source writes drug names, mapped to the drug ids above. Names are matched
 # after lower-casing and tidying spaces, so "Levodopa / Benserazid" and "Levodopa/Benserazid"
@@ -137,3 +140,10 @@ names:
     rotigotine: rotigotine                          # the patch, mg per 24 h
     rasagiline: rasagiline
     safinamide: safinamide
+    selegeline: selegiline_oral                     # COPS's misspelling of selegiline; its 5 mg doses are the oral tablet (the sublingual one is 1.25 mg)
+    levodopa/carbidopa/entacapon: levodopa_carbidopa_entacapone   # the German spelling (Entacapon), Stalevo
+    pramipexole: pramipexole_base                   # doses of 0.09, 0.18 and 0.7 mg are the EU base strengths (0.088, 0.18, 0.7)
+    pramipexol (0,26): pramipexole_base             # the German spelling with the base strength in the name; doses written in mg
+    pramipexol (0,52): pramipexole_base             # the same, 0.52 mg base
+    levocomp (50/12,5): levodopa_ir                 # Levocomp: German levodopa/carbidopa 50/12.5 mg tablet; doses written as mg of levodopa (50)
+    clozapin: clozapine                             # German spelling of clozapine: an antipsychotic, no LEDD
