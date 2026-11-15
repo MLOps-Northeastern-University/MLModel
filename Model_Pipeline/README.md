@@ -7,10 +7,32 @@ Trains the model behind Careportal's symptom timeline. From the watch's movement
 > - **Built:** the contracts in `core/` (with the shared scores, `core/metrics.py`), the data loader, the patient split, three model families and the registry, training, tuning, hyperparameter sensitivity, the MLflow tracker, and selection, export, registry and the release gate (P4), and evaluate with the validation gate (P1).
 > - **Built (P3):** the bias step (slices, gate, reweighing) and the explain step (Shapley values over input groups, ablation), tested on synthetic data and a small test model family.
 > - **Wired (P5):** the run command goes through every step with alerts, and runs on GitHub Actions against the team's GCP project, logged to the hosted MLflow. It calls every real step in order: train, evaluate, bias, explain, select, compare, export, register.
+> - **Run on the real data (2026-11-15):** the data pipeline on 60 participants through Airflow, then tuning, training, evaluate, bias, explain, select, export and register on a GCP GPU machine, logged to the hosted MLflow. See [Training on the real data](#training-on-the-real-data-2026-11-15).
 > - **Still a docstring:** `models/composite.py`.
-> - **Not run on the real data yet:** training, tuning and sensitivity are tested on synthetic data only.
 >
 > Each module says what it's for and who owns it.
+
+## The model
+
+Every 10-second window of wrist movement goes through harnet10, a movement model pretrained on UK Biobank. harnet10 is frozen and turns each window into 1,024 numbers. Those numbers are compared with the patient's own past week, so the model sees how this hour differs from this patient's normal, not how this patient differs from others. A causal transformer then reads the windows, doses and check-ins up to now, never later, and answers for this hour and the next: asleep or awake, the diary's state (OFF to dyskinetic) and tremor.
+
+```mermaid
+flowchart LR
+    W["10-s windows<br/>wrist, 30 Hz"] --> H["harnet10<br/>frozen, 1,024 numbers"]
+    H --> B["Patient baseline<br/>vs own past 7 days"]
+    B --> P["Projection<br/>+ dose and check-in tokens"]
+    P --> T["Causal transformer<br/>sees only the past"]
+    T --> M["Pooling per hour<br/>attention over windows"]
+    M --> N["Now: sleep, state, tremor"]
+    M --> X["Next hour: sleep, state, tremor"]
+```
+
+It trains in two steps:
+
+1. **Pretraining, no diary needed:** the transformer learns to forecast the coming movement. Any worn hour counts, so this step uses far more data than the diary has.
+2. **Diary step:** the body is frozen and only the small heads learn the diary's answers. The epoch kept is the one best at telling OFF from not-OFF within each patient (`diary.select_by`).
+
+Two simpler models are trained next to it as baselines. Both score each window on its own, with no past: `window_logistic` (logistic regression) and `window_boosting` (gradient boosting). Both get the same harnet10 features and the same patient baseline. Then the pipeline picks whichever scores best.
 
 ## Running
 
@@ -371,6 +393,69 @@ python -m scripts.steps.explain   # after bias: explains each final model by its
 - **Out-of-fold predictions by default** (`bias.predictions: cv`), so every development patient counts and the test patients stay unseen.
 - **Reweighing fixes imbalance, not weak signal.** It weights each group's answers as if group and answer were independent (Kamiran and Calders), with weights from each fold's training patients only. It closes a gap a model learned from who is usually OFF; it can't close one where the movement shows OFF less clearly for a group. The report shows both gaps and the selection metric's change, so the trade-off is visible.
 - **Leaving a group out** shuffles it (movement within each patient, hourly features within each patient), removes it (events) or swaps it with another patient's (patient fields), repeated `explain.repeats` times.
+
+## Training on the real data (2026-11-15)
+
+### The patients
+
+The COPS study has 66 patients. They're split three ways, once, and the split is versioned with DVC (`Data_Pipeline/data/processed/patient_split.json`):
+
+| Group | Patients | Used for |
+|---|---|---|
+| Development | 50, in 2 folds of 25 | Training, tuning and every design choice. Each fold trains on one half and is scored on the other |
+| Test | 10: COPS-4, 5, 29, 38, 39, 40, 53, 58, 62, 63 | Scored once, at the end (`train.score_test`). Never used to choose anything |
+| Demo | 6: COPS-6, 41, 50, 51, 52, 59 | The app's live demo only. Left out of the data pipeline entirely (`Data_Pipeline/config/pipeline.yaml` lists the other 60) |
+
+The 10 test patients were picked to match the whole cohort on sex, PD subtype, more affected side, DBS, Hoehn & Yahr, age and years since diagnosis, and to hold about their share of every diary answer. Each has at least 50 labelled waking hours, and at least 6 of the 10 have both OFF and not-OFF hours, so OFF can be scored within them (seeded draw, seed 42). The rule is written into the split file.
+
+The data pipeline's run on the 60 participants: 10,272 diary hours (8,344 usable), 3.2 million 10-second windows (3.08 million worn) and 2,109 doses. Its checks found 0 critical problems and 25 warnings.
+
+### What the scores mean
+
+Every score is an AUC: how often the model ranks a positive hour above a negative one, where 0.5 is guessing. Each is reported two ways:
+
+- **Pooled:** all patients' hours together. This can be won by recognising patients (someone who moves little is OFF more often) without reading their state from the movement.
+- **Within patients (`_within`):** each patient's hours against each other, averaged over patients. This is what the app needs: telling a patient's OFF hour from their own good hours. Selection uses it (`cv/state_now/off_auc_within`).
+
+### What changed the scores
+
+At first every model scored at chance on OFF within patients, about 0.52. A review of the data found the reason: patients differ from each other far more than one patient's OFF hours differ from their good hours, and the models learned the patients. Each change below was tested on fold 1, on development patients only:
+
+| Change | OFF within patients | Kept? |
+|---|---|---|
+| **Compare each patient with their own past 7 days** (`baseline: {mode: rolling}`) | logistic 0.579 → **0.640**, boosting 0.562 → **0.601**, transformer 0.522 → **0.636** | Yes, for all three models |
+| The same over the past 3 days | logistic 0.632 | No: 7 days is better |
+| **Keep the transformer's epoch best at OFF** (`diary.select_by: off_auc_within`) | Before, it kept a later epoch with OFF at 0.56 because the other targets improved | Yes |
+| **Frozen body in the diary step** (only the heads learn) | **0.642**, against 0.58 to 0.61 when the whole network learns, which memorised the training patients | Yes |
+| Adding time of day | 0.625 → 0.649 for a simple model, but time of day alone scores 0.639: the clock does the work, not the movement | No |
+| Adding tremor-band frequency features | 0.625 → 0.624 | No: harnet10 already holds it |
+| Adding the data pipeline's 7 hourly movement features | 0.625 → 0.636 on all patients, 0.630 → 0.628 on patients with 5+ hours of each answer | No: within noise |
+
+How the baseline works (`scripts/models/patient_baseline.py`): for each hour, the mean and spread of the patient's worn windows over the past 168 hours, never including that hour. Early on, when a patient has little past, it's pulled toward the training patients' mean and spread, as if the patient already had 24 hours of average data (`warmup_h`), so the pull fades as their own hours add up. It only ever looks back, so it works the same way on live data from the app. The training patients' mean and spread are saved with the model.
+
+### The gates
+
+| Gate | When it fails | Setting, and why |
+|---|---|---|
+| **Leakage check** (train) | A model fitted to shuffled labels scores far from 0.5 | `max_auc: 0.6`, judged on state and tremor, within patients only. Sleep isn't judged, because it follows the night even with shuffled labels. Pooled AUCs aren't judged, because they follow how much each patient moves (0.36 on shuffled labels with no leak). A leak would still show within patients |
+| **Validation gate** (evaluate) | OFF or tremor scores below guessing | `cv/state_now/off_auc` and `cv/tremor_now/any_tremor_auc` at least 0.5 |
+| **Bias gate** (bias) | A patient group scores much worse than another | AUC gap over 0.15 on OFF, any tremor or asleep, between groups of 5 or more patients. Groups of 2 to 4 measure those people more than the group, so they're reported but not judged |
+| **Release gate** (compare) | The chosen model is worse than the one in production | Compares its scores with the production model's `metrics.json` |
+
+### Where it ran
+
+The full run needs a GPU for harnet10 and the transformer, so it ran on a GCP machine with one NVIDIA L4 (`g2-standard-8`):
+
+1. The data pipeline ran in Airflow (Dhruv's `cops_data_pipeline` DAG, in Docker on the same machine) for the 60 participants, and pushed the data version and the patient split to the team's DVC remote.
+2. `python -m scripts.steps.tune`: 3 Optuna trials each for logistic regression and boosting. Each trial is a full 2-fold cross-validation.
+3. `python -m scripts.run_model_pipeline`: train, evaluate, bias, explain, select, export and register, with the tuned settings.
+4. `python -m scripts.steps.sensitivity_hparams`: which tuned settings mattered.
+
+Every step logged to the team's hosted MLflow in the experiment `parkinsons-risk`, through `gcloud run services proxy` on the machine. The run's logs are attached to a `run_logs` run. When everything finished, `artifacts/` (without the caches), the config, the split and the logs were copied to a bucket, and the machine shut itself down.
+
+### Results
+
+To be filled in from the 2026-11-15 run: each model's cross-validated and test scores, the chosen model, and the bias and explain findings, with the charts from MLflow.
 
 ## Adding your step
 

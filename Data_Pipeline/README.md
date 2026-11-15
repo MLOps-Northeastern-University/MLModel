@@ -40,7 +40,7 @@ python -m scripts.pipeline --mode full        # all 66
 
 - **Downloads:** zips already in `data/raw/` are reused. With every listed participant and `Demographics.csv` there, OSF isn't contacted at all, so copy zips you already have into `data/raw/` to run offline.
 
-- **Who is processed:** `data.participants` in the config names exactly who, whatever the mode. It's set to the model team's 10: 5 with DBS and 5 without, so each of the 5 test folds holds one of each. Set it to `null` to go back to `--mode sample` (the smallest `data.sample_size`) or `--mode full` (all 66).
+- **Who is processed:** `data.participants` in the config names exactly who, whatever the mode. It's set to 60 of the 66: everyone except the 6 patients kept for the app's demo (COPS-6, 41, 50, 51, 52, 59), who are never in the model's data. Set it to `null` to go back to `--mode sample` (the smallest `data.sample_size`) or `--mode full` (all 66).
 - Participants run 4 at a time (`run.parallel_participants`). One failing is skipped and listed in `reports/failed_participants.json` with an alert; more than 20% failing (`data.max_failed_fraction`) stops the run with exit code 1.
 - A dataset that fails its checks also stops the run with exit code 1.
 - Every setting is in `config/pipeline.yaml`. Email and Slack alerts are on once `.env` is filled in from `.env.example`; without it they're logged and skipped.
@@ -115,6 +115,20 @@ The spec is `windows:` in the config (10 s, 30 Hz, 3 axes, `spec_version: 1`). I
 - **Warnings** (alert, the run carries on): fewer than 24 usable hours for a participant, under 50% of windows worn, wrists that still disagree after the orientation fix, and diary label issues.
 - **Bias** (`bias_report.md`): rows, participants, and the share of off, on, dyskinetic and asleep, per sex, age group, visit, DBS, Hoehn & Yahr stage and PD subtype. The model pipeline checks the model itself per group.
 
+## Full run (2026-11-15)
+
+The 60 participants, run by the Airflow DAG `cops_data_pipeline` in Docker on the model team's GCP GPU machine:
+
+| | |
+| --- | --- |
+| Hours | 10,272 diary hours, 8,344 usable |
+| Windows | 3,216,337, of which 3,082,176 worn |
+| Doses | 2,109 |
+| Checks | 0 critical, 25 warnings |
+| Failed participants | None. The first run skipped 8 for drug names the LEDD table didn't know, so these were added to `config/ledd.yaml`: selegeline, clozapin, entacapon, pramipexole, pramipexol and levocomp |
+| Data version | Pushed to the DVC remote; `dvc.lock` names it |
+| Patient split | `data/processed/patient_split.json`, also under DVC: the 10 test patients and the 50 development patients in 2 folds, with the rule that picked them (see [Model_Pipeline/README.md](../Model_Pipeline/README.md#the-patients)) |
+
 ## Sample run (2026-11-14)
 
 The model team's 10 participants (`data.participants`: 5 with DBS, 5 without):
@@ -173,6 +187,7 @@ Newest first.
 
 | Date | Who | What changed | PR |
 | --- | --- | --- | --- |
+| 2026-11-15 | Sam Selvaraj | Full run on 60 participants through Airflow (the 6 demo patients left out), more COPS drug names in the LEDD table, and the patient split under DVC | #22 |
 | 2026-11-14 | Dhruv Puri | Rebuilt the pipeline for the window model: every diary hour kept (sleep is a label), 10-s 30 Hz windows with worn flags, the more affected wrist with an orientation fix checked on both wrists, dose events wired in, a patients table, and checks against Model_Pipeline's `Dataset` contract. Removed UPDRS, the row-dropping cleaning, `hours_since_dose`, the schema baseline and the model-level bias check. 18 modules became 8. Then: a named list of participants (the 10 for the model team), orientation decided per wear bout, a fallback when only one wrist was recorded or the side is "both", every wrist mirrored to read like a right one, zips already in `data/raw/` reused without downloading, and 3 more COPS drug names in the LEDD table | (this PR) |
 | 2026-11-11 | Sam Selvaraj | Added `scripts/ledd.py`: doses as events with their levodopa equivalent dose, from `config/ledd.yaml` (Jost et al. 2023, Table 1, every value cited), with COMT inhibitor boosts and a clear stop on any unknown drug name. Updated requests, pyarrow and pytest for the Dependabot alerts | (this PR) |
 | 2026-10-26 | Shaikh Basim | Made the pipeline run with only Docker: `tests` and `pipeline` services, Airflow's slim image, the Linux `AIRFLOW_UID` setup, and a README that starts with the Docker commands | #9 |

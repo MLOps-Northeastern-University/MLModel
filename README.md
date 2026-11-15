@@ -101,6 +101,7 @@ Newest first. One row per milestone, not per small change.
 
 | Date | Who | What changed | PR |
 |---|---|---|---|
+| 2026-11-15 | Sam Selvaraj | First full run on real data: the 66-patient split (10 test, 6 demo, 50 development), the data pipeline through Airflow on 60 participants with the data and split under DVC, then tuning and the whole model pipeline on a GCP GPU machine, logged to the hosted MLflow. Model pipeline (P2): each patient compared with their own past week (within-patient OFF from chance to about 0.64), early stopping by OFF, charts per run, and leakage and bias gates that judge what they should. Docs updated with the results and what was tested | #22 |
 | 2026-11-15 | Ayush Varma | Model pipeline (P4): the registry in the models bucket (`MODEL_REGISTRY` in CI), a `status` and `rollback` command, and the release gate skips a metric neither model has | (this PR) |
 | 2026-11-15 | Ayush Varma | Model pipeline (P4): export for the server (the saved model folder, manifest, metrics, stats and bias report; harnet10 not bundled), optional device export off by default, and select no longer needs `exportable` | (this PR) |
 | 2026-11-14 | Tejaswini Sarikonda | Model pipeline (P3): the bias step (slices scored with Fairlearn, the bias gate with an alert, mitigation by reweighing as a new `_reweighted` candidate, `bias.json`, `bias_report.md` and plots) and the explain step (exact Shapley values over each model's input groups, the AUC drop when a group is left out, plots). Tested on synthetic data | (this PR) |
