@@ -70,14 +70,14 @@ models:
   horizons: [now, next_hour]
   candidates:
     # The baselines: each 10-s window on its own, no past (MODEL.md, Experiment order, stage 0).
-    # 15 of each labelled hour's windows to train on (the default is 60): about 4x faster to fit,
+    # 10 of each labelled hour's windows to train on (the default is 60): about 6x faster to fit,
     # which tuning (many fits) needs on the CPU; predictions still use every window.
     - name: window_logistic
       family: window_logistic
-      params: {windows_per_hour: 15}
+      params: {windows_per_hour: 10}
     - name: window_boosting
       family: window_boosting
-      params: {windows_per_hour: 15}
+      params: {windows_per_hour: 10}
     # The window model (MODEL.md, Architecture and Training). Its settings are the defaults in
     # scripts/models/motor_causal_transformer/model.py; a block set here is merged into them.
     - name: motor_causal_transformer
