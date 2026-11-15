@@ -76,6 +76,9 @@ Every PR and every push to `dev` or `main` runs [.github/workflows/checks.yml](.
 | Data file guard | Fails on data or model files (`.csv`, `.h5`, `.pt` and similar) or any file over 5 MB. Small synthetic test data may go in `tests/fixtures/`. |
 | Markdown lint | Fails on broken Markdown. Rules are relaxed; see `.markdownlint-cli2.yaml`. |
 | Data pipeline tests | flake8, pytest with an 85% coverage floor, and `dvc dag`, on Python 3.11 |
+| Model pipeline tests | flake8 and pytest on Python 3.11. The coverage floor is 0 while the steps are being built, and goes up to 85. |
+
+A second workflow, [.github/workflows/model.yml](.github/workflows/model.yml), runs the model pipeline itself in the team's GCP project and emails the team when it fails and when training finishes. It runs on the way to `main`: on a pull request into `main` (checks only) and on the merge (trains and releases). How it works, its settings, and how to open the hosted MLflow: [Model_Pipeline/README.md, "Running in the cloud"](Model_Pipeline/README.md#running-in-the-cloud).
 
 Dependabot opens PRs to keep the workflow's actions up to date.
 
@@ -101,6 +104,7 @@ Newest first. One row per milestone, not per small change.
 | 2026-11-14 | Tejaswini Sarikonda | Model pipeline (P3): the bias step (slices scored with Fairlearn, the bias gate with an alert, mitigation by reweighing as a new `_reweighted` candidate, `bias.json`, `bias_report.md` and plots) and the explain step (exact Shapley values over each model's input groups, the AUC drop when a group is left out, plots). Tested on synthetic data | (this PR) |
 | 2026-11-14 | Dhruv Puri | Model pipeline (P1): evaluate and the validation gate, after train: a 95% interval for each pooled AUC from resampling patients, AUCs per fold and per patient, ROC plots and each candidate's `metrics.json`, with `gates_passed` set for select. Model pipeline reads the rebuilt data pipeline's output (`hours.csv`, `windows/manifest.json`) | (this PR) |
 | 2026-11-14 | Dhruv Puri | Data pipeline rebuilt for the window model: 10-s 30 Hz windows from the more affected wrist with an orientation fix, every diary hour kept, dose events and a patients table, 18 modules down to 8. Run on the model team's 10 participants and pushed as a DVC data version | (this PR) |
+| 2026-11-14 | Shaikh Basim | Model pipeline (P5): the GCP project as Terraform in `infra/` (buckets, Workload Identity Federation for CI, Artifact Registry, Cloud SQL, the hosted MLflow on Cloud Run), the run command through every step (train, evaluate, bias, explain, select, release gate, export, register), the `model.yml` CI workflow, email alerts, and the shared DVC remote | (this PR) |
 | 2026-11-13 | Ayush Varma | Model pipeline (P4): model selection, the release gate against production, the export bundle, and the registry with rollback. Placeholders for the phone runtime, the registry location and the Backend endpoint | (this PR) |
 | 2026-11-11 | Sam Selvaraj | Model: the design decisions in MODEL.md. Model pipeline core: targets (kinesia score and tremor, now and next hour), the Dataset contract with a versioned window spec, the tracker contract with in-memory and MLflow trackers, and production logging. Data pipeline: dose events with LEDD from Jost et al. 2023. Fixed the Dependabot alerts | (this PR) |
 | 2026-10-25 | Ayush Varma | Data pipeline run on 5 sample participants with `dvc repro` and Airflow, first DVC data version, results, bias findings, Gantt chart and screenshots in the docs, and this README updated | (this PR) |
