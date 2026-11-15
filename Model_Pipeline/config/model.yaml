@@ -90,7 +90,7 @@ models:
 train:
   # scripts/steps/train.py. Every candidate trains with each seed on every fold; the cv
   # scores are the mean over seeds.
-  seeds: [42, 43, 44]
+  seeds: [42]
   # Train the candidates tune.py tuned with the settings it chose (artifacts/tuned_params.json),
   # merged over their config. Refused if they were tuned on another split, data or config, or if
   # tune hasn't run yet: run tune first.
