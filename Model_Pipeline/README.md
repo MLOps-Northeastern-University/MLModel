@@ -5,7 +5,8 @@ Trains the model behind Careportal's symptom timeline. From the watch's movement
 > **Status:** in progress.
 >
 > - **Built:** the contracts in `core/` (with the shared scores, `core/metrics.py`), the data loader, the patient split, three model families and the registry, training, tuning, hyperparameter sensitivity, the MLflow tracker, and selection, export, registry and the release gate (P4), and evaluate with the validation gate (P1).
-> - **Still a docstring:** the bias and explain steps, and `models/composite.py`.
+> - **Built (P3):** the bias step (slices, gate, reweighing) and the explain step (Shapley values over input groups, ablation), tested on synthetic data and a small test model family.
+> - **Still a docstring:** `models/composite.py`.
 > - **Not run on the real data yet:** training, tuning and sensitivity are tested on synthetic data only.
 >
 > Each module says what it's for and who owns it.
@@ -217,7 +218,7 @@ There's no `to_keras()` or phone export: the model runs on the server.
 | `manifest.json` | P4 | What the Backend needs to run and check the model: family, version, window spec version, labels, and the model folder's sha256 |
 | `stats.json` | P4 | The training data's statistics for drift, starting with the 7 hourly features |
 | `metrics.json` | P1 | The chosen candidate's `artifacts/evaluation/<name>/metrics.json`: train's `cv/` scores plus evaluate's 95% intervals (`_auc_lo`, `_auc_hi`), which the next run's release gate compares against |
-| `bias.json` | P3 | Metrics per slice and the mitigation result |
+| `bias.json` | P3 | Metrics per slice and the mitigation result: `artifacts/bias/bias.json` |
 
 harnet10 isn't in the bundle: its licence limits redistribution. The server loads its own pinned copy, and the model refuses one whose sha256 differs from training.
 
@@ -247,6 +248,24 @@ Charts (`train.charts`): every train run with predictions gets its own, under `c
 - **Comparison** (on the `train` run): the candidates side by side on the metrics in `train.charts.compare`, with each one's spread across folds.
 
 Each fold run gets them (`folds: false` turns that off), each candidate's run gets them for all its folds together, and the final run gets them when the test patients are scored. MLflow's own chart view still compares any logged metric across runs. A chart that fails to draw is a warning, never a failed run.
+
+## Bias and explanations (P3)
+
+```bash
+python -m scripts.steps.bias      # after evaluate: reads artifacts/candidates.json and artifacts/predictions/
+python -m scripts.steps.explain   # after bias: explains each final model by its input groups
+```
+
+| Step | Config | What it does | Writes |
+|---|---|---|---|
+| `bias` | `bias:` | Joins each predicted hour to its patient's groups (`slice_columns`, from the hours table or else the patients table) and scores every group with Fairlearn's `MetricFrame`, using `core/metrics.py`'s scores plus each question's recall, precision and false-positive rate. Each check in `bias.checks` fails when the gap between the best and worst judged group is over its `max_gap`. A group is judged only with `min_slice_rows` hours and `min_slice_participants` patients. A failing candidate alerts and is retrained with reweighing as `<name>_reweighted`, a new candidate. No candidate passing raises `GateError` | `artifacts/bias/`: `bias.json`, `bias_report.md`, `plots/`; the updated `artifacts/candidates.json` |
+| `explain` | `explain:` | Exact Shapley values over each model's input groups (movement, doses and check-ins, patient fields, hourly features) for P(OFF), P(any tremor) and P(asleep), and the AUC drop when one group is left out | `artifacts/explain/<candidate>/` (`shap.json`, `shap.png`, `ablation.png`), `explain_report.md` |
+
+- **One candidates file, passed along.** Bias reads `artifacts/candidates.json` and writes it back with each candidate's `gates["bias"]` and `gates_passed`, which is true only when every gate passed, so select skips a candidate that failed bias. Evaluate's earlier `gates_passed` is kept as `gates["validation"]` and never overwritten. A `_reweighted` candidate, which evaluate never saw, is held to the same `validation_gate.min`.
+- **Nothing judged blocks.** A candidate passes only when at least one check was judged and none failed. If every group is too small to judge, the gate fails and alerts rather than passing by default, and no reweighted retrain is made, since there's nothing to reweigh.
+- **Out-of-fold predictions by default** (`bias.predictions: cv`), so every development patient counts and the test patients stay unseen.
+- **Reweighing fixes imbalance, not weak signal.** It weights each group's answers as if group and answer were independent (Kamiran and Calders), with weights from each fold's training patients only. It closes a gap a model learned from who is usually OFF; it can't close one where the movement shows OFF less clearly for a group. The report shows both gaps and the selection metric's change, so the trade-off is visible.
+- **Leaving a group out** shuffles it (movement within each patient, hourly features within each patient), removes it (events) or swaps it with another patient's (patient fields), repeated `explain.repeats` times.
 
 ## Adding your step
 
