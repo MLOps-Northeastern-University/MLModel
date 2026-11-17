@@ -127,13 +127,22 @@ Then open <http://localhost:5001>, and leave the command running while you use i
 4. Uploads `artifacts/` and `logs/` as the run's `model-run` artifact, even when it fails.
 5. On a push to `main` only: releases the model, and pushes the training image as `ml/training:<commit>`.
 
-**When it runs:** when `Model_Pipeline/**` or `Data_Pipeline/dvc.lock` changes on the way to `main`:
+**When it runs:** by hand for now, with Actions → Model → Run workflow, on any branch; a run releases only from `main`. The triggers for a pull request into `main` and a push to `main` (on `Model_Pipeline/**` or a new `Data_Pipeline/dvc.lock`) are in the file, commented out, until CI trains on a GPU (see [CI/CD](#cicd-assignment-section-7)).
 
-- a pull request into `main` (`dev` → `main` at release time) checks every gate and releases nothing;
-- the merge into `main` trains, checks and releases;
-- Actions → Model → Run workflow checks any branch, and releases nothing.
+### CI/CD (assignment section 7)
 
-Work on `dev` doesn't start it; `checks.yml` tests every pull request. To run it for `dev` too, add `dev` to both `branches` lists in the workflow.
+What each requirement runs on, and where to see it:
+
+| Requirement | How | Evidence |
+|---|---|---|
+| **7.1** Training starts from CI | `model.yml`: GitHub Actions signs in to GCP through Workload Identity Federation (no key file) and runs `python -m scripts.run_model_pipeline`, logged to the hosted MLflow | Manual runs of `model.yml`. The run of 2026-11-13 went through every step, in the hosted MLflow |
+| **7.2** Validation gate | `steps/evaluate.py`: a candidate fails when a metric in `validation_gate.min` is missing or below it | The real run of 2026-11-15: failed for both candidates (see [The gates](#the-gates)) |
+| **7.3** Bias detection, alert or block | `steps/bias.py`: groups of 5+ patients, AUC gap over 0.15 fails; a failure emails the team, and no passing candidate stops the release | The real run: failed for both, so select stopped the run |
+| **7.4** Registry push | `steps/register.py`: the bundle goes to `gs://team17-mlops-neu-models/parkinsons-risk/v<N>/`, with `active.json` naming the version in use | v1 is there, released by hand as an override after the gates failed (tagged `manual_release` in MLflow) |
+| **7.5** Alerts | `run_model_pipeline.py` emails on a failed gate, a crash and finished training; `model.yml` on any other failed step; the settings are GitHub secrets | [Alerts](#alerts) |
+| **7.6** Rollback | `steps/compare_production.py`: a model worse than the active one on any `release_gate.rules` metric is never exported or released; `python -m scripts.steps.register rollback` makes the previous version active again | The release gate's tests, and `register status` |
+
+**Why CI doesn't train the real model yet.** The full run needs a GPU for harnet10 and the transformer (about 3.5 hours on an NVIDIA L4, tuning included), the 11.6 GB of windows and harnet10's weights. GitHub's runners have no GPU and stop a job after 6 hours, so the real run was made on a GCP GPU machine with the same command. The next step keeps `model.yml` as the trigger: one job starts that machine, the pipeline runs on it as a GitHub self-hosted runner (data, weights and caches stay on its disk), and a last job stops it, so it costs only while it trains.
 
 ### Settings
 
