@@ -1,0 +1,5 @@
+# Terraform's state can hold sensitive values; it lives in a bucket, never in Git.
+*.tfstate*
+# Downloaded providers, recreated by `terraform init`.
+.terraform/
+crash.log

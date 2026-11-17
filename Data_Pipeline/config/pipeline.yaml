@@ -6,22 +6,28 @@ data:
   osf_api_url: https://api.osf.io/v2
   # "sample" processes the N smallest participant zips; "full" processes all.
   mode: sample
-  sample_size: 5
-  # Optional: a folder that already contains participant zips (e.g. COPS-7.zip).
-  # When set, the pipeline uses these files instead of downloading from OSF.
-  local_zip_dir: null
-  # Delete each raw zip after its features are extracted, to save disk space.
-  delete_raw_after_processing: true
-  random_seed: 42
-  # Stop the command-line run if more than this share of participants fail.
+  sample_size: 5 # ignored when participants list is mentioned
+  # When set, exactly these participants are processed, whatever the mode.
+  # The model's 60: every COPS participant except the 6 kept for the app demo
+  # (COPS-6, 41, 50, 51, 52, 59), which the model pipeline must never see. The model's
+  # patient split makes 10 of these 60 the test patients and the other 50 development.
+  participants: [COPS-1, COPS-2, COPS-3, COPS-4, COPS-5, COPS-7, COPS-8, COPS-9, COPS-10, COPS-11,
+                 COPS-12, COPS-13, COPS-14, COPS-15, COPS-16, COPS-17, COPS-18, COPS-19, COPS-20, COPS-21,
+                 COPS-22, COPS-23, COPS-24, COPS-25, COPS-26, COPS-27, COPS-28, COPS-29, COPS-30, COPS-31,
+                 COPS-32, COPS-33, COPS-34, COPS-35, COPS-36, COPS-37, COPS-38, COPS-39, COPS-40, COPS-42,
+                 COPS-43, COPS-44, COPS-45, COPS-46, COPS-47, COPS-48, COPS-49, COPS-53, COPS-54, COPS-55,
+                 COPS-56, COPS-57, COPS-58, COPS-60, COPS-61, COPS-62, COPS-63, COPS-64, COPS-65, COPS-66]
+  # Zips already in paths.raw_dir are used instead of downloaded; with every listed
+  # participant and Demographics.csv there, OSF isn't contacted at all.
+  # Delete each downloaded zip once it's processed, to save disk space.
+  delete_raw_after_processing: false
+  # Stop the run if more than this share of participants fail.
   # Failed participants are listed in reports/failed_participants.json either way.
   max_failed_fraction: 0.2
 
 run:
-  # Participants processed at the same time, each in its own process (download,
-  # features, delete the zip), by the command-line run and the Airflow DAG.
-  # 1 processes them one after another. Each uses one CPU core and holds one
-  # participant zip on disk at a time.
+  # Participants processed at the same time, each in its own process, by the
+  # command line and the Airflow DAG. 1 processes them one after another.
   parallel_participants: 4
 
 paths:
@@ -45,11 +51,54 @@ files:
   demographics_file: Demographics.csv
   participant_zip_pattern: "^COPS-\\d+\\.zip$"
 
-features:
-  # Users wear one watch, so only this wrist's data is used: left or right.
-  # COPS recorded both wrists; the other one is ignored.
-  wrist: left
+wrist:
+  # Which wrist each participant's data comes from: more_affected (their
+  # pd_dominantside in Demographics.csv), left or right. COPS recorded both.
+  choose: more_affected
+  # The wrist for anyone whose pd_dominantside is "both" or blank.
+  fallback: right
+
+sensor:
   sampling_rate_hz: 100
+  # GENEActiv range; values outside are physically impossible and are clipped.
+  accel_range_g: [-8.0, 8.0]
+  # Samples further apart than this are a recording gap: nothing is filtered or
+  # resampled across one.
+  max_sample_gap_seconds: 0.05
+
+windows:
+  # The window spec. It must match `windows:` in Model_Pipeline/config/model.yaml,
+  # and the Android app cuts windows the same way. Bump spec_version whenever a
+  # value here, or a step in sensor.windows, changes.
+  spec_version: 1
+  seconds: 10
+  rate_hz: 30
+  axes: 3
+
+orientation:
+  # Checked on COPS's two wrists (both recorded at once): X runs along the arm,
+  # Y across the wrist, Z out of the face. A watch strapped on turned round reads
+  # X mostly positive, so X and Y are flipped back (a 180-degree turn). Then the
+  # left wrist's Y is flipped, so every wrist looks like a right one (most
+  # participants' more affected side).
+  along_arm_axis: 0
+  mirror_axis: 1
+  mirror_wrist: left
+  # Watches can be put back on another way round (COPS-60 was, after day 0), so
+  # each wear bout is judged on its own. A bout ends when the watch is off this long.
+  rewear_gap_minutes: 30
+
+wear:
+  # A window counts as not worn when the diary says so, or when, over a block
+  # around it, the watch is cold and nearly every window is still.
+  block_minutes: 30
+  # A window is still when every axis's standard deviation is below this.
+  still_std_g: 0.013
+  min_still_fraction: 0.95
+  max_temp_c: 25.0
+
+features:
+  # The 7 hourly features: the baselines and drift monitoring use them, not the window model.
   expected_seconds_per_file: 3600
   movement_band_hz: [0.1, 3.0]
   tremor_band_hz: [4.0, 8.0]
@@ -57,12 +106,21 @@ features:
   epoch_seconds: 1
   # An epoch counts as "still" when its mean movement is below this (in g).
   still_threshold_g: 0.01
-  # GENEActiv sensor range; values outside are physically impossible.
-  accel_range_g: [-8.0, 8.0]
-  # Gaps between samples longer than this are counted as recording gaps.
-  max_sample_gap_seconds: 0.05
-  # Hours with less than this much valid data are not used for features.
+  # Hours with less valid data than this get no features.
   min_valid_seconds: 60
+
+hours:
+  # drop_reason marks hours the hourly baselines should skip. No hour is removed.
+  min_valid_fraction: 0.8
+  min_worn_fraction: 0.5
+
+medication:
+  # The LEDD conversion table (Jost et al. 2023) and how each source writes drug names.
+  ledd_table: config/ledd.yaml
+  # Which name map in the table this data uses.
+  name_source: cops
+  # COPS only ticks the hour a dose was taken, so doses go at mid-hour.
+  dose_offset_minutes: 30
 
 labels:
   kinesia_text_to_score:
@@ -79,51 +137,10 @@ labels:
     Slight Tremor: 1
     Strong Tremor: 2
     Severe Tremor: 2
-  # Collapse the 7-point kinesia score into three classes.
-  kinesia_classes:
-    "off": [-3, -2, -1]
-    "on": [0]
-    "dyskinetic": [1, 2, 3]
-
-cleaning:
-  # Minimum share of the hour with valid samples (applies to partially worn hours too).
-  min_valid_fraction: 0.8
-  # Sensor-based non-wear check, in addition to the diary flag.
-  nonwear_max_temp_c: 25.0
-  nonwear_min_still_fraction: 0.95
-
-anomalies:
-  max_missing_fraction: 0.05
-  # Robust z-score (median / MAD) above which a value is an outlier.
-  outlier_z_limit: 6.0
-  max_outlier_fraction: 0.02
-  min_hours_per_participant: 24
-  # Anomaly types that stop the pipeline (others only send a warning alert).
-  critical_types: [schema_violation, empty_dataset, expectation_failed]
-
-validation:
-  categorical_max_unique: 20
-  # ID columns: new values are expected, so they are never treated as new categories.
-  id_columns: [participant_id]
-  # Allowed slack when comparing new numeric ranges with the baseline schema.
-  range_tolerance: 0.25
-  max_null_fraction_increase: 0.05
-
-bias:
-  slice_columns: [sex, age_group, visit, dbs, hoehn_yahr, pd_subtype]
-  age_bins: [0, 55, 65, 120]
-  age_labels: ["<55", "55-64", "65+"]
-  # Binary target used for slice-level model metrics.
-  positive_class: "off"
-  test_fraction: 0.3
-  min_participants_for_model: 4
-  min_slice_rows: 20
-  # A recall gap larger than this between slices is reported as bias.
-  max_recall_gap: 0.10
 
 demographics:
-  # Map Demographics.csv headers to standard names. Headers are lower-cased
-  # and spaces replaced with "_" first. Real headers (checked): id, age, sex,
+  # Map Demographics.csv headers to standard names. Headers are lower-cased and
+  # spaces replaced with "_" first. Real headers (checked): id, age, sex,
   # handedness, pd_subtype, pd_dominantside, pd_hoehnandyahr,
   # pd_yearssincediagnosis, dbs.
   column_map:
@@ -135,8 +152,20 @@ demographics:
     hoehnyahr: hoehn_yahr
     pd_hoehnandyahr: hoehn_yahr
     subtype: pd_subtype
-    pd_subtype: pd_subtype
     deep_brain_stimulation: dbs
+  age_bins: [0, 55, 65, 120]
+  age_labels: ["<55", "55-64", "65+"]
+
+bias:
+  # Groups whose label balance is reported. visit comes from the diary, the rest
+  # from Demographics.csv. The model pipeline checks the model per group.
+  slice_columns: [sex, age_group, visit, dbs, hoehn_yahr, pd_subtype]
+
+checks:
+  # Hours of both wrists compared per participant to confirm the orientation fix.
+  agreement_hours: 12
+  # Warn when a participant has fewer usable labelled hours than this.
+  min_labelled_hours: 24
 
 alerts:
   email_enabled: true

@@ -14,8 +14,7 @@ from urllib.parse import urlsplit
 
 import requests
 
-from scripts.utils.file_io import read_json, write_json
-from scripts.utils.logging_setup import get_logger
+from scripts.utils import get_logger, read_json, write_json
 
 logger = get_logger("acquire")
 
@@ -79,13 +78,30 @@ def list_osf_files(cfg, session=None):
     return files
 
 
-def build_manifest(files, cfg, mode=None):
-    """Select the participant zips and demographics file to process.
+def choose_participants(entries, cfg, mode):
+    """The participant zips to process, and the mode that chose them.
 
-    In sample mode the smallest participant zips are chosen, so the
-    pipeline finishes quickly and the choice is the same on every machine.
+    data.participants, when set, names exactly who to process, whatever the mode.
+    Otherwise "sample" takes the data.sample_size smallest zips (quick, and the same
+    on every machine) and "full" takes all of them.
     """
-    mode = mode or cfg["data"]["mode"]
+    wanted = cfg["data"].get("participants")
+    if wanted:
+        names = {f"{p}.zip" for p in wanted}
+        missing = names - {e["name"] for e in entries}
+        if missing:
+            raise AcquisitionError(f"Participants not found: {sorted(missing)}")
+        return [e for e in entries if e["name"] in names], "list"
+    entries = sorted(entries, key=lambda e: (e["size"] or 0, e["name"]))
+    if mode == "sample":
+        return entries[: cfg["data"]["sample_size"]], mode
+    if mode != "full":
+        raise ValueError(f"Unknown mode: {mode}")
+    return entries, mode
+
+
+def build_manifest(files, cfg, mode=None):
+    """Select the participant zips and demographics file to process."""
     pattern = re.compile(cfg["files"]["participant_zip_pattern"])
     participants = [f for f in files if f["name"] and pattern.match(f["name"])]
     demographics = [f for f in files if f["name"] == cfg["files"]["demographics_file"]]
@@ -95,12 +111,7 @@ def build_manifest(files, cfg, mode=None):
     if not demographics:
         raise AcquisitionError("Demographics file not found in the OSF listing")
 
-    participants.sort(key=lambda f: (f["size"] or 0, f["name"]))
-    if mode == "sample":
-        participants = participants[: cfg["data"]["sample_size"]]
-    elif mode != "full":
-        raise ValueError(f"Unknown mode: {mode}")
-
+    participants, mode = choose_participants(participants, cfg, mode or cfg["data"]["mode"])
     manifest = {
         "mode": mode,
         "participants": sorted(participants, key=lambda f: _participant_number(f["name"])),
@@ -111,38 +122,39 @@ def build_manifest(files, cfg, mode=None):
     return manifest
 
 
-def build_local_manifest(cfg, mode=None):
-    """Build a manifest from zips already on disk (data.local_zip_dir)."""
-    mode = mode or cfg["data"]["mode"]
-    folder = Path(cfg["data"]["local_zip_dir"])
-    pattern = re.compile(cfg["files"]["participant_zip_pattern"])
-    zips = sorted(
-        (p for p in folder.glob("*.zip") if pattern.match(p.name)),
-        key=lambda p: (p.stat().st_size, p.name),
-    )
-    if not zips:
-        raise AcquisitionError(f"No participant zips found in {folder}")
-    if mode == "sample":
-        zips = zips[: cfg["data"]["sample_size"]]
+def have_local_files(cfg):
+    """True when data/raw/ already holds Demographics.csv and every data.participants zip."""
+    wanted, raw = cfg["data"].get("participants"), cfg["resolved_paths"]["raw_dir"]
+    names = [cfg["files"]["demographics_file"]] + [f"{p}.zip" for p in wanted or []]
+    return bool(wanted) and all((raw / n).exists() for n in names)
 
+
+def build_local_manifest(cfg, mode=None):
+    """Build a manifest from the zips already in data/raw/."""
+    folder = cfg["resolved_paths"]["raw_dir"]
+    pattern = re.compile(cfg["files"]["participant_zip_pattern"])
+    zips = [{"name": p.name, "local_path": str(p), "size": p.stat().st_size}
+            for p in folder.glob("*.zip") if pattern.match(p.name)]
+    zips, mode = choose_participants(zips, cfg, mode or cfg["data"]["mode"])
     demo_path = folder / cfg["files"]["demographics_file"]
     manifest = {
         "mode": mode,
-        "participants": [
-            {"name": p.name, "local_path": str(p), "size": p.stat().st_size} for p in zips
-        ],
-        "demographics": {"name": demo_path.name, "local_path": str(demo_path)}
-        if demo_path.exists()
-        else None,
+        "participants": sorted(zips, key=lambda f: _participant_number(f["name"])),
+        "demographics": {"name": demo_path.name, "local_path": str(demo_path)},
     }
-    manifest["participants"].sort(key=lambda f: _participant_number(f["name"]))
     logger.info("Local manifest: %d participants from %s", len(zips), folder)
     return manifest
 
 
 def fetch_manifest(cfg, mode=None, session=None):
-    """Create the manifest (from OSF or a local folder) and save it to disk."""
-    if cfg["data"].get("local_zip_dir"):
+    """Create the manifest and save it to disk.
+
+    If data/raw/ already has every listed participant and Demographics.csv, they
+    are used as they are, with no network. Otherwise OSF is listed, and each zip is
+    downloaded later unless a valid copy is already in data/raw/.
+    """
+    if have_local_files(cfg):
+        logger.info("All listed participants are already in %s: not downloading", cfg["resolved_paths"]["raw_dir"])
         manifest = build_local_manifest(cfg, mode)
     else:
         manifest = build_manifest(list_osf_files(cfg, session), cfg, mode)

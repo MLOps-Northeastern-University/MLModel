@@ -1,0 +1,109 @@
+name: Model
+
+# Trains and checks the model: Actions → Model → Run workflow, on any branch. A run releases
+# only from main.
+#
+# Manual only for now. The full training needs a GPU (harnet10 and the transformer: about
+# 3.5 h on an NVIDIA L4) and the 11.6 GB of windows, which GitHub's runners don't have, so
+# the real run was made on a GCP GPU machine with the same run_model_pipeline. The next step
+# is a job here that starts that machine and runs this one there, as a self-hosted runner
+# (Model_Pipeline/README.md, "CI/CD"). Then these triggers go back on, so a change to the
+# model's code or data on its way to main retrains, checks and releases:
+on:
+  # pull_request:
+  #   branches: [main]
+  #   paths: [Model_Pipeline/**, Data_Pipeline/dvc.lock, .github/workflows/model.yml]
+  # push:
+  #   branches: [main]
+  #   paths: [Model_Pipeline/**, Data_Pipeline/dvc.lock, .github/workflows/model.yml]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  # Lets the job ask GitHub for the ID token that Google checks (Workload Identity Federation).
+  id-token: write
+
+# One run per branch at a time, so two releases never pick the same version number.
+concurrency:
+  group: model-${{ github.ref }}
+
+jobs:
+  train:
+    name: Train, check and release
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: Model_Pipeline
+    env:
+      IMAGE: us-central1-docker.pkg.dev/${{ vars.GCP_PROJECT_ID }}/ml/training
+      # Only a push to dev or main releases; every other run just checks.
+      RELEASE: ${{ github.event_name == 'push' && (github.ref == 'refs/heads/dev' || github.ref == 'refs/heads/main') }}
+      # Email alerts (scripts/alerts.py). Unset ones are skipped, never an error.
+      ALERT_EMAIL: ${{ secrets.ALERT_EMAIL }}
+      SMTP_HOST: ${{ secrets.SMTP_HOST }}
+      SMTP_PORT: ${{ secrets.SMTP_PORT }}
+      SMTP_USER: ${{ secrets.SMTP_USER }}
+      SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          # The same Python as the model pipeline's Docker image: 3.13, for PyTorch.
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: Model_Pipeline/requirements.txt
+      # PyTorch's CPU build first, as in checks.yml: the default Linux build pulls in GBs of CUDA.
+      - name: Install dependencies
+        run: |
+          pip install torch==2.12.1 --index-url https://download.pytorch.org/whl/cpu
+          pip install -r requirements.txt
+      # Logs in as the training service account, and gets an ID token for the hosted
+      # MLflow on Cloud Run, which only lets in callers with run.invoker.
+      - id: auth
+        uses: google-github-actions/auth@v3
+        with:
+          workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
+          service_account: ${{ vars.GCP_SERVICE_ACCOUNT }}
+          token_format: id_token
+          id_token_audience: ${{ vars.MLFLOW_TRACKING_URI }}
+          id_token_include_email: true
+      # dvc pull goes here once the data and the patient split are in the bucket (P5_Setup_Plan.md,
+      # step 4). Until then the run stops at train: there's no data on the runner.
+      - name: Run the model pipeline
+        id: pipeline
+        env:
+          MLFLOW_TRACKING_URI: ${{ vars.MLFLOW_TRACKING_URI }}
+          MLFLOW_TRACKING_TOKEN: ${{ steps.auth.outputs.id_token }}
+          # The registry in the models bucket, so releases and the active version persist
+          # between runs (scripts/steps/register.py).
+          MODEL_REGISTRY: gs://team17-mlops-neu-models
+        # A failed gate exits 1 and fails the job. The pipeline emails the team itself on
+        # a failed gate, a crash or a release.
+        run: python -m scripts.run_model_pipeline ${{ env.RELEASE != 'true' && '--no-register' || '' }}
+      - name: Upload the reports and bundle
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: model-run
+          path: |
+            Model_Pipeline/artifacts/
+            Model_Pipeline/logs/
+          if-no-files-found: ignore
+      # The image that made this release, tagged with the commit, to rerun it later.
+      - if: env.RELEASE == 'true'
+        uses: google-github-actions/setup-gcloud@v3
+      - name: Push the training image
+        if: env.RELEASE == 'true'
+        run: |
+          gcloud auth configure-docker us-central1-docker.pkg.dev --quiet
+          docker build -t "$IMAGE:${{ github.sha }}" .
+          docker push "$IMAGE:${{ github.sha }}"
+      # The pipeline already emailed about its own failure, so this covers every other
+      # step: installing, logging in to GCP, pushing the image.
+      - name: Email the team about a failed step
+        if: failure() && steps.pipeline.outcome != 'failure'
+        env:
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          pip install -q requests==2.33.0 PyYAML==6.0.2
+          python -c "import os; from scripts.alerts import notify; notify('[MedNOVA model] CI job failed', 'A step outside the pipeline failed (install, GCP login or image push).\n\nRun: ' + os.environ['RUN_URL'])"

@@ -1,0 +1,64 @@
+# MLflow, plus two one-off services that run the pipeline and the tests in the
+# model pipeline's image, so only Docker is needed. Run from the Model_Pipeline
+# folder. The whole repository (..) is mounted, so code edits need no rebuild,
+# the pipeline reads ../Data_Pipeline/data/processed/hourly_features.csv (get
+# it with `dvc pull` in Data_Pipeline), and outputs land in artifacts/ on the host.
+#
+#   docker compose up -d mlflow          # MLflow at http://localhost:5001
+#   docker compose run --rm train        # the whole model pipeline, logged to MLflow
+#   docker compose run --rm tests        # pytest
+
+x-tool: &tool
+  build: .
+  # Not started by "docker compose up"; run with "docker compose run --rm <name>".
+  profiles: [tools]
+  # Optional: a .env with the alert settings (see scripts/alerts.py) turns on email/Slack.
+  env_file:
+    - path: .env
+      required: false
+  volumes:
+    - ..:/app
+  working_dir: /app/Model_Pipeline
+
+services:
+  mlflow:
+    # The official image: the training image doesn't need the MLflow server.
+    image: ghcr.io/mlflow/mlflow:v3.17.2
+    # Runs go in a SQLite database and files in a folder, both in a volume, so they
+    # survive restarts. Clients send files through the server (--artifacts-destination).
+    command:
+      - mlflow
+      - server
+      - --host=0.0.0.0
+      - --port=5000
+      - --backend-store-uri=sqlite:////mlflow/mlflow.db
+      - --artifacts-destination=/mlflow/artifacts
+      # MLflow 3 only answers requests addressed to the hosts listed here. The
+      # train service reaches it as mlflow:5000, the browser as localhost:5001.
+      - --allowed-hosts=mlflow:5000,localhost:*,127.0.0.1:*
+    # 5001 on the host, because macOS uses 5000 for AirPlay.
+    ports:
+      - "5001:5000"
+    volumes:
+      - mlflow-data:/mlflow
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:5000/health')"]
+      interval: 10s
+      retries: 6
+    restart: unless-stopped
+
+  train:
+    <<: *tool
+    command: ["python", "-m", "scripts.run_model_pipeline"]
+    environment:
+      MLFLOW_TRACKING_URI: http://mlflow:5000
+    depends_on:
+      mlflow:
+        condition: service_healthy
+
+  tests:
+    <<: *tool
+    command: ["python", "-m", "pytest", "-q", "-p", "no:cacheprovider"]
+
+volumes:
+  mlflow-data:
