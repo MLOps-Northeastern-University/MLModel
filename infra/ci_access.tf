@@ -44,3 +44,19 @@ resource "google_service_account_iam_member" "training_wif" {
   role               = "roles/iam.workloadIdentityUser"
   member             = "principalSet://iam.googleapis.com/${google_iam_workload_identity_pool.github.name}/attribute.repository/${var.github_repo}"
 }
+
+# ---- making the training VMs (training_vm.tf) ---------------------------------------------
+
+# Create, start and delete the VM of each training run.
+resource "google_project_iam_member" "training_instances" {
+  project = var.project_id
+  role    = "roles/compute.instanceAdmin.v1"
+  member  = "serviceAccount:${google_service_account.training.email}"
+}
+
+# Make that VM run as training-vm: a VM can only be given an account its maker may act as.
+resource "google_service_account_iam_member" "training_acts_as_vm" {
+  service_account_id = google_service_account.training_vm.name
+  role               = "roles/iam.serviceAccountUser"
+  member             = "serviceAccount:${google_service_account.training.email}"
+}
