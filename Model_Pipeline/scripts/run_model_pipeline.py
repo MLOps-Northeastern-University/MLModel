@@ -21,7 +21,8 @@ Runs the steps in order, each logged to MLflow as a child of one model_pipeline 
 
 The comparison comes before export, so a model that can't replace the active one is never
 packaged. Every step reads the data and the patient split itself (paths in config/model.yaml), so
-the data must be there first: dvc pull in ../Data_Pipeline.
+the data must be there first: dvc pull in ../Data_Pipeline. The steps are in pipeline_steps.py and
+hand over through files in artifacts/, so the Airflow DAG can run each one on its own (run_step.py).
 
 Which candidates and whether to tune are chosen per run, not in the config, so a run trains only
 what changed:
@@ -50,16 +51,7 @@ import uuid
 from scripts.alerts import notify
 from scripts.core.errors import GateError, PipelineError
 from scripts.data.folds import read_split
-from scripts.data.loaders import load_dataset
-from scripts.steps.bias import CheckBias
-from scripts.steps.compare_production import CompareProduction
-from scripts.steps.evaluate import EvaluateModel
-from scripts.steps.explain import ExplainModels
-from scripts.steps.export import ExportModel
-from scripts.steps.register import RegisterModel, active_metrics
-from scripts.steps.select import SelectModel
-from scripts.steps.train import TrainModels
-from scripts.steps.tune import TuneModels
+from scripts.pipeline_steps import STEPS, steps_for
 from scripts.tracking.memory_tracker import MemoryTracker
 from scripts.tracking.mlflow_tracker import MlflowTracker
 from scripts.utils.config import choose_candidates, load_config
@@ -69,21 +61,6 @@ logger = get_logger("run_model_pipeline")
 
 # Starts every alert's subject, to filter them in the inbox.
 ALERT_PREFIX = "[MedNOVA model]"
-
-
-# ---- what joins the steps ----------------------------------------------------------------
-
-def training_stats(cfg, split, data=None):
-    """The 7 hourly features' statistics over the development patients, for drift checks."""
-    if data is None:
-        data = load_dataset(cfg, groups=("features",), participants=split.development)
-    else:
-        data = data.subset(split.development)
-    table = data.features.astype(float)
-    return {"rows": len(table), "participants": len(split.development),
-            "features": {name: {"mean": col.mean(), "std": col.std(), "min": col.min(),
-                                "p50": col.median(), "max": col.max()}
-                         for name, col in table.items()}}
 
 
 # ---- the run -----------------------------------------------------------------------------
@@ -105,40 +82,35 @@ def run(cfg, tracker, release=True, data=None, split=None, tune=False, reason=No
         PipelineError: A step couldn't go on, such as a failed gate (GateError).
     """
     if tune:
-        # Train with what tuning finds, even if the config doesn't use tuned settings.
-        cfg = copy.deepcopy(cfg)
-        cfg["train"]["use_tuned"] = True
-    register = RegisterModel(cfg, tracker)
+        cfg = with_tuning(cfg)
     split = split or read_split(cfg)
-    names = [c["name"] for c in cfg["models"]["candidates"]]
-    tags = {"owner": "P5", "split_hash": split.hash, "candidates": ",".join(names),
+    results = {}
+    with tracker.run("model_pipeline", tags=run_tags(cfg, split, tune, reason)):
+        for name in steps_for(tune=tune, release=release):
+            step, owner = STEPS[name]
+            with log_step(logger, name, owner=owner):
+                results[name] = step(cfg, tracker, data, split)
+    if not release:
+        logger.info("Not registered: --no-register")
+        return None
+    return results["register"]                                  # the released version
+
+
+def with_tuning(cfg):
+    """A copy of cfg that trains with what tuning finds, even if the config doesn't use tuned settings."""
+    cfg = copy.deepcopy(cfg)
+    cfg["train"]["use_tuned"] = True
+    return cfg
+
+
+def run_tags(cfg, split, tune, reason):
+    """The model_pipeline run's tags: what it trained, on which split, whether it tuned, and why."""
+    tags = {"owner": "P5", "split_hash": split.hash,
+            "candidates": ",".join(c["name"] for c in cfg["models"]["candidates"]),
             "tuned_this_run": str(tune).lower()}
     if reason:
         tags["reason"] = reason
-
-    with tracker.run("model_pipeline", tags=tags):
-        if tune:
-            with log_step(logger, "tune", owner="P2"):
-                TuneModels(cfg, tracker).run(data, split)
-        with log_step(logger, "train", owner="P2"):
-            candidates = TrainModels(cfg, tracker).run(data, split)
-        with log_step(logger, "evaluate", owner="P1"):
-            candidates = EvaluateModel(cfg, tracker).run(candidates)
-        with log_step(logger, "check bias", owner="P3"):
-            candidates = CheckBias(cfg, tracker).run(candidates, data, split)
-        with log_step(logger, "explain", owner="P3"):
-            ExplainModels(cfg, tracker).run(candidates, data, split)
-        with log_step(logger, "select a model", owner="P4"):
-            chosen = SelectModel(cfg, tracker).run(candidates)
-        with log_step(logger, "compare with production", owner="P4"):
-            CompareProduction(cfg, tracker).run(chosen["metrics"], active_metrics(register.family_dir))
-        with log_step(logger, "export", owner="P4"):
-            bundle_dir = ExportModel(cfg, tracker).run(chosen, training_stats(cfg, split, data))
-        if not release:
-            logger.info("Not registered: --no-register")
-            return None
-        with log_step(logger, "register", owner="P4"):
-            return register.run(bundle_dir)
+    return tags
 
 
 def where():

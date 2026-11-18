@@ -1,46 +1,21 @@
 """The whole run, every real step in order, on the small fake family and data the bias tests use."""
 
-import datetime as dt
 import functools
 import json
-from types import SimpleNamespace
 
 import pytest
 
 from scripts import run_model_pipeline
 from scripts.core.errors import GateError
 from scripts.core.tracker import RunStatus
-from scripts.models import registry
 from scripts.run_model_pipeline import run
-from scripts.steps import bias, train
+from scripts.steps import bias
+from scripts.steps.evaluate import EvaluateModel
 from scripts.steps.register import active_version, versions
+from scripts.steps.tune import TuneModels
 from scripts.tracking.memory_tracker import MemoryTracker
-from tests.helpers import make_config
-from tests.steps.fake_models import SPLIT, biased_dataset, pipeline_config
-
-STEPS = ["train", "evaluate", "bias", "explain", "select_model", "compare_production", "export"]
-# The release gate's rules that the fake family can be scored on (it predicts now only).
-RULES = [{"metric": "cv/state_now/off_auc", "must_improve": True},
-         {"metric": "cv/sleep_now/asleep_auc", "must_improve": False}]
-
-
-@pytest.fixture(autouse=True)
-def fake_family(monkeypatch):
-    monkeypatch.setitem(registry.FAMILIES, "fake_hourly", "tests.steps.fake_models:HourlyLogistic")
-
-
-@pytest.fixture(autouse=True)
-def ticking_clock(monkeypatch):
-    """A clock a second further on at each call: train names each saved model by the second, and
-    these tests run the pipeline twice within one."""
-    class Ticking(dt.datetime):
-        calls = 0
-
-        @classmethod
-        def now(cls, tz=None):
-            cls.calls += 1
-            return dt.datetime(2026, 1, 1, tzinfo=tz) + dt.timedelta(seconds=cls.calls)
-    monkeypatch.setattr(train, "dt", SimpleNamespace(datetime=Ticking, timezone=dt.timezone))
+from tests.pipeline_run import STEP_RUNS as STEPS, fake_family, run_config, ticking_clock  # noqa: F401
+from tests.steps.fake_models import SPLIT, biased_dataset
 
 
 @pytest.fixture(autouse=True)
@@ -56,19 +31,7 @@ def alerts(monkeypatch):
 
 @pytest.fixture
 def cfg(tmp_path):
-    """The full config, with the fake family and small bias and explain settings.
-
-    The fake data is biased on purpose; a gap limit of 1 lets a candidate through, so the run
-    reaches the release (test_a_biased_model_stops_the_run checks the bias gate). Its tremor is
-    noise, so the validation gate checks only the OFF score.
-    """
-    small = pipeline_config(tmp_path / "artifacts", max_recall_gap=1.0)
-    sections = {k: small[k] for k in ("models", "train", "bias", "explain")}
-    config = make_config(tmp_path, evaluation={"bootstrap_resamples": 50}, release_gate={"rules": RULES},
-                         **sections)
-    config["validation_gate"]["min"] = {"cv/state_now/off_auc": 0.5}   # replaced, not merged into
-    config["train"].update(use_tuned=False, charts={"enabled": False})  # nothing tuned here
-    return config
+    return run_config(tmp_path)
 
 
 def run_once(cfg, release=True, tracker=None, **options):
@@ -130,7 +93,7 @@ def test_the_run_is_tagged_with_its_candidates_and_reason(cfg):
 
 def test_with_tune_the_run_tunes_first_and_trains_with_tuned_settings(cfg, monkeypatch):
     tuned_with = []
-    monkeypatch.setattr(run_model_pipeline.TuneModels, "run",
+    monkeypatch.setattr(TuneModels, "run",
                         lambda self, data, split: tuned_with.append(self.cfg["train"]["use_tuned"]) or {})
     cfg["train"]["use_tuned"] = False
     cfg["tune"]["candidates"] = {}                                     # the fake family has nothing to tune
@@ -187,7 +150,7 @@ def test_main_refuses_a_candidate_the_config_doesnt_have(main_with):
 def test_a_crash_is_alerted_with_its_stack_trace_and_re_raised(main_with, alerts, monkeypatch):
     def broken(self, candidates):
         raise KeyError("missing column")
-    monkeypatch.setattr(run_model_pipeline.EvaluateModel, "run", broken)
+    monkeypatch.setattr(EvaluateModel, "run", broken)
     with pytest.raises(KeyError):
         main_with(["--no-mlflow"])
     (subject, body), = alerts

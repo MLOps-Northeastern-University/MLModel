@@ -76,6 +76,38 @@ python -m scripts.run_model_pipeline --candidates motor_causal_transformer --tun
 
 The leakage check (`train.leakage_check`) runs on one of the candidates being trained: the ones it names, or else the first candidate of the run.
 
+### One step at a time
+
+The Airflow DAG runs each step in its own container, with `scripts/run_step.py`. `start` saves the run's choices to `artifacts/run.json` (it takes the options above) and opens the `model_pipeline` run in MLflow. Each step reads `run.json` and logs under that run, and `finish` closes it, so MLflow looks the same as after a whole run:
+
+```bash
+python -m scripts.run_step start --candidates window_logistic --reason "new data"
+python -m scripts.run_step train          # then evaluate, bias, explain, select, compare, export, register
+python -m scripts.run_step finish         # or: finish --status failed
+```
+
+The steps are in `scripts/pipeline_steps.py`, which both this and the whole run use. They hand over only through files in `artifacts/`:
+
+| Step | Reads | Writes |
+|---|---|---|
+| tune | the data | `tuned_params.json` |
+| train | the data, `tuned_params.json` | `candidates.json`, `predictions/`, `models/` |
+| evaluate | `candidates.json`, `predictions/` | `candidates.json`, with the validation gate |
+| bias | `candidates.json`, `predictions/`, the data | `candidates.json`, with the bias gate; `bias/` |
+| explain | `candidates.json`, the data | `explain/` |
+| select | `candidates.json` | `chosen.json` |
+| compare | `chosen.json`, the active version's metrics | nothing: it passes or stops the run |
+| export | `chosen.json`, the data | `bundle/` |
+| register | `bundle/` | the registry's next version |
+
+A step exits 1 when it stops (a failed gate, a missing input) and alerts the team, so Airflow marks it failed and skips the rest.
+
+In a container:
+
+- `GIT_COMMIT` names the commit MLflow records, since there's no git in the image (a build argument of the Dockerfile).
+- `MODEL_MLFLOW_GOOGLE_AUTH=1` makes the tracker get Google ID tokens for the hosted MLflow from the machine's service account and renew them every 45 minutes. A token lasts an hour, and a GPU run takes hours. CI's own token is enough for its run.
+- The GPU image is built with `--build-arg TORCH=cu128` and run with `--gpus all`.
+
 The training data is the data pipeline's output, versioned by DVC. Get it with `dvc pull` in `../Data_Pipeline` (see [Training data](#training-data-dvc)). `paths.features_csv` in `config/model.yaml` points at it.
 
 ### The steps P2 built

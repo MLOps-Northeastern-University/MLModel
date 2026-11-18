@@ -186,15 +186,23 @@ def log_run_start(logger, cfg, packages=("numpy", "pandas", "scikit-learn", "mlf
 
 
 def environment(packages=("numpy", "pandas", "scikit-learn", "mlflow")):
-    """The code and library versions a result came from: git commit, uncommitted changes, Python, packages."""
+    """The code and library versions a result came from: git commit, uncommitted changes, Python, packages.
+
+    In a container there's no git: the image's GIT_COMMIT (set when CI builds it) names the commit,
+    and an image is built from a clean checkout, so it has no uncommitted changes.
+    """
     versions = {}
     for name in packages:
         try:
             versions[name] = importlib.metadata.version(name)
         except importlib.metadata.PackageNotFoundError:
             pass
-    return {"git_commit": _git("rev-parse", "HEAD"), "git_dirty": bool(_git("status", "--porcelain")),
-            "python": platform.python_version(), "packages": versions}
+    commit = _git("rev-parse", "HEAD")
+    if commit:
+        dirty = bool(_git("status", "--porcelain"))
+    else:
+        commit, dirty = os.environ.get("GIT_COMMIT"), False
+    return {"git_commit": commit, "git_dirty": dirty, "python": platform.python_version(), "packages": versions}
 
 
 def _git(*args):

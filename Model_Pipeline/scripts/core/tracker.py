@@ -161,6 +161,35 @@ class Tracker(ABC):
                 logger.info("tracking run %s ended %s", name, status.value, extra={
                     "event": "tracking_run_ended", "tracker_run_id": run_id, "status": status.value})
 
+    # ---- a run shared by several processes ------------------------------------------------
+    # When the steps run in separate containers (the Airflow DAG, run_step.py), the pipeline's run
+    # can't be one `with` block: the first task opens it, each step attaches to it, the last closes it.
+
+    def open_run(self, name, tags=None):
+        """Start a run and leave it open, for other processes to attach to. Returns its id."""
+        run_id = self._start_run(name, self.active_run_id, dict(tags or {}))
+        logger.info("tracking run %s opened", name, extra={"event": "tracking_run_opened", "tracker_run_id": run_id})
+        return run_id
+
+    @contextlib.contextmanager
+    def attach(self, run_id):
+        """Make an already open run the active one, so the runs started in the block are its children.
+
+        The run stays open when the block ends; close_run closes it.
+        """
+        token = self._stack.set(self._stack.get() + (run_id,))
+        try:
+            with log_context(tracker_run_id=run_id):
+                yield run_id
+        finally:
+            self._stack.reset(token)
+
+    def close_run(self, run_id, status):
+        """Close a run that open_run started, with a RunStatus."""
+        self._end_run(run_id, status)
+        logger.info("tracking run closed %s", status.value,
+                    extra={"event": "tracking_run_closed", "tracker_run_id": run_id, "status": status.value})
+
     def log_params(self, params):
         """Record parameters. Nested dicts are flattened to dotted keys."""
         if not isinstance(params, dict):

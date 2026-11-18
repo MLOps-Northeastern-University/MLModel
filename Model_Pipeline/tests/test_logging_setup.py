@@ -141,3 +141,10 @@ def test_log_run_start_records_reproducibility_fields():
     assert set(entry) >= {"git_commit", "git_dirty", "config_sha256", "python", "packages", "host"}
     assert "numpy" in entry["packages"]
     assert again["config_sha256"] == entry["config_sha256"]     # paths don't change the hash
+
+
+def test_without_git_the_images_commit_is_used(monkeypatch):
+    monkeypatch.setattr(logging_setup, "_git", lambda *args: None)        # a container: no git
+    monkeypatch.setenv("GIT_COMMIT", "abc123")
+    env = logging_setup.environment(packages=())
+    assert env["git_commit"] == "abc123" and env["git_dirty"] is False

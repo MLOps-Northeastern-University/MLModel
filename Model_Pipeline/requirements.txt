@@ -26,6 +26,9 @@ fairlearn==0.13.0
 gcsfs==2026.8.2
 
 # P5: platform
+# Google ID tokens for the hosted MLflow on long runs (tracking/mlflow_tracker.py). MLflow already
+# brings it (through databricks-sdk); pinned here because the tracker imports it itself.
+google-auth==2.62.2
 
 # Testing and style
 pytest==9.0.3

@@ -7,6 +7,7 @@ pytest.importorskip("mlflow")
 from mlflow.utils.mlflow_tags import MLFLOW_PARENT_RUN_ID, MLFLOW_RUN_NAME  # noqa: E402
 
 from scripts.core.errors import TrackingError  # noqa: E402
+from scripts.core.tracker import RunStatus  # noqa: E402
 from scripts.tracking.mlflow_tracker import MlflowTracker  # noqa: E402
 
 
@@ -76,3 +77,37 @@ def test_from_config_prefers_the_environment(tmp_path, monkeypatch):
     monkeypatch.setenv("MLFLOW_TRACKING_URI", uri)
     tracker = MlflowTracker.from_config({"mlflow": {"tracking_uri": "http://unused:1", "experiment": "e"}})
     assert tracker.client.tracking_uri == uri
+
+
+def test_a_google_id_token_is_fetched_and_replaced_before_it_expires(tmp_path, monkeypatch):
+    from google.oauth2 import id_token
+
+    from scripts.tracking import mlflow_tracker
+    fetched = []
+    monkeypatch.setattr(id_token, "fetch_id_token", lambda request, audience: fetched.append(audience)
+                        or f"token-{len(fetched)}")
+    clock = [1000.0]
+    monkeypatch.setattr(mlflow_tracker.time, "monotonic", lambda: clock[0])
+    monkeypatch.delenv("MLFLOW_TRACKING_TOKEN", raising=False)
+    uri = f"sqlite:///{(tmp_path / 'mlflow.db').as_posix()}"
+    tracker = MlflowTracker(uri, "e", google_auth=True)
+    assert fetched == [uri] and mlflow_tracker.os.environ["MLFLOW_TRACKING_TOKEN"] == "token-1"
+    with tracker.run("train"):                                 # within 45 minutes: the same token
+        pass
+    assert len(fetched) == 1
+    clock[0] += mlflow_tracker.TOKEN_REFRESH_S + 1             # later: a new one before the next call
+    with tracker.run("train"):
+        pass
+    assert len(fetched) == 2 and mlflow_tracker.os.environ["MLFLOW_TRACKING_TOKEN"] == "token-2"
+    monkeypatch.delenv("MLFLOW_TRACKING_TOKEN")
+
+
+def test_open_attach_and_close_a_run_across_processes(tracker):
+    run_id = tracker.open_run("model_pipeline", tags={"owner": "P5"})
+    other = MlflowTracker(tracker.client.tracking_uri, "test-experiment")   # as a new process would
+    with other.attach(run_id), other.run("evaluate") as child:
+        pass
+    assert get_run(tracker, child).data.tags[MLFLOW_PARENT_RUN_ID] == run_id
+    assert get_run(tracker, run_id).info.status == "RUNNING"            # attaching leaves it open
+    other.close_run(run_id, RunStatus.FAILED)
+    assert get_run(tracker, run_id).info.status == "FAILED"
