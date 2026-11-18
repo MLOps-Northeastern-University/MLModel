@@ -13,8 +13,9 @@ For each candidate in the config's models section (models/registry.py), on the p
     3. the test patients, only when train.score_test is true: scored once, with the final model
 
 With train.use_tuned, a candidate that tune.py tuned trains with the settings it chose (from
-artifacts/tuned_params.json), merged over its config; train refuses settings tuned on another split,
-other data or another configuration of the candidate.
+artifacts/tuned_params.json), merged over its config. Settings tuned on another split or other data
+are reused with a warning (and tagged in MLflow) until a run tunes again; settings tuned on another
+config of the candidate are skipped, so it trains with its config (experiments.read_tuned).
 
 Before any candidate trains, the shuffled-label check (train.leakage_check): a model trained on
 labels shuffled among the training hours must score near chance on the real labels. If it doesn't,
@@ -99,7 +100,6 @@ class TrainModels:
 
         Raises:
             GateError: The shuffled-label check scored above chance.
-            ConfigError: use_tuned with no tuned settings, or ones tuned on something else.
         """
         split = split or read_split(self.cfg)
         models = candidates(self.cfg)
@@ -126,7 +126,8 @@ class TrainModels:
             self.tracker.log_params({"train": self.settings, "models": self.cfg["models"], "environment": code_params,
                                      "split": {"hash": split.hash, "test": len(split.test),
                                                "development": len(split.development), "folds": len(split.folds)},
-                                     "tuned": {name: {k: entry.get(k) for k in ("study", "best_trial", "tuned_at")}
+                                     "tuned": {name: {k: entry.get(k) for k in ("study", "best_trial", "tuned_at",
+                                                                                "stale")}
                                                for name, entry in tuned.items()}})
             if score_test:
                 logger.warning("scoring the test patients: do this once, at the end of model work",

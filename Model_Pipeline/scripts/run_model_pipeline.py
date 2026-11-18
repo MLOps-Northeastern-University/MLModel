@@ -4,9 +4,12 @@
     python -m scripts.run_model_pipeline --config config/model.yaml
     python -m scripts.run_model_pipeline --no-mlflow     # without an MLflow server
     python -m scripts.run_model_pipeline --no-register   # every gate, but release nothing (CI on PRs)
+    python -m scripts.run_model_pipeline --candidates window_logistic        # retrain only these
+    python -m scripts.run_model_pipeline --candidates motor_causal_transformer --tune --reason "deeper encoder"
 
 Runs the steps in order, each logged to MLflow as a child of one model_pipeline run:
 
+    tune       only with --tune: the candidates' settings searched again (P2)
     train      every candidate cross-validated, refit and saved (P2)
     evaluate   intervals, plots, metrics.json and the validation gate (P1)
     bias       slices, the bias gate, and reweighted candidates for the ones that fail (P3)
@@ -18,8 +21,18 @@ Runs the steps in order, each logged to MLflow as a child of one model_pipeline 
 
 The comparison comes before export, so a model that can't replace the active one is never
 packaged. Every step reads the data and the patient split itself (paths in config/model.yaml), so
-the data must be there first: dvc pull in ../Data_Pipeline. Tuning isn't part of a run: run
-scripts/steps/tune.py on its own, and train uses its settings when train.use_tuned is true.
+the data must be there first: dvc pull in ../Data_Pipeline.
+
+Which candidates and whether to tune are chosen per run, not in the config, so a run trains only
+what changed:
+
+    --candidates   the candidates to train (names from models.candidates); all of them when left out.
+                   The others aren't trained, and the release gate compares the best of these with
+                   the active version, whatever its family.
+    --tune         search the candidates' settings again first (tune.candidates), and train with them.
+                   Without it, train reuses the last tuned settings (train.use_tuned), even if they
+                   were tuned on older data; see experiments.read_tuned.
+    --reason       why this run happened (a change, drift), kept as a tag on the MLflow run.
 
 A step that can't go on raises a core/errors.py error; the run then stops with exit code 1.
 Alerts (scripts/alerts.py) go to the team when a gate fails, when the run crashes, and when
@@ -27,6 +40,7 @@ training finishes, saying whether a model was released.
 """
 
 import argparse
+import copy
 import os
 import platform
 import sys
@@ -45,9 +59,10 @@ from scripts.steps.export import ExportModel
 from scripts.steps.register import RegisterModel, active_metrics
 from scripts.steps.select import SelectModel
 from scripts.steps.train import TrainModels
+from scripts.steps.tune import TuneModels
 from scripts.tracking.memory_tracker import MemoryTracker
 from scripts.tracking.mlflow_tracker import MlflowTracker
-from scripts.utils.config import load_config
+from scripts.utils.config import choose_candidates, load_config
 from scripts.utils.logging_setup import configure_logging, get_logger, log_context, log_run_start, log_step
 
 logger = get_logger("run_model_pipeline")
@@ -73,22 +88,38 @@ def training_stats(cfg, split, data=None):
 
 # ---- the run -----------------------------------------------------------------------------
 
-def run(cfg, tracker, release=True, data=None, split=None):
+def run(cfg, tracker, release=True, data=None, split=None, tune=False, reason=None):
     """Run every step in order and return the released version.
 
     With release False, the run stops after export: every gate is checked and
     the bundle built, but nothing is registered, and it returns None.
 
     Args:
+        cfg: The config, with only the candidates to train (utils/config.choose_candidates).
         data, split: A Dataset and patient split to use instead of reading them from
             the config's paths (tests pass small ones).
+        tune: Search the candidates' settings first, and train with them.
+        reason: Why this run happened, for the MLflow run's tags.
 
     Raises:
         PipelineError: A step couldn't go on, such as a failed gate (GateError).
     """
+    if tune:
+        # Train with what tuning finds, even if the config doesn't use tuned settings.
+        cfg = copy.deepcopy(cfg)
+        cfg["train"]["use_tuned"] = True
     register = RegisterModel(cfg, tracker)
     split = split or read_split(cfg)
-    with tracker.run("model_pipeline", tags={"owner": "P5", "split_hash": split.hash}):
+    names = [c["name"] for c in cfg["models"]["candidates"]]
+    tags = {"owner": "P5", "split_hash": split.hash, "candidates": ",".join(names),
+            "tuned_this_run": str(tune).lower()}
+    if reason:
+        tags["reason"] = reason
+
+    with tracker.run("model_pipeline", tags=tags):
+        if tune:
+            with log_step(logger, "tune", owner="P2"):
+                TuneModels(cfg, tracker).run(data, split)
         with log_step(logger, "train", owner="P2"):
             candidates = TrainModels(cfg, tracker).run(data, split)
         with log_step(logger, "evaluate", owner="P1"):
@@ -140,16 +171,26 @@ def main(argv=None):
                         help="Keep tracking in memory instead of logging to MLflow")
     parser.add_argument("--no-register", action="store_true",
                         help="Check every gate and build the bundle, but don't release it")
+    parser.add_argument("--candidates", nargs="+", metavar="NAME", default=None,
+                        help="Train only these candidates (names from models.candidates); default: all")
+    parser.add_argument("--tune", action="store_true",
+                        help="Search the candidates' settings again before training (slow)")
+    parser.add_argument("--reason", default=None, help="Why this run happened, tagged on the MLflow run")
     args = parser.parse_args(argv)
 
     cfg = load_config(args.config)
+    if args.candidates:
+        try:
+            cfg = choose_candidates(cfg, args.candidates)
+        except ValueError as exc:
+            parser.error(str(exc))
     configure_logging(cfg)
     # One id per run, on every log line, to find a run's lines in Cloud Logging.
     with log_context(run_id=uuid.uuid4().hex[:12]):
         log_run_start(logger, cfg)
         try:
             tracker = MemoryTracker() if args.no_mlflow else MlflowTracker.from_config(cfg)
-            version = run(cfg, tracker, release=not args.no_register)
+            version = run(cfg, tracker, release=not args.no_register, tune=args.tune, reason=args.reason)
         except PipelineError as exc:
             logger.error("Model pipeline stopped: %s", exc)
             alert_failure(cfg, exc)

@@ -94,12 +94,14 @@ train:
   # scores are the mean over seeds.
   seeds: [42]
   # Train the candidates tune.py tuned with the settings it chose (artifacts/tuned_params.json),
-  # merged over their config. Refused if they were tuned on another split, data or config, or if
-  # tune hasn't run yet: run tune first.
+  # merged over their config. Reused with a warning when tuned on another split or older data, until
+  # a run tunes again (run_model_pipeline --tune); skipped for a candidate whose config changed since,
+  # and when nothing is tuned yet, so those train with their config.
   use_tuned: true
   # The test patients are scored once, with the final models, at the very end of model
   # work. Leave false; set true only for that one run (it's tagged test_scored in MLflow).
-  score_test: true
+  # The 2026-11-15 run scored them, for v1. Retrains are judged on cross-validation.
+  score_test: false
   charts:
     # scripts/reporting/: a scorecard and confusion matrices on every run with predictions (each
     # fold, each candidate's cross-validation, the test run), and the candidates compared on the

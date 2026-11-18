@@ -20,7 +20,10 @@ a worn column, for the predictions files.
 
 The tuned-settings file (artifacts/tuned_params.json) is how tune hands its result to train: per
 candidate, the settings tuning chose, and what they were tuned on (the split, the data, the
-candidate's own config). read_tuned refuses an entry tuned on anything else.
+candidate's own config). read_tuned reuses an entry tuned on another split or other data, with a
+warning: the last tuned settings are kept until a run asks to tune again (run_model_pipeline --tune).
+An entry tuned on another config of the candidate is skipped, so a changed config is never
+overwritten by settings tuned for the old one.
 """
 
 import copy
@@ -36,7 +39,6 @@ from typing import Dict, List, Mapping, Optional, Sequence
 import numpy as np
 import pandas as pd
 
-from scripts.core.errors import ConfigError
 from scripts.core.metrics import label_scores, mean_scores
 from scripts.core.targets import HOUR_INDEX, PARTICIPANT, get_target, parse_label
 from scripts.utils.file_io import write_json
@@ -295,28 +297,38 @@ def read_tuned(folder, models, split, fingerprint) -> Dict[str, Dict]:
     """{candidate: its entry} for the candidates in the file, checked against what they were tuned on.
 
     An entry holds "params" (the settings to merge over the candidate's config) and where they came
-    from ("study", "best_trial", "value", "tuned_at").
+    from ("study", "best_trial", "value", "tuned_at"), plus "stale": what changed since it was tuned
+    (["split"], ["data"], both, or empty).
 
-    Raises:
-        ConfigError: An entry tuned on another split, other data, or another configuration of the
-            candidate, or a file that isn't there.
+    - Tuned on another split or other data: reused, with a warning. The last tuned settings are
+      usually still the best guess, and tuning again is a choice (run_model_pipeline --tune).
+    - Tuned on another config of the candidate: skipped, with a warning, so the candidate trains with
+      its config. The old settings could undo the change (a tuned setting the new config sets too).
+    - No file: nothing is tuned yet, so every candidate trains with its config, with a warning.
     """
     path = Path(folder) / TUNED_FILE
     if not path.exists():
-        raise ConfigError(f"train.use_tuned is on, but there's no {path}: run tune first")
+        logger.warning("train.use_tuned is on, but there's no %s: every candidate trains with its config", path,
+                       extra={"event": "tuned_missing"})
+        return {}
     entries = json.loads(path.read_text(encoding="utf-8"))
     out = {}
     for name, template in models:
         entry = entries.get(name)
         if entry is None:
             continue
-        stale = [what for what, now in (("split", split.hash), ("data", fingerprint),
-                                        ("candidate", candidate_fingerprint(template)))
+        if entry.get("candidate_hash") != candidate_fingerprint(template):
+            logger.warning("%s's config changed since it was tuned: it trains with its config, not the tuned "
+                           "settings (tune again with --tune)", name,
+                           extra={"event": "tuned_skipped", "candidate": name})
+            continue
+        stale = [what for what, now in (("split", split.hash), ("data", fingerprint))
                  if entry.get(f"{what}_hash") != now]
         if stale:
-            raise ConfigError(f"{name} was tuned on a different {' and '.join(stale)}: tune again, or set "
-                              "train.use_tuned to false")
-        out[name] = entry
+            logger.warning("%s reuses settings tuned on a different %s (tuned %s; tune again with --tune)",
+                           name, " and ".join(stale), entry.get("tuned_at"),
+                           extra={"event": "tuned_stale", "candidate": name, "stale": stale})
+        out[name] = {**entry, "stale": stale}
     return out
 
 

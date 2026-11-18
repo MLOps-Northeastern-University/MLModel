@@ -45,7 +45,15 @@ pytest -q                               # synthetic data only, nothing downloade
 python -m scripts.run_model_pipeline --no-mlflow   # every step, without an MLflow server
 ```
 
-The run needs the data pipeline's outputs (`dvc pull` in `../Data_Pipeline`), the patient split (`paths.split_file`, made once with `python -m scripts.data.folds create`) harnet10's weights (`MODEL_HARNET_HUB`, below), and, while `train.use_tuned` is true, the tuned settings: run `python -m scripts.steps.tune` first. Without them it stops at train with a clear error.
+The run needs the data pipeline's outputs (`dvc pull` in `../Data_Pipeline`), the patient split (`paths.split_file`, made once with `python -m scripts.data.folds create`) and harnet10's weights (`MODEL_HARNET_HUB`, below).
+
+With `train.use_tuned` on, each candidate trains with its last tuned settings (`artifacts/tuned_params.json`):
+
+- tuned on another split or older data: reused, with a warning, and marked stale in MLflow;
+- tuned before its config changed: skipped, so it trains with its config;
+- never tuned: it trains with its config.
+
+`--tune` tunes again first.
 
 Or with only Docker: `docker compose up -d mlflow` for a local MLflow at <http://localhost:5001>, then `docker compose run --rm train` for the pipeline and `docker compose run --rm tests` for the tests.
 
@@ -56,6 +64,17 @@ The run command's options:
 | `--config <file>` | Another config instead of `config/model.yaml` |
 | `--no-mlflow` | Keeps tracking in memory, so no MLflow server is needed |
 | `--no-register` | Checks every gate and builds the bundle, but releases nothing. CI uses it for every run except a push to `dev` or `main`. |
+| `--candidates <name> ...` | Trains only these candidates (names from `models.candidates`), for a change to one model. The release gate compares the best of them with the active version, whatever its family. Default: all |
+| `--tune` | Tunes the candidates' settings again (`tune.candidates`) before training, and trains with them. Slow; without it, the last tuned settings are reused |
+| `--reason <text>` | Why the run happened (a change, drift), tagged on the MLflow run |
+
+For example, to retrain only the transformer after changing its architecture, tuning it again:
+
+```bash
+python -m scripts.run_model_pipeline --candidates motor_causal_transformer --tune --reason "deeper encoder"
+```
+
+The leakage check (`train.leakage_check`) runs on one of the candidates being trained: the ones it names, or else the first candidate of the run.
 
 The training data is the data pipeline's output, versioned by DVC. Get it with `dvc pull` in `../Data_Pipeline` (see [Training data](#training-data-dvc)). `paths.features_csv` in `config/model.yaml` points at it.
 
@@ -372,7 +391,7 @@ They share one cross-validation (`scripts/experiments.py`), so a tuning trial an
 | Step | Config | What it does | Writes |
 |---|---|---|---|
 | `tune` | `tune:` | One Optuna study (TPE, seeded) per listed candidate. Each trial is a cross-validation scored by `selection.metric`. Studies resume after a crash, and any change to the split, data, candidate or space starts a new one. Transformer trials that change only diary settings reuse each fold's pretrained body | `artifacts/tuning/` (studies, a trials table per candidate), `artifacts/tuned_params.json` |
-| `train` | `models:`, `train:` | A shuffled-label check first (a model must score near chance on shuffled labels), then every candidate cross-validated, refit on all development patients, and saved. With `use_tuned`, a tuned candidate trains with its tuned settings, refused if they were tuned on another split, data or config | `artifacts/models/`, `artifacts/predictions/`, `artifacts/candidates.json`, `artifacts/charts/` |
+| `train` | `models:`, `train:` | A shuffled-label check first (a model must score near chance on shuffled labels), then every candidate cross-validated, refit on all development patients, and saved. With `use_tuned`, a tuned candidate trains with its tuned settings: reused with a warning if they were tuned on another split or data, skipped if its config changed since | `artifacts/models/`, `artifacts/predictions/`, `artifacts/candidates.json`, `artifacts/charts/` |
 | `sensitivity_hparams` | (reads the studies) | Each tuned setting's importance (fANOVA), plus plots: importance, score against each setting, score per trial | `artifacts/sensitivity/<candidate>/` |
 
 In MLflow, each step is a run with a child per candidate. train and tune go on to a child per fold (and tune per trial before that), with the scores above, fit times and each epoch's curves. For the transformer that includes pretraining's skill per target on the validation patients, so one pretraining can be compared with another. Runs carry the split's hash and a data fingerprint, so only comparable runs get compared. For a live look at the tuning studies, `optuna-dashboard sqlite:///artifacts/tuning/studies.db`.
