@@ -193,15 +193,3 @@ def notify(subject, body, cfg):
         send_email(subject, body)
     if settings.get("slack_enabled"):
         send_slack(f"*{subject}*\n```{body}```")
-
-
-def airflow_failure_callback(context):
-    """Airflow on_failure_callback: alert with the DAG run and the failed task."""
-    ti = context.get("task_instance")
-    subject = f"[COPS pipeline] Task failed: {getattr(ti, 'task_id', 'unknown')}"
-    body = (f"DAG: {getattr(ti, 'dag_id', '?')}\n"
-            f"Run: {context.get('run_id', '?')}\n"
-            f"Task: {getattr(ti, 'task_id', '?')} (try {getattr(ti, 'try_number', '?')})\n"
-            f"Error: {context.get('exception')}\n"
-            f"Log: {getattr(ti, 'log_url', '')}")
-    notify(subject, body, load_config())

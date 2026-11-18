@@ -27,7 +27,8 @@ data:
 
 run:
   # Participants processed at the same time, each in its own process, by the
-  # command line and the Airflow DAG. 1 processes them one after another.
+  # command line. 1 processes them one after another. The Airflow DAG sets its own
+  # (PARALLEL_PARTICIPANTS in airflow/dags/data_pipeline.py): Airflow doesn't read this config.
   parallel_participants: 4
 
 paths:

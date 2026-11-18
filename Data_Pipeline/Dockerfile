@@ -1,16 +1,30 @@
-# Airflow's slim image: Airflow without most of its provider packages, which
-# the pipeline doesn't use (and whose pins clash with its pandas version).
-FROM apache/airflow:slim-2.10.5-python3.11
+# The data pipeline's image: Python, git and the pinned libraries (DVC among them), and the code.
+# Airflow isn't in it: Airflow (../airflow/) runs each step of the DAG in this image, with
+# `python -m scripts.run_step <step>`, and the data folder mounted at /app/Data_Pipeline/data.
+#
+#   docker build -t data-pipeline --build-arg GIT_COMMIT=$(git rev-parse HEAD) .
+#   docker run --rm -v "$PWD/data:/app/Data_Pipeline/data" data-pipeline python -m scripts.pipeline
+#
+# docker-compose.yaml mounts the repo over /app instead, so code changes need no rebuild.
+FROM python:3.11-slim
 
-USER root
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1
+
+# git, for DVC: it records data versions next to the code.
 RUN apt-get update \
     && apt-get install -y --no-install-recommends git \
-    && rm -rf /var/lib/apt/lists/*
-
-USER airflow
-COPY requirements.txt /tmp/requirements.txt
-# Pinning apache-airflow stops pip from up- or downgrading Airflow itself.
-# The slim image has no Postgres driver, so the [postgres] extra adds it for
-# Airflow's database.
-RUN pip install --no-cache-dir "apache-airflow[postgres]==${AIRFLOW_VERSION}" -r /tmp/requirements.txt \
+    && rm -rf /var/lib/apt/lists/* \
     && git config --global --add safe.directory '*'
+
+WORKDIR /app/Data_Pipeline
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+COPY . .
+
+# The commit the image was built from, for the logs: there's no git history in the image.
+ARG GIT_COMMIT=""
+ENV GIT_COMMIT=${GIT_COMMIT}
+
+CMD ["python", "-m", "scripts.pipeline"]

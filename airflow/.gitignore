@@ -1,0 +1,4 @@
+# Secrets and Airflow's own logs.
+.env
+logs/
+__pycache__/

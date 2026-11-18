@@ -1,45 +1,21 @@
-# Airflow with LocalExecutor and Postgres, plus two one-off services that run
-# the tests and the pipeline in the same image, so only Docker is needed.
-# Run from the Data_Pipeline folder. The whole repository (..) is mounted, so
-# outputs land in data/ on the host and DVC and Git work inside the containers.
+# The data pipeline's tests and a whole run in its image, so only Docker is needed. Run from the
+# Data_Pipeline folder. The whole repository (..) is mounted, so code edits need no rebuild,
+# outputs land in data/ on the host, and DVC and Git work inside the container.
 #
 #   docker compose run --rm tests        # pytest
 #   docker compose run --rm pipeline     # the pipeline without Airflow (sample mode)
-#   docker compose up airflow-init       # first time only
-#   docker compose up -d                 # Airflow at http://localhost:8080
+#
+# Airflow, which runs the same steps as a DAG, is in ../airflow/.
 
-x-pipeline-image: &pipeline-image
+x-tool: &tool
   build: .
   # Optional: copy .env.example to .env to turn on email/Slack alerts.
   env_file:
     - path: .env
       required: false
   volumes:
-    - ..:/opt/airflow/repo
-    - ./logs/airflow:/opt/airflow/logs
-  user: "${AIRFLOW_UID:-50000}:0"
-
-x-tool: &tool
-  <<: *pipeline-image
-  # Not started by "docker compose up"; run with "docker compose run --rm <name>".
-  profiles: [tools]
-  working_dir: /opt/airflow/repo/Data_Pipeline
-  environment:
-    # These services don't use Airflow's database, so skip its startup check.
-    CONNECTION_CHECK_MAX_COUNT: "0"
-
-x-airflow-common: &airflow-common
-  <<: *pipeline-image
-  environment:
-    AIRFLOW__CORE__EXECUTOR: LocalExecutor
-    AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@postgres/airflow
-    AIRFLOW__CORE__LOAD_EXAMPLES: "false"
-    AIRFLOW__CORE__DAGS_FOLDER: /opt/airflow/repo/Data_Pipeline/dags
-    AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: "true"
-    PYTHONPATH: /opt/airflow/repo/Data_Pipeline
-  depends_on:
-    postgres:
-      condition: service_healthy
+    - ..:/app
+  working_dir: /app/Data_Pipeline
 
 services:
   tests:
@@ -50,43 +26,3 @@ services:
     <<: *tool
     # Other modes: docker compose run --rm pipeline python -m scripts.pipeline --mode full
     command: ["python", "-m", "scripts.pipeline", "--mode", "sample"]
-
-  postgres:
-    image: postgres:13
-    environment:
-      POSTGRES_USER: airflow
-      POSTGRES_PASSWORD: airflow
-      POSTGRES_DB: airflow
-    volumes:
-      - postgres-db:/var/lib/postgresql/data
-    healthcheck:
-      test: ["CMD", "pg_isready", "-U", "airflow"]
-      interval: 10s
-      retries: 5
-
-  airflow-init:
-    <<: *airflow-common
-    # One folded line: extra indentation would keep the line breaks and split the command.
-    # Only "user already exists" is ignored; a failed migration still fails.
-    command:
-      - bash
-      - -c
-      - >-
-        airflow db migrate &&
-        (airflow users create --username airflow --password airflow
-        --firstname Admin --lastname User --role Admin --email admin@example.com || true)
-
-  airflow-webserver:
-    <<: *airflow-common
-    command: webserver
-    ports:
-      - "8080:8080"
-    restart: unless-stopped
-
-  airflow-scheduler:
-    <<: *airflow-common
-    command: scheduler
-    restart: unless-stopped
-
-volumes:
-  postgres-db:

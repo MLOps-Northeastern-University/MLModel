@@ -34,8 +34,9 @@ services:
       - --backend-store-uri=sqlite:////mlflow/mlflow.db
       - --artifacts-destination=/mlflow/artifacts
       # MLflow 3 only answers requests addressed to the hosts listed here. The
-      # train service reaches it as mlflow:5000, the browser as localhost:5001.
-      - --allowed-hosts=mlflow:5000,localhost:*,127.0.0.1:*
+      # train service reaches it as mlflow:5000, the browser as localhost:5001, and
+      # the Airflow DAG's containers (../airflow/) as host.docker.internal:5001.
+      - --allowed-hosts=mlflow:5000,localhost:*,127.0.0.1:*,host.docker.internal:*
     # 5001 on the host, because macOS uses 5000 for AirPlay.
     ports:
       - "5001:5000"

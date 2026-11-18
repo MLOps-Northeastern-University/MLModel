@@ -74,9 +74,8 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
       - name: Lint (flake8)
-        run: flake8 scripts dags tests
-      # Fails if coverage of scripts/ drops below 85%. The DAG's own tests need Airflow and
-      # skip here; they run in the Airflow image (see tests/test_dag.py).
+        run: flake8 scripts tests
+      # Fails if coverage of scripts/ drops below 85%.
       - name: Unit tests, with a coverage floor
         run: pytest -q --cov=scripts --cov-branch --cov-report=term-missing:skip-covered --cov-fail-under=85
       - name: DVC reads the pipeline
@@ -107,6 +106,21 @@ jobs:
       # The floor is 0 while most steps are still being built; it goes up to 85 once they're merged.
       - name: Unit tests, with a coverage floor
         run: pytest -q --cov=scripts --cov-branch --cov-report=term-missing:skip-covered --cov-fail-under=0
+
+  airflow:
+    name: Airflow DAGs
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: airflow
+    steps:
+      - uses: actions/checkout@v7
+      # The DAGs need Airflow and its Docker provider, which only the Airflow image has, so the
+      # tests run in it: both DAGs load, their steps connect in order, each runs in its pipeline's image.
+      - name: Build the Airflow image
+        run: docker compose build tests
+      - name: DAG tests
+        run: docker compose run --rm tests
 
   markdown:
     name: Markdown lint

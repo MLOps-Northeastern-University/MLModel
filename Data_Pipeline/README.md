@@ -17,14 +17,11 @@ The zips also hold UPDRS exams; the pipeline doesn't use them. Participant IDs a
 Install [Docker Desktop](https://www.docker.com/products/docker-desktop/) and give it at least 4 GB of memory. Then, from this folder:
 
 ```bash
-mkdir -p logs/airflow && echo "AIRFLOW_UID=$(id -u)" > .env    # Linux only, once
-docker compose run --rm tests       # the tests, in the Airflow image (the first run builds it)
+docker compose run --rm tests       # the tests, in the pipeline's image (the first run builds it)
 docker compose run --rm pipeline    # the pipeline on the 5 smallest participants (~1.1 GB download)
-docker compose up airflow-init      # first time only: Airflow's database and login
-docker compose up -d                # Airflow at http://localhost:8080
 ```
 
-Outputs land in `data/` on your machine. Don't run the `pipeline` service and the DAG at the same time: both write to `data/`.
+Outputs land in `data/` on your machine. Airflow, which runs the same steps as a DAG, is in [`../airflow/`](../airflow/README.md), shared with the model pipeline. Don't run the `pipeline` service and the DAG at the same time: both write to `data/`.
 
 ## Without Docker
 
@@ -154,13 +151,13 @@ scripts/
 ├── ledd.py       doses → events with LEDD, from config/ledd.yaml (every factor cited)
 ├── sensor.py     windows, wear, orientation, wrist agreement, the 7 hourly features
 ├── pipeline.py   patients, one participant, the build, failures, the command line
+├── run_step.py   one step on its own, as each task of the DAG (../airflow/dags/data_pipeline.py) runs it
 ├── checks.py     the contract, warnings, the bias report
 └── utils.py      config, file I/O, logging, email and Slack alerts
-dags/cops_pipeline_dag.py   the same steps in Airflow
-tests/                      one file per module, on synthetic participants (tests/helpers.py)
+tests/            one file per module, on synthetic participants (tests/helpers.py)
 ```
 
-**Tests:** `pytest -q` runs 138 tests on synthetic participants made by `tests/helpers.py`, and nothing is downloaded or sent. `test_dag.py` needs Airflow, so it skips outside Docker; `docker compose run --rm tests` runs it. Coverage of `scripts/` is about 94% (`pytest --cov=scripts --cov-branch`); CI fails below 85%.
+**Tests:** `pytest -q` runs 149 tests on synthetic participants made by `tests/helpers.py`, and nothing is downloaded or sent. The DAG's tests are in `../airflow/tests/`. Coverage of `scripts/` is about 94% (`pytest --cov=scripts --cov-branch`); CI fails below 85%.
 
 ## Data versioning (DVC)
 
@@ -177,9 +174,11 @@ After an Airflow run, the `dvc_version` task runs `dvc commit -f build_dataset` 
 
 ## Airflow
 
-Open <http://localhost:8080> and log in as `airflow` / `airflow` (local test values in `docker-compose.yaml`). Turn `cops_data_pipeline` on, then trigger it with `{"mode": "sample"}` or `{"mode": "full"}`.
+The DAG `cops_data_pipeline` is in [`../airflow/`](../airflow/README.md), next to the model pipeline's. Each task runs one step in this pipeline's image (`python -m scripts.run_step <step>`), with `data/` mounted, so Airflow never imports this code and the steps run the same as on a laptop. Trigger it with `{"mode": "sample"}` or `{"mode": "full"}`.
 
-Tasks run in this order: `fetch_manifest` → `patients` → `process_participant` (one mapped task per participant, 4 at a time, 2 retries) → `check_failures` (runs even when some participants failed) → `build` → `run_checks` (no retries) → `dvc_version` → `notify_success`. Any failed task sends an alert.
+Tasks run in this order: `manifest` → `patients` → `participant` (one task per participant, 4 at a time, 2 retries) → `check_failures` (runs even when some participants failed) → `build` → `checks` (no retries) → `dvc_version` → `notify_success`. Any failed task sends an alert.
+
+The steps hand over only through files (the table in `scripts/run_step.py`). `manifest` also clears the last run's `data/interim/<participant>/` folders, so a participant that fails can't be counted from an earlier run's output.
 
 ## Contributions
 
