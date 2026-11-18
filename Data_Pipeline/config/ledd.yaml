@@ -147,3 +147,28 @@ names:
     pramipexol (0,52): pramipexole_base             # the same, 0.52 mg base
     levocomp (50/12,5): levodopa_ir                 # Levocomp: German levodopa/carbidopa 50/12.5 mg tablet; doses written as mg of levodopa (50)
     clozapin: clozapine                             # German spelling of clozapine: an antipsychotic, no LEDD
+  # MedNOVA's prescriptions (the Backend's scoring: app/scoring/inputs.py), as a US care team writes
+  # them: the drugs' generic names, "/" between a combination's drugs, and the dose in the same
+  # order ("carbidopa/levodopa" with "25/100 mg" is 100 mg of levodopa). Names only: every drug is
+  # one of the table's rows above, so no factor changes.
+  mednova:
+    levodopa/carbidopa: levodopa_ir
+    carbidopa/levodopa: levodopa_ir
+    levodopa/carbidopa cr: levodopa_cr
+    carbidopa/levodopa cr: levodopa_cr                 # Sinemet CR
+    carbidopa/levodopa er: levodopa_er_capsule         # the US extended-release capsule (Rytary)
+    levodopa/carbidopa/entacapone: levodopa_carbidopa_entacapone
+    carbidopa/levodopa/entacapone: levodopa_carbidopa_entacapone
+    pramipexole: pramipexole_salt                      # US labels give the dihydrochloride salt
+    pramipexole er: pramipexole_salt
+    ropinirole: ropinirole
+    ropinirole er: ropinirole
+    rotigotine: rotigotine                             # the patch, mg per 24 h
+    rasagiline: rasagiline
+    selegiline: selegiline_oral
+    safinamide: safinamide
+    amantadine: amantadine
+    amantadine er: amantadine_er
+    entacapone: entacapone
+    opicapone: opicapone
+    istradefylline: istradefylline

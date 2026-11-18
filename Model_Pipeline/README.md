@@ -193,6 +193,8 @@ machine_type: ""                            # optional: n1-standard-16, e2-stand
 zone: ""                                    # optional: us-central1-b
 ```
 
+**Retraining on drift:** the Backend scores every patient's hours with the released model and checks prediction drift each night: the PSI of the live P(OFF) against the bundle's `stats.json` `prediction_reference` (how often the model said each P(OFF) band on its out-of-fold training hours). Over 0.25 for 3 nights in a row, with 5+ patients, it writes a report to `gs://team17-mlops-neu-training-data/drift/`. [`drift.yml`](../.github/workflows/drift.yml), hourly, opens a GitHub issue from it, "retrain in 24 h unless closed" ([`.github/scripts/drift_retrain.sh`](../.github/scripts/drift_retrain.sh)). Closing the issue rejects the retrain; one still open after 24 hours starts this workflow on `main` for the drifting model's candidate, releasing if it passes every gate. At most one drift retrain a week. Neither the Backend nor the VM holds a GitHub credential.
+
 ### CI/CD (assignment section 7)
 
 What each requirement runs on, and where to see it:

@@ -1,0 +1,39 @@
+name: Drift
+
+# The Backend's drift reports become GitHub issues, and an issue nobody closes within 24 hours
+# becomes a retrain (.github/scripts/drift_retrain.sh). The Backend checks prediction drift each
+# night (Backend app/scoring/drift.py) and writes a report to GCS when it's due; this turns it into
+# an issue the team can close to reject the retrain. Hourly, and by hand.
+on:
+  schedule:
+    - cron: "41 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write            # open, comment on and close the drift issues
+  actions: write           # start model.yml for the retrain
+  id-token: write          # read the reports in GCS
+
+concurrency:
+  group: drift
+  cancel-in-progress: false
+
+env:
+  TEAM_PROJECT: ${{ vars.GCP_PROJECT_ID }}
+
+jobs:
+  drift:
+    name: Drift reports and retrains
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: google-github-actions/auth@v3
+        with:
+          workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
+          service_account: ${{ vars.GCP_SERVICE_ACCOUNT }}
+      - uses: google-github-actions/setup-gcloud@v3
+      - name: Issues for new reports, retrains for issues left open
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: bash .github/scripts/drift_retrain.sh
