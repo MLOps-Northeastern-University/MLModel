@@ -21,13 +21,14 @@
 #   mednova-airflow-image, mednova-data-image, mednova-model-image   the images CI pushed
 #   mednova-gpu           1 for a GPU run
 #   mednova-mlflow-uri    the team MLflow
+#   mednova-team-project  the team project, whose buckets, secrets and images it uses
 #
-# What it reads and writes in GCS (the project's buckets, private):
-#   gs://<project>-training-data/cops-dvc/        the DVC data (dvc pull)
-#   gs://<project>-training-data/harnet10/        harnet10's weights, uploaded once by hand
-#   gs://<project>-training-data/state/           what runs keep: the feature caches, tuned settings,
-#                                                 the tuning studies, the test-scored markers
-#   gs://<project>-training-data/runs/<run id>/   this run's result.json (CI waits for it) and logs
+# What it reads and writes in GCS (the team project's buckets, private):
+#   gs://<team>-training-data/cops-dvc/        the DVC data (dvc pull)
+#   gs://<team>-training-data/harnet10/        harnet10's weights, uploaded once by hand
+#   gs://<team>-training-data/state/           what runs keep: the feature caches, tuned settings,
+#                                              the tuning studies, the test-scored markers
+#   gs://<team>-training-data/runs/<run id>/   this run's result.json (CI waits for it) and logs
 #
 # Its own log: the VM's serial console, and runs/<run id>/startup.log.
 
@@ -49,12 +50,8 @@ metadata() {   # metadata <key>: one of the VM's metadata values, or empty
     "http://metadata.google.internal/computeMetadata/v1/instance/attributes/$1" || true
 }
 
-project() {
-  curl -sf -H "Metadata-Flavor: Google" "http://metadata.google.internal/computeMetadata/v1/project/project-id"
-}
-
 secret() {     # secret <name>: the latest version of a Secret Manager secret, or empty
-  gcloud secrets versions access latest --secret "$1" 2>/dev/null || true
+  gcloud secrets versions access latest --secret "$1" --project "$TEAM_PROJECT" 2>/dev/null || true
 }
 
 # ---- the run's settings ----------------------------------------------------------------------
@@ -69,15 +66,17 @@ MODEL_IMAGE="$(metadata mednova-model-image)"
 GPU="$(metadata mednova-gpu)"
 MLFLOW_URI="$(metadata mednova-mlflow-uri)"
 [ -n "$DAG_CONF" ] || DAG_CONF="{}"
-PROJECT="$(project)"
-BUCKET="gs://${PROJECT}-training-data"
+# The team project: its buckets, secrets and images. The VM itself may run in another project
+# (infra/compute/, for its GPU quota), so this comes from the metadata, not the VM's own project.
+TEAM_PROJECT="$(metadata mednova-team-project)"
+BUCKET="gs://${TEAM_PROJECT}-training-data"
 RUN_DIR="$BUCKET/runs/$RUN_ID"
 
 # Everything below goes to the serial console and to a file copied to GCS at the end.
 mkdir -p "$WORK"
 exec > >(tee -a "$WORK/startup.log") 2>&1
 
-for name in RUN_ID SHA DAG AIRFLOW_IMAGE DATA_IMAGE MODEL_IMAGE; do
+for name in RUN_ID SHA DAG AIRFLOW_IMAGE DATA_IMAGE MODEL_IMAGE TEAM_PROJECT; do
   if [ -z "${!name}" ]; then log "missing metadata for $name: CI sets it"; shutdown -h now; exit 1; fi
 done
 
@@ -225,7 +224,7 @@ MODEL_IMAGE=$MODEL_IMAGE
 MODEL_GPU=${GPU:-0}
 MLFLOW_TRACKING_URI=$MLFLOW_URI
 MODEL_MLFLOW_GOOGLE_AUTH=1
-MODEL_REGISTRY=gs://${PROJECT}-models
+MODEL_REGISTRY=gs://${TEAM_PROJECT}-models
 AIRFLOW_UID=50000
 DOCKER_GID=$(stat -c %g /var/run/docker.sock)
 AIRFLOW_ADMIN_USER=$FIRST_USER

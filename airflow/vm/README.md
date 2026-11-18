@@ -1,6 +1,6 @@
 # The training VM
 
-CI makes one VM for each training run and deletes it after. [`startup.sh`](startup.sh) is the VM's start-up script: it sets the machine up, runs one DAG, saves the result and shuts down. What every VM shares (its service account, its network, its secrets) is in [`../../infra/`](../../infra/): `training_vm.tf` and `secrets.tf`.
+CI makes one VM for each training run and deletes it after. [`startup.sh`](startup.sh) is the VM's start-up script: it sets the machine up, runs one DAG, saves the result and shuts down. The VMs run in their own project (Sam's, for its GPU quota and credits), and use the team project's buckets, MLflow, images and secrets. What every VM shares is in Terraform: its account, its network and CI's permission to make it in [`../../infra/compute/`](../../infra/compute/); what it may use in the team project in [`../../infra/training_vm_access.tf`](../../infra/training_vm_access.tf) and [`secrets.tf`](../../infra/secrets.tf).
 
 ## What a run does
 
@@ -25,6 +25,7 @@ CI passes them as VM metadata:
 | `mednova-airflow-image`, `mednova-data-image`, `mednova-model-image` | the images |
 | `mednova-gpu` | `1` for a GPU run |
 | `mednova-mlflow-uri` | the team MLflow |
+| `mednova-team-project` | the team project, whose buckets, secrets and images it uses |
 
 ## What it keeps in GCS
 
@@ -39,6 +40,6 @@ All in `gs://team17-mlops-neu-training-data/`, private:
 
 ## Getting in during a run
 
-- **The Airflow UI:** the link in the team's email, with your Airflow login. Your password: `gcloud secrets versions access latest --secret airflow-users`.
+- **The Airflow UI:** the link in the team's email, with your Airflow login. Your password: `gcloud secrets versions access latest --secret airflow-users --project team17-mlops-neu`.
 - **A shell, to debug:** `gcloud compute ssh <vm> --zone <zone> --tunnel-through-iap`. The network lets in nothing else.
 - **The start-up script's log:** `gcloud compute instances get-serial-port-output <vm> --zone <zone>`, or `runs/<run id>/startup.log` once it's done.

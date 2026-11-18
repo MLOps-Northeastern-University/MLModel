@@ -44,7 +44,7 @@ resource "google_secret_manager_secret" "alerts" {
   depends_on = [google_project_service.apis]
 }
 
-# ---- who may read them: the training VM ------------------------------------------------
+# ---- who may read them: the training VMs (their account is made in compute/) ------------
 
 resource "google_secret_manager_secret_iam_member" "training_vm_reads" {
   for_each = merge(
@@ -53,5 +53,5 @@ resource "google_secret_manager_secret_iam_member" "training_vm_reads" {
   )
   secret_id = each.value
   role      = "roles/secretmanager.secretAccessor"
-  member    = "serviceAccount:${google_service_account.training_vm.email}"
+  member    = "serviceAccount:${var.training_vm_email}"
 }

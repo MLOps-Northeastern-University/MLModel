@@ -1,9 +1,11 @@
-# A monthly budget for the project, so a training VM left running (or a GPU run that hangs) shows
-# up in an email long before it uses up the credits. Made only when var.billing_account is set:
+# A monthly budget for the training VMs' project, so a VM left running (or a GPU run that hangs)
+# shows up in an email long before it uses up the credits. Made only when var.billing_account is set:
 # a budget lives on the billing account, which needs its own permission (Billing Account
 # Administrator, or Costs Manager).
 
-data "google_project" "this" {}
+data "google_project" "this" {
+  project_id = var.compute_project
+}
 
 # The extra address the budget emails, besides the billing account's admins.
 resource "google_monitoring_notification_channel" "budget" {
@@ -20,7 +22,7 @@ resource "google_monitoring_notification_channel" "budget" {
 resource "google_billing_budget" "project" {
   count           = var.billing_account != "" ? 1 : 0
   billing_account = var.billing_account
-  display_name    = "${var.project_id} monthly"
+  display_name    = "${var.compute_project} monthly"
 
   budget_filter {
     projects = ["projects/${data.google_project.this.number}"]
