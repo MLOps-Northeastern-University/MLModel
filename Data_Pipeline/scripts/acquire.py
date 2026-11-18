@@ -81,23 +81,27 @@ def list_osf_files(cfg, session=None):
 def choose_participants(entries, cfg, mode):
     """The participant zips to process, and the mode that chose them.
 
-    data.participants, when set, names exactly who to process, whatever the mode.
-    Otherwise "sample" takes the data.sample_size smallest zips (quick, and the same
-    on every machine) and "full" takes all of them.
+    data.exclude is never processed, whatever the mode: the app's demo patients, whom the model must
+    never see. Of the rest, "sample" takes the data.sample_size smallest zips (quick, and the same on
+    every machine), "full" takes all of them, and "list" exactly data.participants.
     """
-    wanted = cfg["data"].get("participants")
-    if wanted:
-        names = {f"{p}.zip" for p in wanted}
-        missing = names - {e["name"] for e in entries}
+    excluded = {f"{p}.zip" for p in cfg["data"].get("exclude") or []}
+    if mode == "list":
+        wanted = {f"{p}.zip" for p in cfg["data"].get("participants") or []}
+        if not wanted:
+            raise ValueError("list mode needs data.participants")
+        if wanted & excluded:
+            raise AcquisitionError(f"Participants listed and excluded at once: {sorted(wanted & excluded)}")
+        missing = wanted - {e["name"] for e in entries}
         if missing:
             raise AcquisitionError(f"Participants not found: {sorted(missing)}")
-        return [e for e in entries if e["name"] in names], "list"
-    entries = sorted(entries, key=lambda e: (e["size"] or 0, e["name"]))
+        return [e for e in entries if e["name"] in wanted], mode
+    kept = sorted((e for e in entries if e["name"] not in excluded), key=lambda e: (e["size"] or 0, e["name"]))
     if mode == "sample":
-        return entries[: cfg["data"]["sample_size"]], mode
+        return kept[: cfg["data"]["sample_size"]], mode
     if mode != "full":
         raise ValueError(f"Unknown mode: {mode}")
-    return entries, mode
+    return kept, mode
 
 
 def build_manifest(files, cfg, mode=None):
@@ -122,11 +126,11 @@ def build_manifest(files, cfg, mode=None):
     return manifest
 
 
-def have_local_files(cfg):
-    """True when data/raw/ already holds Demographics.csv and every data.participants zip."""
+def have_local_files(cfg, mode):
+    """True in list mode when data/raw/ already holds Demographics.csv and every data.participants zip."""
     wanted, raw = cfg["data"].get("participants"), cfg["resolved_paths"]["raw_dir"]
     names = [cfg["files"]["demographics_file"]] + [f"{p}.zip" for p in wanted or []]
-    return bool(wanted) and all((raw / n).exists() for n in names)
+    return mode == "list" and bool(wanted) and all((raw / n).exists() for n in names)
 
 
 def build_local_manifest(cfg, mode=None):
@@ -149,11 +153,12 @@ def build_local_manifest(cfg, mode=None):
 def fetch_manifest(cfg, mode=None, session=None):
     """Create the manifest and save it to disk.
 
-    If data/raw/ already has every listed participant and Demographics.csv, they
-    are used as they are, with no network. Otherwise OSF is listed, and each zip is
+    In list mode, if data/raw/ already has every listed participant and Demographics.csv,
+    they are used as they are, with no network. Otherwise OSF is listed, and each zip is
     downloaded later unless a valid copy is already in data/raw/.
     """
-    if have_local_files(cfg):
+    mode = mode or cfg["data"]["mode"]
+    if have_local_files(cfg, mode):
         logger.info("All listed participants are already in %s: not downloading", cfg["resolved_paths"]["raw_dir"])
         manifest = build_local_manifest(cfg, mode)
     else:

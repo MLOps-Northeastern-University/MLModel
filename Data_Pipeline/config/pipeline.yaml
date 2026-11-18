@@ -4,21 +4,18 @@
 data:
   osf_project_id: 5xvwn
   osf_api_url: https://api.osf.io/v2
-  # "sample" processes the N smallest participant zips; "full" processes all.
-  mode: sample
-  sample_size: 5 # ignored when participants list is mentioned
-  # When set, exactly these participants are processed, whatever the mode.
-  # The model's 60: every COPS participant except the 6 kept for the app demo
-  # (COPS-6, 41, 50, 51, 52, 59), which the model pipeline must never see. The model's
-  # patient split makes 10 of these 60 the test patients and the other 50 development.
-  participants: [COPS-1, COPS-2, COPS-3, COPS-4, COPS-5, COPS-7, COPS-8, COPS-9, COPS-10, COPS-11,
-                 COPS-12, COPS-13, COPS-14, COPS-15, COPS-16, COPS-17, COPS-18, COPS-19, COPS-20, COPS-21,
-                 COPS-22, COPS-23, COPS-24, COPS-25, COPS-26, COPS-27, COPS-28, COPS-29, COPS-30, COPS-31,
-                 COPS-32, COPS-33, COPS-34, COPS-35, COPS-36, COPS-37, COPS-38, COPS-39, COPS-40, COPS-42,
-                 COPS-43, COPS-44, COPS-45, COPS-46, COPS-47, COPS-48, COPS-49, COPS-53, COPS-54, COPS-55,
-                 COPS-56, COPS-57, COPS-58, COPS-60, COPS-61, COPS-62, COPS-63, COPS-64, COPS-65, COPS-66]
-  # Zips already in paths.raw_dir are used instead of downloaded; with every listed
-  # participant and Demographics.csv there, OSF isn't contacted at all.
+  # Who is processed: "sample" the sample_size smallest participant zips (quick, the same on every
+  # machine), "full" all of them, "list" exactly the participants below. full gives the model's 60.
+  mode: full
+  sample_size: 5
+  # Never processed, in any mode: the 6 participants kept for the app demo, which the model pipeline
+  # must never see. The model's patient split makes 10 of the other 60 the test patients and 50
+  # development.
+  exclude: [COPS-6, COPS-41, COPS-50, COPS-51, COPS-52, COPS-59]
+  # Only in list mode: exactly these (a test on a few participants, say).
+  participants: []
+  # Zips already in paths.raw_dir are used instead of downloaded; in list mode, with every
+  # listed participant and Demographics.csv there, OSF isn't contacted at all.
   # Delete each downloaded zip once it's processed, to save disk space.
   delete_raw_after_processing: false
   # Stop the run if more than this share of participants fail.

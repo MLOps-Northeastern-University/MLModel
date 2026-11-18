@@ -8,7 +8,7 @@ participant downloads, processes and deletes one zip, so the disk never holds ev
 check_failures runs once every participant has finished or failed, and stops the run only if more
 than data.max_failed_fraction failed (Data_Pipeline/config/pipeline.yaml).
 
-Trigger with config {"mode": "sample"} or {"mode": "full"}.
+Trigger with config {"mode": "sample"}, {"mode": "full"} or {"mode": "list"}.
 """
 
 import json
@@ -35,9 +35,10 @@ RUN = "python -m scripts.run_step"
     catchup=False,
     default_args={"owner": "mednova", "retries": 1, "retry_delay": timedelta(minutes=2),
                   "on_failure_callback": task_failed},
-    params={"mode": Param("sample", enum=["sample", "full"],
-                          description="sample = the smallest participants, full = all of them. "
-                                      "Ignored while data.participants names a list in the config.")},
+    params={"mode": Param("sample", enum=["sample", "full", "list"],
+                          description="sample = the smallest participants, full = all of them (the model's 60), "
+                                      "list = the config's data.participants. The demo patients "
+                                      "(data.exclude) are never processed.")},
     tags=["mlops", "parkinsons", "data-pipeline"],
 )
 def cops_data_pipeline():

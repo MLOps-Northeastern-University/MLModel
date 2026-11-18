@@ -79,7 +79,7 @@ def set_email(monkeypatch, user="sender@example.com"):
 
 def test_config_resolves_and_creates_paths(tmp_path):
     cfg = make_config(tmp_path, data={"sample_size": 2})
-    assert cfg["data"]["sample_size"] == 2 and cfg["data"]["mode"] == "sample"  # override merged, rest kept
+    assert cfg["data"]["sample_size"] == 2 and cfg["data"]["mode"] == "list"  # override merged, rest kept
     assert cfg["resolved_paths"]["processed_dir"] == tmp_path / "data" / "processed"
     assert cfg["resolved_paths"]["processed_dir"].is_dir()
 

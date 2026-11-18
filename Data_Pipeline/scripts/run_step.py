@@ -114,7 +114,8 @@ def parser():
     p = argparse.ArgumentParser(description="Run one step of the data pipeline (see scripts/run_step.py)")
     p.add_argument("step", choices=STEPS)
     p.add_argument("name", nargs="?", help="participant only: the participant's zip, as the manifest names it")
-    p.add_argument("--mode", choices=["sample", "full"], default=None, help="manifest only: which participants")
+    p.add_argument("--mode", choices=["sample", "full", "list"], default=None,
+                   help="manifest only: who to process (data.mode in the config when left out)")
     p.add_argument("--config", default=None, help="Path to a config YAML")
     return p
 

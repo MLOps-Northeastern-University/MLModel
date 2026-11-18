@@ -7,7 +7,7 @@
 # summary names no participants, so it's `cache: false` and kept in Git to read.
 stages:
   build_dataset:
-    cmd: python -m scripts.pipeline --mode sample
+    cmd: python -m scripts.pipeline --mode full
     deps:
       - scripts
       - config/pipeline.yaml

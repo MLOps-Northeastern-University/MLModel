@@ -302,7 +302,8 @@ def run(cfg, mode=None):
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description="COPS data pipeline")
-    parser.add_argument("--mode", choices=["sample", "full"], default=None)
+    parser.add_argument("--mode", choices=["sample", "full", "list"], default=None,
+                        help="who to process (data.mode in the config when left out)")
     parser.add_argument("--config", default=None, help="path to a config YAML")
     args = parser.parse_args(argv)
     return run(load_config(args.config), args.mode)

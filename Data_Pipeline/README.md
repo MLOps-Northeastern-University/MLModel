@@ -25,19 +25,20 @@ Outputs land in `data/` on your machine. Airflow, which runs the same steps as a
 
 ## Without Docker
 
-Use **Python 3.11** or 3.12 (3.13 can't install the pinned libraries).
+Use **Python 3.12**, the same as the model pipeline (3.13 can't install the pinned libraries).
 
 ```bash
-python3.11 -m venv .venv && source .venv/bin/activate
+python3.12 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 pytest -q                                     # synthetic files only, nothing downloaded
 python -m scripts.pipeline --mode sample      # the 5 smallest participants
-python -m scripts.pipeline --mode full        # all 66
+python -m scripts.pipeline --mode full        # everyone but the 6 demo patients: the model's 60
+python -m scripts.pipeline --mode list        # exactly data.participants in the config
 ```
 
 - **Downloads:** zips already in `data/raw/` are reused. With every listed participant and `Demographics.csv` there, OSF isn't contacted at all, so copy zips you already have into `data/raw/` to run offline.
 
-- **Who is processed:** `data.participants` in the config names exactly who, whatever the mode. It's set to 60 of the 66: everyone except the 6 patients kept for the app's demo (COPS-6, 41, 50, 51, 52, 59), who are never in the model's data. Set it to `null` to go back to `--mode sample` (the smallest `data.sample_size`) or `--mode full` (all 66).
+- **Who is processed:** `data.mode` (or `--mode`): `sample` the smallest `data.sample_size`, `full` everyone, `list` exactly `data.participants`. `data.exclude` is never processed in any mode: the 6 patients kept for the app's demo (COPS-6, 41, 50, 51, 52, 59), who are never in the model's data. So `full`, the config's default, gives the model's 60.
 - Participants run 4 at a time (`run.parallel_participants`). One failing is skipped and listed in `reports/failed_participants.json` with an alert; more than 20% failing (`data.max_failed_fraction`) stops the run with exit code 1.
 - A dataset that fails its checks also stops the run with exit code 1.
 - Every setting is in `config/pipeline.yaml`. Email and Slack alerts are on once `.env` is filled in from `.env.example`; without it they're logged and skipped.
@@ -174,7 +175,7 @@ After an Airflow run, the `dvc_version` task runs `dvc commit -f build_dataset` 
 
 ## Airflow
 
-The DAG `cops_data_pipeline` is in [`../airflow/`](../airflow/README.md), next to the model pipeline's. Each task runs one step in this pipeline's image (`python -m scripts.run_step <step>`), with `data/` mounted, so Airflow never imports this code and the steps run the same as on a laptop. Trigger it with `{"mode": "sample"}` or `{"mode": "full"}`.
+The DAG `cops_data_pipeline` is in [`../airflow/`](../airflow/README.md), next to the model pipeline's. Each task runs one step in this pipeline's image (`python -m scripts.run_step <step>`), with `data/` mounted, so Airflow never imports this code and the steps run the same as on a laptop. Trigger it with `{"mode": "sample"}`, `{"mode": "full"}` or `{"mode": "list"}`.
 
 Tasks run in this order: `manifest` → `patients` → `participant` (one task per participant, 4 at a time, 2 retries) → `check_failures` (runs even when some participants failed) → `build` → `checks` (no retries) → `dvc_version` → `notify_success`. Any failed task sends an alert.
 
