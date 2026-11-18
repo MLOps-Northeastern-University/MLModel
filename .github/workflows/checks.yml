@@ -66,8 +66,8 @@ jobs:
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v7
         with:
-          # The pinned libraries need 3.11 or 3.12 (see Data_Pipeline/README.md).
-          python-version: "3.11"
+          # The same Python as the data pipeline's Docker image, and the model pipeline's.
+          python-version: "3.12"
           cache: pip
           cache-dependency-path: Data_Pipeline/requirements.txt
       # The full requirements, so a broken pin fails here before it fails on someone's machine.
@@ -91,8 +91,8 @@ jobs:
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v7
         with:
-          # The same Python as the model pipeline's Docker image: 3.13, for PyTorch.
-          python-version: "3.13"
+          # The same Python as the model pipeline's Docker image, and the data pipeline's.
+          python-version: "3.12"
           cache: pip
           cache-dependency-path: Model_Pipeline/requirements.txt
       # PyTorch's CPU build first (about 200 MB; the default Linux build pulls in GBs of CUDA),
@@ -103,6 +103,9 @@ jobs:
           pip install -r requirements.txt
       - name: Lint (flake8)
         run: flake8 scripts tests
+      # The file a PR bumps to ask for training: a typo fails here, not at the merge that trains.
+      - name: retrain.yaml is valid
+        run: python -m scripts.retrain_request check
       # The floor is 0 while most steps are still being built; it goes up to 85 once they're merged.
       - name: Unit tests, with a coverage floor
         run: pytest -q --cov=scripts --cov-branch --cov-report=term-missing:skip-covered --cov-fail-under=0

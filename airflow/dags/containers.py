@@ -2,8 +2,8 @@
 
 Airflow only orchestrates. Each task starts a container of the data or the model pipeline's image and
 runs one command in it (that pipeline's scripts/run_step.py). Airflow never imports either pipeline,
-so each keeps its own Python and libraries (the data pipeline 3.11, the model pipeline 3.13 with
-PyTorch), and a step runs the same in a task as on a laptop.
+so each keeps its own libraries (both on Python 3.12; the model pipeline's has PyTorch), and a
+step runs the same in a task as on a laptop.
 
 The containers are started through this machine's Docker (its socket is mounted into Airflow), so
 the folders they mount are paths on this machine, under its checkout of the repo:

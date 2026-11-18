@@ -48,8 +48,8 @@ jobs:
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v7
         with:
-          # The same Python as the model pipeline's Docker image: 3.13, for PyTorch.
-          python-version: "3.13"
+          # The same Python as the model pipeline's Docker image, and the data pipeline's.
+          python-version: "3.12"
           cache: pip
           cache-dependency-path: Model_Pipeline/requirements.txt
       # PyTorch's CPU build first, as in checks.yml: the default Linux build pulls in GBs of CUDA.

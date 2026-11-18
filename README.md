@@ -55,11 +55,11 @@ docker compose run --rm tests       # the tests (the first run builds the image)
 docker compose run --rm pipeline    # the pipeline on 5 participants, 1.08 GB download
 ```
 
-On Linux, run `mkdir -p logs/airflow && echo "AIRFLOW_UID=$(id -u)" > .env` once first, so the containers can write to the folder. To run it in Airflow, or without Docker on Python 3.11 or 3.12, see the [quick start in Data_Pipeline/README.md](Data_Pipeline/README.md#quick-start-only-docker-needed).
+To run it without Docker, on Python 3.12, see the [quick start in Data_Pipeline/README.md](Data_Pipeline/README.md#quick-start-only-docker-needed). Both pipelines also run as DAGs on one Airflow, in [airflow/](airflow/README.md).
 
 ## Running tests
 
-From `Data_Pipeline/`: `docker compose run --rm tests`, or `pytest -v` with Python 3.11 or 3.12 (which skips the Airflow DAG tests). The tests use small synthetic files, so they download nothing.
+From `Data_Pipeline/` or `Model_Pipeline/`: `docker compose run --rm tests`, or `pytest -v` with Python 3.12. The DAGs' tests run in the Airflow image: `docker compose run --rm tests` in `airflow/`. The tests use small synthetic files, so they download nothing.
 
 ## Data rules
 
@@ -75,8 +75,9 @@ Every PR and every push to `dev` or `main` runs [.github/workflows/checks.yml](.
 | Secret scan | Fails if a key, token or password is committed (gitleaks) |
 | Data file guard | Fails on data or model files (`.csv`, `.h5`, `.pt` and similar) or any file over 5 MB. Small synthetic test data may go in `tests/fixtures/`. |
 | Markdown lint | Fails on broken Markdown. Rules are relaxed; see `.markdownlint-cli2.yaml`. |
-| Data pipeline tests | flake8, pytest with an 85% coverage floor, and `dvc dag`, on Python 3.11 |
-| Model pipeline tests | flake8 and pytest on Python 3.11. The coverage floor is 0 while the steps are being built, and goes up to 85. |
+| Data pipeline tests | flake8, pytest with an 85% coverage floor, and `dvc dag`, on Python 3.12 |
+| Model pipeline tests | flake8 and pytest on Python 3.12. The coverage floor is 0 while the steps are being built, and goes up to 85. |
+| Airflow DAGs | both DAGs load, connect in order and run each step in its pipeline's image, in the Airflow image |
 
 A second workflow, [.github/workflows/model.yml](.github/workflows/model.yml), runs the model pipeline itself in the team's GCP project and emails the team when it fails and when training finishes. It runs by hand for now: the full training needs a GPU, which GitHub's runners don't have, so the real run was made on a GCP GPU machine with the same command. How it works, how it maps to the assignment's CI/CD section, its settings, and how to open the hosted MLflow: [Model_Pipeline/README.md, "Running in the cloud"](Model_Pipeline/README.md#running-in-the-cloud).
 

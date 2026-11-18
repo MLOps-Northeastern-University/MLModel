@@ -1,0 +1,15 @@
+# Asks CI to train the model. On a merge to main, CI compares request with the commit before it:
+# a new number starts a training run with the options below; anything else in a merge trains
+# nothing. So to train, change request (bump it by one) in your PR, and say why.
+#
+# The options are the model DAG's (airflow/dags/model_pipeline.py) and run_step start's. They're
+# checked on every PR (python -m scripts.retrain_request check), so a typo fails the PR, not the merge.
+
+# Bump to train. 1 was v1, the first full run on the real data (2026-11-15), released by hand.
+request: 1
+# Why this run: tagged on its MLflow run.
+reason: "v1: the first full run on the real data"
+# The candidates to train, names from models.candidates in model.yaml. Empty: all of them.
+candidates: []
+# Tune their settings again before training (slow). false reuses the last tuned settings.
+tune: false

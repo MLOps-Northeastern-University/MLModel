@@ -1,6 +1,6 @@
-# Shared libraries, with the same pins as the data pipeline, except numpy: this pipeline runs on
-# Python 3.13 (for PyTorch), and numpy 1.26.4 has no 3.13 build. numpy 2 reads the data
-# pipeline's files the same way.
+# Shared libraries, with the same pins as the data pipeline, except numpy (2.3.5 here, 1.26.4
+# there). Both pipelines run on Python 3.12, which has builds of either, so the two can be aligned
+# in a change of their own, tested on both. numpy 2 reads the data pipeline's files the same way.
 pandas==2.2.3
 numpy==2.3.5
 scikit-learn==1.5.2

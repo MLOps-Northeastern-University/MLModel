@@ -6,7 +6,7 @@
 #   docker run --rm -v "$PWD/data:/app/Data_Pipeline/data" data-pipeline python -m scripts.pipeline
 #
 # docker-compose.yaml mounts the repo over /app instead, so code changes need no rebuild.
-FROM python:3.11-slim
+FROM python:3.12-slim
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1

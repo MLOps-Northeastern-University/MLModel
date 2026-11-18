@@ -9,7 +9,7 @@
 #
 # The GPU image runs with `docker run --gpus all`, on a machine with NVIDIA's
 # driver and container toolkit. PyTorch's CUDA build brings CUDA itself.
-FROM python:3.13-slim
+FROM python:3.12-slim
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1

@@ -36,7 +36,7 @@ Two simpler models are trained next to it as baselines. Both score each window o
 
 ## Running
 
-With Python 3.13, from `Model_Pipeline/` (3.13 for PyTorch; the data pipeline stays on 3.11):
+With Python 3.12, from `Model_Pipeline/` (the same Python as the data pipeline):
 
 ```bash
 pip install torch==2.12.1 --index-url https://download.pytorch.org/whl/cpu   # or a CUDA build for a GPU
@@ -172,13 +172,22 @@ Then open <http://localhost:5001>, and leave the command running while you use i
 
 [`.github/workflows/model.yml`](../.github/workflows/model.yml) runs the pipeline on GitHub Actions:
 
-1. Installs Python 3.13, PyTorch's CPU build and `requirements.txt`.
+1. Installs Python 3.12, PyTorch's CPU build and `requirements.txt`.
 2. Signs in to GCP as the `training` service account through Workload Identity Federation, so there's no key file, and gets an ID token for the hosted MLflow.
 3. Runs `python -m scripts.run_model_pipeline`, logged to the hosted MLflow. A failed gate fails the job.
 4. Uploads `artifacts/` and `logs/` as the run's `model-run` artifact, even when it fails.
 5. On a push to `main` only: releases the model, and pushes the training image as `ml/training:<commit>`.
 
 **When it runs:** by hand for now, with Actions → Model → Run workflow, on any branch; a run releases only from `main`. The triggers for a pull request into `main` and a push to `main` (on `Model_Pipeline/**` or a new `Data_Pipeline/dvc.lock`) are in the file, commented out, until CI trains on a GPU (see [CI/CD](#cicd-assignment-section-7)).
+
+**Asking for a training run:** [`config/retrain.yaml`](config/retrain.yaml). A PR that bumps its `request` asks CI to train once it merges into `main`, with the candidates, tuning and reason it names; a merge that leaves `request` alone trains nothing, so docs and fixes never train. Every PR checks the file (`python -m scripts.retrain_request check`), so a typo fails the PR, not the merge. On the merge, CI reads it with `python -m scripts.retrain_request conf --before <the file in the commit before>`, which prints the model DAG's trigger config only when `request` changed.
+
+```yaml
+request: 2                                  # was 1: bumped, so this merge trains
+reason: "transformer: deeper encoder"
+candidates: [motor_causal_transformer]      # empty: all of them
+tune: true
+```
 
 ### CI/CD (assignment section 7)
 
