@@ -101,3 +101,16 @@ def test_a_step_before_start_is_refused(command):
 
 def test_start_refuses_a_candidate_the_config_doesnt_have(command):
     assert command(["start", "--candidates", "nope"]) == 2
+
+
+def test_a_failed_start_leaves_no_run_for_finish_to_close(command, cfg, monkeypatch):
+    run_all(command)                                            # an earlier run, finished
+    earlier = command.tracker.find("model_pipeline").run_id
+
+    def no_split(cfg):
+        raise run_step.PipelineError("no patient split")
+    monkeypatch.setattr(run_step, "read_split", no_split)
+    assert command(["start"]) == 1
+    assert not (cfg["resolved_paths"]["artifacts_dir"] / "run.json").exists()
+    assert command(["finish", "--status", "failed"]) == 0      # nothing to close, and says so
+    assert command.tracker.runs[earlier].status == RunStatus.FINISHED   # the earlier run is left alone

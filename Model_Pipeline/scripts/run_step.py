@@ -74,9 +74,15 @@ def start(args, tracker_factory):
     except ValueError as exc:                       # a candidate the config doesn't have
         logger.error("Can't start: %s", exc)
         return 2
-    tracker = tracker_factory(cfg)
-    run_id = tracker.open_run("model_pipeline",
-                              tags=run_tags(cfg, read_split(cfg), args.tune, args.reason))
+    # An earlier run's file goes first: if this start fails, finish must not close that run.
+    run_file(cfg).unlink(missing_ok=True)
+    try:
+        split = read_split(cfg)
+    except PipelineError as exc:                    # no patient split: nothing can train
+        logger.error("Can't start: %s", exc)
+        alert_failure(cfg, exc)
+        return 1
+    run_id = tracker_factory(cfg).open_run("model_pipeline", tags=run_tags(cfg, split, args.tune, args.reason))
     write_json({**choices, "mlflow_run_id": run_id}, run_file(cfg))
     print(run_id)
     return 0
@@ -115,7 +121,11 @@ def step(name, args, tracker_factory):
 
 def finish(args, tracker_factory):
     """Close the run's MLflow run, and tell the team the result when it passed."""
-    run = read_run(load_config(args.config))
+    try:
+        run = read_run(load_config(args.config))
+    except PipelineError:
+        logger.info("No run to close: start didn't open one")
+        return 0
     cfg = config_for(run, args.config)
     status = RunStatus.FINISHED if args.status == "finished" else RunStatus.FAILED
     tracker_factory(cfg).close_run(run["mlflow_run_id"], status)
