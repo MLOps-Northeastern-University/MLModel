@@ -19,7 +19,8 @@ airflow/
 │   ├── alerts.py         the email and Slack alert when a task fails
 │   ├── data_pipeline.py
 │   └── model_pipeline.py
-└── tests/test_dags.py    both DAGs load, connect in order, and run in the right image
+├── tests/test_dags.py    both DAGs load, connect in order, and run in the right image
+└── vm/                   the training VM's start-up script: one run on a VM CI makes, then it shuts down
 ```
 
 ## How a task runs
