@@ -171,7 +171,7 @@ dvc push                         # upload the data
 dvc pull                         # elsewhere: get exactly the data of the checked-out commit
 ```
 
-After an Airflow run, the `dvc_version` task runs `dvc commit -f build_dataset` and tries `dvc push`. It doesn't commit to Git; do the `git add` and `git commit` yourself.
+After an Airflow run, the `dvc_version` task runs `dvc commit -f build_dataset` and `dvc push`. On the training VM, when that changed the data, CI opens a PR with the new `dvc.lock` and bias report (`.github/scripts/open_data_pr.sh`): merge it to record the data version in git, or close it to ignore it. Bump `Model_Pipeline/config/retrain.yaml`'s `request` in that PR to train on the new data when it merges. On a laptop, commit `dvc.lock` yourself.
 
 ## Airflow
 

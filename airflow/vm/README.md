@@ -9,7 +9,7 @@ CI makes one VM for each training run and deletes it after. [`startup.sh`](start
 3. **The files** (a model run): the data the commit's `dvc.lock` names (`dvc pull`), harnet10's weights, and what earlier runs kept.
 4. **Airflow:** started with one login per teammate (the `airflow-users` secret). Its REST API is off and logins are rate-limited.
 5. **The run:** the DAG triggered with the run's settings. A Cloudflare tunnel serves the Airflow UI at a random `https://….trycloudflare.com` link, emailed to the team (never printed in a public log). The VM opens no port.
-6. **After:** what runs keep, the Airflow logs and `result.json` go back to GCS, and the VM shuts down. If anything fails on the way, the run is recorded as failed and the VM still shuts down.
+6. **After:** what runs keep, the Airflow logs and `result.json` go back to GCS; a data run that changed the data leaves its new `dvc.lock` there too, for CI to open a PR with (no GitHub credential is on the VM). Then the VM deletes itself. If anything fails on the way, the run is recorded as failed and the VM still goes.
 
 ## The run's settings
 
@@ -36,7 +36,7 @@ All in `gs://team17-mlops-neu-training-data/`, private:
 | `cops-dvc/` | the data, by DVC | the data DAG |
 | `harnet10/` | harnet10's weights (our pinned copy; its licence allows no redistribution) | by hand, once |
 | `state/` | what one run leaves the next: harnet10's feature cache and the pretrained bodies (`cache/`), the tuning studies, `tuned_params.json`, the test-scored markers | each run |
-| `runs/<run id>/` | `result.json` (CI waits for it), the start-up log, the Airflow logs | each run |
+| `runs/<run id>/` | `result.json` (CI waits for it), the start-up log, the Airflow logs; for a data run that changed the data, `data-version/` (the new `dvc.lock`, the bias report, the counts), from which CI opens the PR | each run |
 
 ## Getting in during a run
 

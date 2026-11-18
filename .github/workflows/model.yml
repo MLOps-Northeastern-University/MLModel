@@ -281,3 +281,35 @@ jobs:
         run: |
           pip install -q requests==2.33.0 PyYAML==6.0.2
           python -c "import os; from scripts.alerts import notify; notify('[MedNOVA model] CI job failed', 'A CI step failed: making the VM, or waiting for the run (see the job).\n\nRun: ' + os.environ['RUN_URL'])"
+
+  # A data run that changed the data: the PR that records the new data version in git
+  # (.github/scripts/open_data_pr.sh). A run longer than the train job's six hours gets its PR from
+  # data-version.yml, hourly, instead.
+  data-version:
+    name: Open the data version's PR
+    needs: [settings, train]
+    if: needs.settings.outputs.dag == 'cops_data_pipeline'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write          # push the PR's branch
+      pull-requests: write     # open the PR
+      id-token: write          # read the run's files in GCS
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: google-github-actions/auth@v3
+        with:
+          workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
+          service_account: ${{ vars.GCP_SERVICE_ACCOUNT }}
+      - uses: google-github-actions/setup-gcloud@v3
+      - name: Open the PR, if the data changed
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_ID: gh-${{ github.run_id }}-${{ github.run_attempt }}
+        run: |
+          if gcloud storage ls "gs://$TEAM_PROJECT-training-data/runs/$RUN_ID/data-version/dvc.lock" > /dev/null 2>&1; then
+            bash .github/scripts/open_data_pr.sh "$RUN_ID"
+          else
+            echo "The data came out the same: no new data version."
+          fi

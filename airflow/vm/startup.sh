@@ -28,7 +28,9 @@
 #   gs://<team>-training-data/harnet10/        harnet10's weights, uploaded once by hand
 #   gs://<team>-training-data/state/           what runs keep: the feature caches, tuned settings,
 #                                              the tuning studies, the test-scored markers
-#   gs://<team>-training-data/runs/<run id>/   this run's result.json (CI waits for it) and logs
+#   gs://<team>-training-data/runs/<run id>/   this run's result.json (CI waits for it) and logs;
+#                                              for a data run that changed the data, data-version/
+#                                              (dvc.lock and its reports, for CI's PR)
 #
 # Its own log: the VM's serial console, and runs/<run id>/startup.log.
 
@@ -321,5 +323,27 @@ fi
 
 # ---- 6. after --------------------------------------------------------------------------------
 
+# A data run that changed the data: its dvc_version task updated dvc.lock (and DVC pushed the data).
+# What git needs to record it goes to GCS, and CI opens the PR (.github/scripts/open_data_pr.sh),
+# so no GitHub credential is ever on this VM. Nothing if the data came out the same.
+publish_data_version() {
+  local lock="Data_Pipeline/dvc.lock" out="$WORK/data-version"
+  if git -C "$REPO" diff --quiet -- "$lock"; then
+    log "the data is the same as the commit's: no new data version"
+    return
+  fi
+  log "a new data version: its dvc.lock goes to GCS for CI's PR"
+  mkdir -p "$out"
+  cp "$REPO/$lock" "$out/dvc.lock"
+  cp "$REPO/Data_Pipeline/data/reports/bias_report.md" "$out/bias_report.md"
+  # Counts only, no participant IDs: the PR's description.
+  cp "$REPO/Data_Pipeline/data/processed/dataset_meta.json" "$out/dataset_meta.json"
+  printf '%s' "$SHA" > "$out/base-sha"
+  gcloud storage cp "$out"/* "$RUN_DIR/data-version/"
+}
+
 trap - ERR
+if [ "$DAG" = "cops_data_pipeline" ] && [ "$STATE" = "success" ]; then
+  publish_data_version || STATE="failed" DETAIL="couldn't save the new data version"
+fi
 finish "$STATE" "$DETAIL"
