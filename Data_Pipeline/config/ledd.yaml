@@ -1,5 +1,5 @@
 # Levodopa equivalent dose (LEDD): how many mg of levodopa each Parkinson's drug is worth.
-# Read by scripts/ledd.py. One table for every data source: COPS now, the app's dose log later.
+# Read by data_pipeline/ledd.py. One table for every data source: COPS now, the app's dose log later.
 #
 # Every value comes from the reference named in its cite, so it can be cited in a paper.
 # ledd.py refuses a drug without a cite, or a cite to a reference not listed here.

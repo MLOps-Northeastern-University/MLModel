@@ -1,1 +1,1 @@
-"""Tests for scripts/core: the contracts."""
+"""Tests for model_pipeline/core: the contracts."""

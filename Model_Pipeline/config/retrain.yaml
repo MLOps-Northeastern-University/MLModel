@@ -3,7 +3,7 @@
 # nothing. So to train, change request (bump it by one) in your PR, and say why.
 #
 # The options are the model DAG's (airflow/dags/model_pipeline.py) and run_step start's. They're
-# checked on every PR (python -m scripts.retrain_request check), so a typo fails the PR, not the merge.
+# checked on every PR (python -m model_pipeline.retrain_request check), so a typo fails the PR, not the merge.
 
 # Bump to train. 1 was v1, the first full run on the real data (2026-11-15), released by hand.
 request: 1

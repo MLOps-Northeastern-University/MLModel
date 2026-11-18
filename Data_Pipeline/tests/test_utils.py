@@ -9,7 +9,7 @@ import smtplib
 import numpy as np
 import pytest
 
-from scripts import utils
+from data_pipeline import utils
 from tests.helpers import make_config
 
 ALERT_SETTINGS = ["ALERT_EMAIL", "SMTP_HOST", "SMTP_PORT", "SMTP_USER", "SMTP_PASSWORD", "SLACK_WEBHOOK_URL"]

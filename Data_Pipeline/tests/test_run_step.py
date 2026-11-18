@@ -5,8 +5,8 @@ import json
 
 import pandas as pd
 
-from scripts import pipeline, run_step
-from scripts.utils import read_table
+from data_pipeline import pipeline, run_step
+from data_pipeline.utils import read_table
 from tests.helpers import make_local_run
 
 

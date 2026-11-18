@@ -29,4 +29,4 @@ COPY . .
 ARG GIT_COMMIT=""
 ENV GIT_COMMIT=${GIT_COMMIT}
 
-CMD ["python", "-m", "scripts.run_model_pipeline"]
+CMD ["python", "-m", "model_pipeline.run_model_pipeline"]

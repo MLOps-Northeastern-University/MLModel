@@ -1,4 +1,4 @@
-"""The model pipeline as a DAG: the steps of Model_Pipeline/scripts/run_step.py, each in a container.
+"""The model pipeline as a DAG: the steps of Model_Pipeline/model_pipeline/run_step.py, each in a container.
 
     start -> tune -> train -> evaluate -> bias -> explain -> select -> compare -> export -> register
         -> finish (every step passed) or finish_failed (a step failed)
@@ -22,7 +22,7 @@ from airflow.models.param import Param
 from alerts import task_failed
 from containers import model_container, step
 
-RUN = "python -m scripts.run_step"
+RUN = "python -m model_pipeline.run_step"
 STEPS = ["tune", "train", "evaluate", "bias", "explain", "select", "compare", "export", "register"]
 
 # start's options, from the trigger's config. Jinja fills them in when the task runs.

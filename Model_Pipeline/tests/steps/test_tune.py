@@ -3,11 +3,11 @@ import json
 import pandas as pd
 import pytest
 
-from scripts.core.errors import ConfigError
-from scripts.data.folds import Split
-from scripts.steps.train import TrainModels
-from scripts.steps.tune import TuneModels, nest
-from scripts.tracking.memory_tracker import MemoryTracker
+from model_pipeline.core.errors import ConfigError
+from model_pipeline.data.folds import Split
+from model_pipeline.steps.train import TrainModels
+from model_pipeline.steps.tune import TuneModels, nest
+from model_pipeline.tracking.memory_tracker import MemoryTracker
 from tests.models.test_window_classifier import environment  # noqa: F401  (the fake harnet10)
 from tests.steps.test_train import SPLIT, TINY_TRANSFORMER, WINDOWS, data
 

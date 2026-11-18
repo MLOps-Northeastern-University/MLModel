@@ -1,4 +1,4 @@
-"""The COPS data pipeline as a DAG: the steps of Data_Pipeline/scripts/run_step.py, each in a container.
+"""The COPS data pipeline as a DAG: the steps of Data_Pipeline/data_pipeline/run_step.py, each in a container.
 
     manifest -> patients -> participant (one task per participant, in parallel)
         -> check_failures -> build -> checks -> dvc_version -> notify_success
@@ -24,7 +24,7 @@ from containers import data_container, repo_container, step
 # How many participants run at once. Each holds one participant's zip and windows in memory.
 PARALLEL_PARTICIPANTS = 4
 
-RUN = "python -m scripts.run_step"
+RUN = "python -m data_pipeline.run_step"
 
 
 @dag(

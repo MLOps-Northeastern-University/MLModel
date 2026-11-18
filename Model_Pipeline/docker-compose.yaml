@@ -12,7 +12,7 @@ x-tool: &tool
   build: .
   # Not started by "docker compose up"; run with "docker compose run --rm <name>".
   profiles: [tools]
-  # Optional: a .env with the alert settings (see scripts/alerts.py) turns on email/Slack.
+  # Optional: a .env with the alert settings (see model_pipeline/alerts.py) turns on email/Slack.
   env_file:
     - path: .env
       required: false
@@ -50,7 +50,7 @@ services:
 
   train:
     <<: *tool
-    command: ["python", "-m", "scripts.run_model_pipeline"]
+    command: ["python", "-m", "model_pipeline.run_model_pipeline"]
     environment:
       MLFLOW_TRACKING_URI: http://mlflow:5000
     depends_on:

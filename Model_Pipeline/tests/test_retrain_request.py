@@ -4,8 +4,8 @@ import json
 
 import pytest
 
-from scripts import retrain_request
-from scripts.retrain_request import RetrainRequestError, dag_conf, read
+from model_pipeline import retrain_request
+from model_pipeline.retrain_request import RetrainRequestError, dag_conf, read
 
 KNOWN = ["window_logistic", "window_boosting", "motor_causal_transformer"]
 

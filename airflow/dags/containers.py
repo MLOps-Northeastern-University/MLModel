@@ -1,7 +1,8 @@
 """How both DAGs run a step: in its pipeline's Docker image, with the files mounted from this machine.
 
 Airflow only orchestrates. Each task starts a container of the data or the model pipeline's image and
-runs one command in it (that pipeline's scripts/run_step.py). Airflow never imports either pipeline,
+runs one command in it (that pipeline's run_step: data_pipeline.run_step or
+model_pipeline.run_step). Airflow never imports either pipeline,
 so each keeps its own libraries (both on Python 3.12; the model pipeline's has PyTorch), and a
 step runs the same in a task as on a laptop.
 

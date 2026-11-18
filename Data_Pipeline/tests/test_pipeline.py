@@ -4,8 +4,8 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from scripts import acquire, pipeline
-from scripts.utils import read_json, read_table
+from data_pipeline import acquire, pipeline
+from data_pipeline.utils import read_json, read_table
 from tests.helpers import make_config, make_demographics, make_local_run, make_participant_zip, raw_dir
 
 

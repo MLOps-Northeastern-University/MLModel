@@ -4,8 +4,8 @@ import logging
 
 import pytest
 
-from scripts.utils import logging_setup
-from scripts.utils.logging_setup import configure_logging, get_logger, log_context, log_run_start, log_step
+from model_pipeline.utils import logging_setup
+from model_pipeline.utils.logging_setup import configure_logging, get_logger, log_context, log_run_start, log_step
 
 
 @pytest.fixture(autouse=True)
@@ -29,7 +29,7 @@ def entries(buffer):
 
 def test_json_line_has_cloud_logging_fields():
     out = capture()
-    get_logger("scripts.steps.train").info("fold %d done", 2)
+    get_logger("model_pipeline.steps.train").info("fold %d done", 2)
     (entry,) = entries(out)
     assert entry["severity"] == "INFO"
     assert entry["message"] == "fold 2 done"

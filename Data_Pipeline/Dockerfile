@@ -1,9 +1,9 @@
 # The data pipeline's image: Python, git and the pinned libraries (DVC among them), and the code.
 # Airflow isn't in it: Airflow (../airflow/) runs each step of the DAG in this image, with
-# `python -m scripts.run_step <step>`, and the data folder mounted at /app/Data_Pipeline/data.
+# `python -m data_pipeline.run_step <step>`, and the data folder mounted at /app/Data_Pipeline/data.
 #
 #   docker build -t data-pipeline --build-arg GIT_COMMIT=$(git rev-parse HEAD) .
-#   docker run --rm -v "$PWD/data:/app/Data_Pipeline/data" data-pipeline python -m scripts.pipeline
+#   docker run --rm -v "$PWD/data:/app/Data_Pipeline/data" data-pipeline python -m data_pipeline.pipeline
 #
 # docker-compose.yaml mounts the repo over /app instead, so code changes need no rebuild.
 FROM python:3.12-slim
@@ -27,4 +27,4 @@ COPY . .
 ARG GIT_COMMIT=""
 ENV GIT_COMMIT=${GIT_COMMIT}
 
-CMD ["python", "-m", "scripts.pipeline"]
+CMD ["python", "-m", "data_pipeline.pipeline"]

@@ -75,7 +75,7 @@ env:
   TEAM_PROJECT: ${{ vars.GCP_PROJECT_ID }}
   COMPUTE_PROJECT: ${{ vars.GCP_COMPUTE_PROJECT }}
   REGISTRY: us-central1-docker.pkg.dev/${{ vars.GCP_PROJECT_ID }}/ml
-  # Email alerts (Model_Pipeline/scripts/alerts.py). Unset ones are skipped, never an error.
+  # Email alerts (Model_Pipeline/model_pipeline/alerts.py). Unset ones are skipped, never an error.
   ALERT_EMAIL: ${{ secrets.ALERT_EMAIL }}
   SMTP_HOST: ${{ secrets.SMTP_HOST }}
   SMTP_PORT: ${{ secrets.SMTP_PORT }}
@@ -122,7 +122,7 @@ jobs:
           if [ "$EVENT" = "push" ]; then
             # A merge: train only if retrain.yaml's request changed since the commit before.
             git show "$BEFORE:Model_Pipeline/config/retrain.yaml" > /tmp/before.yaml 2>/dev/null || : > /tmp/before.yaml
-            python -m scripts.retrain_request conf --before /tmp/before.yaml > /tmp/run.json
+            python -m model_pipeline.retrain_request conf --before /tmp/before.yaml > /tmp/run.json
           else
             python - > /tmp/run.json <<'PY'
           import json, os
@@ -280,7 +280,7 @@ jobs:
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
           pip install -q requests==2.33.0 PyYAML==6.0.2
-          python -c "import os; from scripts.alerts import notify; notify('[MedNOVA model] CI job failed', 'A CI step failed: making the VM, or waiting for the run (see the job).\n\nRun: ' + os.environ['RUN_URL'])"
+          python -c "import os; from model_pipeline.alerts import notify; notify('[MedNOVA model] CI job failed', 'A CI step failed: making the VM, or waiting for the run (see the job).\n\nRun: ' + os.environ['RUN_URL'])"
 
   # A data run that changed the data: the PR that records the new data version in git
   # (.github/scripts/open_data_pr.sh). A run longer than the train job's six hours gets its PR from

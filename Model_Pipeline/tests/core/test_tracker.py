@@ -3,8 +3,8 @@ import threading
 import numpy as np
 import pytest
 
-from scripts.core.errors import TrackingError
-from scripts.core.tracker import RunStatus, Tracker, flatten, metric_name, validate_metric_name
+from model_pipeline.core.errors import TrackingError
+from model_pipeline.core.tracker import RunStatus, Tracker, flatten, metric_name, validate_metric_name
 
 
 class StubTracker(Tracker):
@@ -186,7 +186,7 @@ def test_tags_become_strings(tracker):
 
 
 def test_a_failing_run_end_doesnt_hide_the_error_that_ended_the_run():
-    from scripts.tracking.memory_tracker import MemoryTracker
+    from model_pipeline.tracking.memory_tracker import MemoryTracker
 
     class Flaky(MemoryTracker):
         def _end_run(self, run_id, status):

@@ -7,13 +7,13 @@
 # summary names no participants, so it's `cache: false` and kept in Git to read.
 stages:
   build_dataset:
-    cmd: python -m scripts.pipeline --mode full
+    cmd: python -m data_pipeline.pipeline --mode full
     deps:
-      - scripts
+      - data_pipeline
       - config/pipeline.yaml
       - config/ledd.yaml
     outs:
-      # The model's inputs (Model_Pipeline/scripts/core/data.py).
+      # The model's inputs (Model_Pipeline/model_pipeline/core/data.py).
       - data/processed/hours.csv
       - data/processed/events.csv
       - data/processed/patients.csv

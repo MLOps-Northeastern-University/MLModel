@@ -24,5 +24,5 @@ services:
 
   pipeline:
     <<: *tool
-    # Other modes: docker compose run --rm pipeline python -m scripts.pipeline --mode full
-    command: ["python", "-m", "scripts.pipeline", "--mode", "sample"]
+    # Other modes: docker compose run --rm pipeline python -m data_pipeline.pipeline --mode full
+    command: ["python", "-m", "data_pipeline.pipeline", "--mode", "sample"]

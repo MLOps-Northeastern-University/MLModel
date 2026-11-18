@@ -74,10 +74,10 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
       - name: Lint (flake8)
-        run: flake8 scripts tests
-      # Fails if coverage of scripts/ drops below 85%.
+        run: flake8 data_pipeline tests
+      # Fails if coverage of data_pipeline/ drops below 85%.
       - name: Unit tests, with a coverage floor
-        run: pytest -q --cov=scripts --cov-branch --cov-report=term-missing:skip-covered --cov-fail-under=85
+        run: pytest -q --cov=data_pipeline --cov-branch --cov-report=term-missing:skip-covered --cov-fail-under=85
       - name: DVC reads the pipeline
         run: dvc dag
 
@@ -102,13 +102,13 @@ jobs:
           pip install torch==2.12.1 --index-url https://download.pytorch.org/whl/cpu
           pip install -r requirements.txt
       - name: Lint (flake8)
-        run: flake8 scripts tests
+        run: flake8 model_pipeline tests
       # The file a PR bumps to ask for training: a typo fails here, not at the merge that trains.
       - name: retrain.yaml is valid
-        run: python -m scripts.retrain_request check
+        run: python -m model_pipeline.retrain_request check
       # The floor is 0 while most steps are still being built; it goes up to 85 once they're merged.
       - name: Unit tests, with a coverage floor
-        run: pytest -q --cov=scripts --cov-branch --cov-report=term-missing:skip-covered --cov-fail-under=0
+        run: pytest -q --cov=model_pipeline --cov-branch --cov-report=term-missing:skip-covered --cov-fail-under=0
 
   airflow:
     name: Airflow DAGs

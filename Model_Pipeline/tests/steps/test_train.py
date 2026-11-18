@@ -5,11 +5,11 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from scripts.core.errors import ConfigError, GateError, SchemaError
-from scripts.data.folds import Split
-from scripts.models import registry
-from scripts.steps.train import TrainModels
-from scripts.tracking.memory_tracker import MemoryTracker
+from model_pipeline.core.errors import ConfigError, GateError, SchemaError
+from model_pipeline.data.folds import Split
+from model_pipeline.models import registry
+from model_pipeline.steps.train import TrainModels
+from model_pipeline.tracking.memory_tracker import MemoryTracker
 from tests.models.test_window_classifier import dataset, environment  # noqa: F401  (the fake harnet10)
 
 PIDS = ("A", "B", "C", "D", "E", "F", "G")
@@ -162,7 +162,7 @@ def test_bad_train_settings_are_refused(tmp_path, train, match):
 
 
 def test_it_loads_the_split_and_only_the_patients_it_needs_from_files(tmp_path):
-    from scripts.data.folds import write_split
+    from model_pipeline.data.folds import write_split
     from tests.data.test_loaders import write_files
     from tests.helpers import make_config
     paths = write_files(tmp_path, people=["COPS-1", "COPS-2", "COPS-3"])
@@ -182,7 +182,7 @@ def test_it_loads_the_split_and_only_the_patients_it_needs_from_files(tmp_path):
 
 
 def test_the_data_fingerprint_covers_every_table_and_the_window_files_contents(tmp_path):
-    from scripts.experiments import data_fingerprint
+    from model_pipeline.experiments import data_fingerprint
     from tests.data.test_loaders import write_files
     paths = write_files(tmp_path)
     first = data_fingerprint(paths)
@@ -253,7 +253,7 @@ def test_charts_can_be_turned_off_or_kept_off_the_folds(tmp_path):
 
 
 def test_the_leakage_check_judges_only_its_targets(tmp_path, monkeypatch):
-    from scripts.steps import train as train_module
+    from model_pipeline.steps import train as train_module
 
     def scores(_):        # the shuffled-label model: sleep far from chance, state and tremor at chance
         return {"sleep_now": {"asleep_auc": 0.75, "asleep_auc_within": 0.78},
@@ -279,7 +279,7 @@ def test_the_leakage_check_refuses_unknown_targets(tmp_path):
 
 
 def test_within_only_judges_only_the_within_patient_aucs(tmp_path, monkeypatch):
-    from scripts.steps import train as train_module
+    from model_pipeline.steps import train as train_module
 
     def scores(_):        # pooled AUC far from chance (patients differ), within-patient at chance
         return {"state_now": {"off_auc": 0.36, "off_auc_within": 0.51}, "tremor_now": {"any_tremor_auc_within": 0.48}}

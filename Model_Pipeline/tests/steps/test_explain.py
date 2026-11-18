@@ -6,10 +6,10 @@ import math
 import numpy as np
 import pytest
 
-from scripts.core.data import Windows
-from scripts.core.errors import ConfigError
-from scripts.steps.explain import ExplainModels, coalitions, leave_out, settings, shapley
-from scripts.tracking.memory_tracker import MemoryTracker
+from model_pipeline.core.data import Windows
+from model_pipeline.core.errors import ConfigError
+from model_pipeline.steps.explain import ExplainModels, coalitions, leave_out, settings, shapley
+from model_pipeline.tracking.memory_tracker import MemoryTracker
 from tests.steps.fake_models import SPLIT, HourlyLogistic, biased_dataset, pipeline_config
 
 

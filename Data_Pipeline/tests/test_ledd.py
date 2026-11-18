@@ -6,8 +6,8 @@ import pandas as pd
 import pytest
 import yaml
 
-from scripts.ledd import LeddError, LeddTable, dose_events, normalise_name
-from scripts.utils import PROJECT_ROOT
+from data_pipeline.ledd import LeddError, LeddTable, dose_events, normalise_name
+from data_pipeline.utils import PROJECT_ROOT
 from tests.helpers import make_config
 
 TABLE = PROJECT_ROOT / "config" / "ledd.yaml"

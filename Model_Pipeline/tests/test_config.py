@@ -2,7 +2,7 @@
 
 import pytest
 
-from scripts.utils.config import choose_candidates, load_config
+from model_pipeline.utils.config import choose_candidates, load_config
 from tests.helpers import FEATURE_NAMES, make_config
 
 # The app's HourFeatures.NAMES for feature spec 3, as the Backend's WRIST_FEATURES lists them.

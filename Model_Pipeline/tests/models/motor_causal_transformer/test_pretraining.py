@@ -3,9 +3,9 @@ import math
 import pytest
 import torch
 
-from scripts.core.errors import ConfigError, ModelError
-from scripts.models.motor_causal_transformer.movement import build_movement_encoder
-from scripts.models.motor_causal_transformer.pretraining import (
+from model_pipeline.core.errors import ConfigError, ModelError
+from model_pipeline.models.motor_causal_transformer.movement import build_movement_encoder
+from model_pipeline.models.motor_causal_transformer.pretraining import (
     Future, MovementForecast, harnet_targets, parts_as_floats, window_ahead, window_averages)
 
 F = 6

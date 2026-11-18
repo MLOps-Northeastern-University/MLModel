@@ -1,1 +1,1 @@
-"""Tests for scripts/tracking."""
+"""Tests for model_pipeline/tracking."""

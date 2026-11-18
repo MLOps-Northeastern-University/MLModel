@@ -4,8 +4,8 @@ One Airflow for both pipelines, with two DAGs:
 
 | DAG | What it runs | In which image |
 |---|---|---|
-| `cops_data_pipeline` | [`Data_Pipeline/scripts/run_step.py`](../Data_Pipeline/scripts/run_step.py): manifest → patients → participant (one task each, in parallel) → check_failures → build → checks → dvc_version → notify_success | the data pipeline's (Python 3.12) |
-| `model_pipeline` | [`Model_Pipeline/scripts/run_step.py`](../Model_Pipeline/scripts/run_step.py): start → tune → train → evaluate → bias → explain → select → compare → export → register → finish | the model pipeline's (Python 3.12, PyTorch; the CUDA build on the GPU machine) |
+| `cops_data_pipeline` | [`Data_Pipeline/data_pipeline/run_step.py`](../Data_Pipeline/data_pipeline/run_step.py): manifest → patients → participant (one task each, in parallel) → check_failures → build → checks → dvc_version → notify_success | the data pipeline's (Python 3.12) |
+| `model_pipeline` | [`Model_Pipeline/model_pipeline/run_step.py`](../Model_Pipeline/model_pipeline/run_step.py): start → tune → train → evaluate → bias → explain → select → compare → export → register → finish | the model pipeline's (Python 3.12, PyTorch; the CUDA build on the GPU machine) |
 
 Airflow only orchestrates. Each task starts a container of its pipeline's image and runs one step in it, so Airflow never imports either pipeline, each keeps its own libraries, and a step runs the same in a task as on a laptop. The web UI shows each DAG's graph, each step's status, duration and live log, and the Gantt chart of a run. MLflow keeps the model's scores, charts and models.
 

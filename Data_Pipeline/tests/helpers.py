@@ -11,7 +11,7 @@ from functools import partial
 import numpy as np
 import pandas as pd
 
-from scripts.utils import PROJECT_ROOT, load_config
+from data_pipeline.utils import PROJECT_ROOT, load_config
 
 FS = 100
 SECONDS = 120

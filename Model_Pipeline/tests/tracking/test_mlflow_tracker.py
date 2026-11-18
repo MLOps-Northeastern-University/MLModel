@@ -6,9 +6,9 @@ pytest.importorskip("mlflow")
 
 from mlflow.utils.mlflow_tags import MLFLOW_PARENT_RUN_ID, MLFLOW_RUN_NAME  # noqa: E402
 
-from scripts.core.errors import TrackingError  # noqa: E402
-from scripts.core.tracker import RunStatus  # noqa: E402
-from scripts.tracking.mlflow_tracker import MlflowTracker  # noqa: E402
+from model_pipeline.core.errors import TrackingError  # noqa: E402
+from model_pipeline.core.tracker import RunStatus  # noqa: E402
+from model_pipeline.tracking.mlflow_tracker import MlflowTracker  # noqa: E402
 
 
 @pytest.fixture
@@ -82,7 +82,7 @@ def test_from_config_prefers_the_environment(tmp_path, monkeypatch):
 def test_a_google_id_token_is_fetched_and_replaced_before_it_expires(tmp_path, monkeypatch):
     from google.oauth2 import id_token
 
-    from scripts.tracking import mlflow_tracker
+    from model_pipeline.tracking import mlflow_tracker
     fetched = []
     monkeypatch.setattr(id_token, "fetch_id_token", lambda request, audience: fetched.append(audience)
                         or f"token-{len(fetched)}")

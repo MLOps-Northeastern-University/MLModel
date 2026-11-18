@@ -2,7 +2,7 @@
 
 import pandas as pd
 
-from scripts.utils.file_io import read_table
+from model_pipeline.utils.file_io import read_table
 from tests.helpers import FEATURES_CSV_COLUMNS, make_config, make_features_table, write_features_csv
 
 

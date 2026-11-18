@@ -7,7 +7,7 @@ import hashlib
 
 import pytest
 
-from scripts import acquire
+from data_pipeline import acquire
 from tests.helpers import make_config, make_demographics, raw_dir
 
 CONTENT = b"participant zip bytes " * 1000

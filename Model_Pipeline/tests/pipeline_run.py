@@ -9,8 +9,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from scripts.models import registry
-from scripts.steps import train
+from model_pipeline.models import registry
+from model_pipeline.steps import train
 from tests.helpers import make_config
 from tests.steps.fake_models import pipeline_config
 

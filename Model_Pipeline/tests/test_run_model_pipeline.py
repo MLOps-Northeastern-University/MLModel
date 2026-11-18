@@ -5,15 +5,15 @@ import json
 
 import pytest
 
-from scripts import run_model_pipeline
-from scripts.core.errors import GateError
-from scripts.core.tracker import RunStatus
-from scripts.run_model_pipeline import run
-from scripts.steps import bias
-from scripts.steps.evaluate import EvaluateModel
-from scripts.steps.register import active_version, versions
-from scripts.steps.tune import TuneModels
-from scripts.tracking.memory_tracker import MemoryTracker
+from model_pipeline import run_model_pipeline
+from model_pipeline.core.errors import GateError
+from model_pipeline.core.tracker import RunStatus
+from model_pipeline.run_model_pipeline import run
+from model_pipeline.steps import bias
+from model_pipeline.steps.evaluate import EvaluateModel
+from model_pipeline.steps.register import active_version, versions
+from model_pipeline.steps.tune import TuneModels
+from model_pipeline.tracking.memory_tracker import MemoryTracker
 from tests.pipeline_run import STEP_RUNS as STEPS, fake_family, run_config, ticking_clock  # noqa: F401
 from tests.steps.fake_models import SPLIT, biased_dataset
 
@@ -62,6 +62,10 @@ def test_the_release_holds_the_chosen_model_its_metrics_and_training_stats(cfg):
     assert 0.5 < metrics["cv/state_now/off_auc"] <= 1
     stats = json.loads((release / "stats.json").read_text(encoding="utf-8"))
     assert stats["participants"] == len(SPLIT.development) and "move_mean" in stats["features"]
+    # The drift reference: the chosen model's P(OFF) bands on its out-of-fold hours.
+    reference = stats["prediction_reference"]
+    assert reference["output"] == "p_off" and len(reference["counts"]) == 10 and len(reference["bands"]) == 11
+    assert sum(reference["counts"]) == reference["hours"] > 0
 
 
 def test_without_release_every_gate_runs_but_nothing_is_registered(cfg):

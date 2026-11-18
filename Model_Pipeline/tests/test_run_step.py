@@ -6,11 +6,11 @@ import json
 
 import pytest
 
-from scripts import pipeline_steps, run_model_pipeline, run_step
-from scripts.core.tracker import RunStatus
-from scripts.steps import bias
-from scripts.steps.register import active_version, versions
-from scripts.tracking.memory_tracker import MemoryTracker
+from model_pipeline import pipeline_steps, run_model_pipeline, run_step
+from model_pipeline.core.tracker import RunStatus
+from model_pipeline.steps import bias
+from model_pipeline.steps.register import active_version, versions
+from model_pipeline.tracking.memory_tracker import MemoryTracker
 from tests.steps.fake_models import SPLIT, biased_dataset
 from tests.pipeline_run import STEP_RUNS, fake_family, run_config, ticking_clock  # noqa: F401
 

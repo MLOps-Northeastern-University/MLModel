@@ -42,7 +42,7 @@ What the model has to produce for the dashboard, the data and inputs it can use,
 |---|---|
 | Orchestration | Airflow 2.10 in Docker (`Data_Pipeline/docker-compose.yaml`) |
 | Data versioning | DVC (`Data_Pipeline/dvc.yaml`, `dvc.lock`) |
-| Data checks and anomalies | Our own checks with pandas against the model's data contract (`Data_Pipeline/scripts/checks.py`) |
+| Data checks and anomalies | Our own checks with pandas against the model's data contract (`Data_Pipeline/data_pipeline/checks.py`) |
 | Bias slicing | Fairlearn |
 | Tests and style | pytest (coverage floor 85%), flake8 |
 
