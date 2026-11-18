@@ -39,6 +39,8 @@ PASSED_ON = [
     "ALERT_EMAIL", "SMTP_HOST", "SMTP_PORT", "SMTP_USER", "SMTP_PASSWORD", "SLACK_WEBHOOK_URL",   # alerts
     "MLFLOW_TRACKING_URI", "MODEL_MLFLOW_GOOGLE_AUTH",                                          # MLflow
     "MODEL_REGISTRY",                                                                           # the registry
+    # Another config for this machine, as a path inside the container (a test with fewer participants).
+    "COPS_CONFIG", "MODEL_CONFIG",
 ]
 
 # Where each pipeline's files are inside its image (its Dockerfile's WORKDIR).
