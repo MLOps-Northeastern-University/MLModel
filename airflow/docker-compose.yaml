@@ -11,7 +11,8 @@
 
 x-airflow: &airflow
   build: .
-  image: mednova-airflow
+  # On the training VM, the image CI pushed (AIRFLOW_IMAGE in .env), pulled, never built there.
+  image: ${AIRFLOW_IMAGE:-mednova-airflow}
   env_file:
     - path: .env
       required: false
@@ -21,8 +22,12 @@ x-airflow: &airflow
     AIRFLOW__CORE__LOAD_EXAMPLES: "false"
     # Unpaused, so a run CI or the Backend triggers starts at once.
     AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: "false"
-    # The REST API takes a user and password, for CI's trigger.
-    AIRFLOW__API__AUTH_BACKENDS: airflow.api.auth.backend.basic_auth,airflow.api.auth.backend.session
+    # The REST API, with a user and password. The training VM turns it off (AIRFLOW_API_AUTH in its
+    # .env): it triggers its own DAG with Airflow's command line, so only the login page is reachable.
+    AIRFLOW__API__AUTH_BACKENDS: ${AIRFLOW_API_AUTH:-airflow.api.auth.backend.basic_auth,airflow.api.auth.backend.session}
+    # At most 5 login attempts in 40 seconds from one address, so passwords can't be guessed quickly.
+    AIRFLOW__WEBSERVER__AUTH_RATE_LIMITED: "True"
+    AIRFLOW__WEBSERVER__AUTH_RATE_LIMIT: "5 per 40 second"
   volumes:
     # The DAGs from this checkout, so an edit needs no rebuild (the image has the same ones).
     - ./dags:/opt/airflow/dags
