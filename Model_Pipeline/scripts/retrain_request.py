@@ -7,10 +7,12 @@ check fails (exit 1) when the file is malformed or names a candidate model.yaml 
 the PR that breaks it fails its checks, not the merge after it.
 
 conf is what CI runs on a merge to main, with --before the file as it was in the commit before
-(git show HEAD^:Model_Pipeline/config/retrain.yaml). When request changed, it prints the model
-DAG's trigger config as JSON:
+(git show <before>:Model_Pipeline/config/retrain.yaml). When request changed, it prints the run as
+JSON: the model DAG's trigger config, and the machine to train on.
 
-    {"candidates": ["motor_causal_transformer"], "tune": true, "reason": "...", "release": true}
+    {"dag_conf": {"candidates": ["motor_causal_transformer"], "tune": true, "reason": "...",
+                  "release": true},
+     "compute": "gpu", "machine_type": "", "zone": ""}
 
 When request didn't change (or there's no file before, as on the commit that adds it), it prints
 nothing, and CI trains nothing.
@@ -26,7 +28,9 @@ import yaml
 from scripts.utils.config import PROJECT_ROOT, load_config
 
 RETRAIN_FILE = PROJECT_ROOT / "config" / "retrain.yaml"
-KEYS = {"request", "reason", "candidates", "tune"}
+KEYS = {"request", "reason", "candidates", "tune", "compute", "machine_type", "zone"}
+# gpu: a T4, else an L4, wherever GCP has one free; t4 or l4: that GPU only; cpu: an e2.
+COMPUTE = ("gpu", "cpu", "t4", "l4")
 
 
 class RetrainRequestError(ValueError):
@@ -34,7 +38,8 @@ class RetrainRequestError(ValueError):
 
 
 def read(text, known_candidates):
-    """The request in retrain.yaml's text, checked. Returns {request, reason, candidates, tune}."""
+    """The request in retrain.yaml's text, checked: {request, reason, candidates, tune, compute,
+    machine_type, zone}."""
     request = yaml.safe_load(text) or {}
     if not isinstance(request, dict):
         raise RetrainRequestError("retrain.yaml must be a mapping of request, reason, candidates and tune")
@@ -56,14 +61,23 @@ def read(text, known_candidates):
     tune = request.get("tune", False)
     if not isinstance(tune, bool):
         raise RetrainRequestError(f"tune must be true or false, not {tune!r}")
-    return {"request": number, "reason": reason, "candidates": candidates, "tune": tune}
+    compute = request.get("compute", "gpu")
+    if compute not in COMPUTE:
+        raise RetrainRequestError(f"compute must be one of {COMPUTE}, not {compute!r}")
+    machine_type, zone = request.get("machine_type") or "", request.get("zone") or ""
+    if not isinstance(machine_type, str) or not isinstance(zone, str):
+        raise RetrainRequestError("machine_type and zone must be text (or empty)")
+    return {"request": number, "reason": reason, "candidates": candidates, "tune": tune,
+            "compute": compute, "machine_type": machine_type, "zone": zone}
 
 
 def dag_conf(now, before):
-    """The model DAG's trigger config when request changed since before, else None."""
+    """The run to start when request changed since before, else None: the DAG's config and the machine."""
     if before is None or now["request"] == before["request"]:
         return None
-    return {"candidates": now["candidates"], "tune": now["tune"], "reason": now["reason"], "release": True}
+    return {"dag_conf": {"candidates": now["candidates"], "tune": now["tune"], "reason": now["reason"],
+                         "release": True},
+            "compute": now["compute"], "machine_type": now["machine_type"], "zone": now["zone"]}
 
 
 def known_candidates(cfg):

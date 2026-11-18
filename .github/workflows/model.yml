@@ -1,109 +1,283 @@
 name: Model
 
-# Trains and checks the model: Actions → Model → Run workflow, on any branch. A run releases
-# only from main.
+# Trains, checks and releases the model on a training VM, one run at a time:
 #
-# Manual only for now. The full training needs a GPU (harnet10 and the transformer: about
-# 3.5 h on an NVIDIA L4) and the 11.6 GB of windows, which GitHub's runners don't have, so
-# the real run was made on a GCP GPU machine with the same run_model_pipeline. The next step
-# is a job here that starts that machine and runs this one there, as a self-hosted runner
-# (Model_Pipeline/README.md, "CI/CD"). Then these triggers go back on, so a change to the
-# model's code or data on its way to main retrains, checks and releases:
+#   - a merge into main that bumps Model_Pipeline/config/retrain.yaml's request trains with what
+#     it names (candidates, tune, reason, compute), and releases if every gate passes; a merge that
+#     leaves request alone trains nothing;
+#   - Actions -> Model -> Run workflow, on any branch, with the same choices (release only from
+#     main): a run by hand, or the Backend's on drift, which calls this through the API.
+#
+# Three jobs:
+#   settings   what to run, from retrain.yaml or the inputs
+#   images     the Airflow, data and model images, built and pushed to Artifact Registry only when
+#              their folder changed (each is tagged with its folder's git tree hash)
+#   train      makes the VM (airflow/vm/create_vm.sh: a T4, else an L4, else whatever compute says,
+#              in the first zone GCP has one free), waits for its result in GCS, and deletes it
+#
+# The VM runs the DAG in Airflow (airflow/vm/startup.sh) and logs to the team MLflow. The Airflow
+# UI's link is emailed to the team only: this repo is public, so it never appears in this log.
+# CI logs in to GCP with no key: Workload Identity Federation, as the training account
+# (infra/ci_access.tf). The VM runs in the compute project (infra/compute/), as training-vm.
 on:
-  # pull_request:
-  #   branches: [main]
-  #   paths: [Model_Pipeline/**, Data_Pipeline/dvc.lock, .github/workflows/model.yml]
-  # push:
-  #   branches: [main]
-  #   paths: [Model_Pipeline/**, Data_Pipeline/dvc.lock, .github/workflows/model.yml]
+  push:
+    branches: [main]
+    paths: [Model_Pipeline/config/retrain.yaml]
   workflow_dispatch:
+    inputs:
+      candidates:
+        description: "Candidates to train, space-separated (names from models.candidates). Empty: all"
+        type: string
+        default: ""
+      tune:
+        description: "Tune their settings again first (slow)"
+        type: boolean
+        default: false
+      reason:
+        description: "Why this run, tagged in MLflow"
+        type: string
+        default: "a run by hand"
+      release:
+        description: "Release the model if every gate passes (only from main)"
+        type: boolean
+        default: false
+      compute:
+        description: "gpu: a T4, else an L4. t4 or l4: that GPU only. cpu: an e2 machine"
+        type: choice
+        options: [gpu, cpu, t4, l4]
+        default: gpu
+      machine_type:
+        description: "Optional: a machine type of that kind (n1-standard-16, e2-standard-16)"
+        type: string
+        default: ""
+      zone:
+        description: "Optional: only this zone (us-central1-b)"
+        type: string
+        default: ""
+      dag:
+        description: "Which pipeline: the model's, or the data's (all 60 participants)"
+        type: choice
+        options: [model_pipeline, cops_data_pipeline]
+        default: model_pipeline
 
 permissions:
   contents: read
-  # Lets the job ask GitHub for the ID token that Google checks (Workload Identity Federation).
+  # Lets a job ask GitHub for the ID token that Google checks (Workload Identity Federation).
   id-token: write
 
-# One run per branch at a time, so two releases never pick the same version number.
+# One training run at a time, across branches: the compute project has one GPU, and runs share
+# what they keep in GCS (the feature cache, the tuned settings).
 concurrency:
-  group: model-${{ github.ref }}
+  group: training
+  cancel-in-progress: false
+
+env:
+  TEAM_PROJECT: ${{ vars.GCP_PROJECT_ID }}
+  COMPUTE_PROJECT: ${{ vars.GCP_COMPUTE_PROJECT }}
+  REGISTRY: us-central1-docker.pkg.dev/${{ vars.GCP_PROJECT_ID }}/ml
+  # Email alerts (Model_Pipeline/scripts/alerts.py). Unset ones are skipped, never an error.
+  ALERT_EMAIL: ${{ secrets.ALERT_EMAIL }}
+  SMTP_HOST: ${{ secrets.SMTP_HOST }}
+  SMTP_PORT: ${{ secrets.SMTP_PORT }}
+  SMTP_USER: ${{ secrets.SMTP_USER }}
+  SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
 
 jobs:
-  train:
-    name: Train, check and release
+  settings:
+    name: What to run
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: Model_Pipeline
-    env:
-      IMAGE: us-central1-docker.pkg.dev/${{ vars.GCP_PROJECT_ID }}/ml/training
-      # Only a push to dev or main releases; every other run just checks.
-      RELEASE: ${{ github.event_name == 'push' && (github.ref == 'refs/heads/dev' || github.ref == 'refs/heads/main') }}
-      # Email alerts (scripts/alerts.py). Unset ones are skipped, never an error.
-      ALERT_EMAIL: ${{ secrets.ALERT_EMAIL }}
-      SMTP_HOST: ${{ secrets.SMTP_HOST }}
-      SMTP_PORT: ${{ secrets.SMTP_PORT }}
-      SMTP_USER: ${{ secrets.SMTP_USER }}
-      SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
+    outputs:
+      train: ${{ steps.run.outputs.train }}
+      dag: ${{ steps.run.outputs.dag }}
+      dag_conf: ${{ steps.run.outputs.dag_conf }}
+      compute: ${{ steps.run.outputs.compute }}
+      machine_type: ${{ steps.run.outputs.machine_type }}
+      zone: ${{ steps.run.outputs.zone }}
     steps:
       - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0       # the commit before the push, to compare retrain.yaml with
       - uses: actions/setup-python@v7
         with:
-          # The same Python as the model pipeline's Docker image, and the data pipeline's.
           python-version: "3.12"
-          cache: pip
-          cache-dependency-path: Model_Pipeline/requirements.txt
-      # PyTorch's CPU build first, as in checks.yml: the default Linux build pulls in GBs of CUDA.
-      - name: Install dependencies
+      - run: pip install -q PyYAML==6.0.2
+      # Inputs reach the script as environment variables, never pasted into it: a reason with a
+      # quote in it can't change what runs.
+      - name: The run's settings
+        id: run
+        working-directory: Model_Pipeline
+        env:
+          EVENT: ${{ github.event_name }}
+          BEFORE: ${{ github.event.before }}
+          ON_MAIN: ${{ github.ref == 'refs/heads/main' }}
+          IN_CANDIDATES: ${{ inputs.candidates }}
+          IN_TUNE: ${{ inputs.tune }}
+          IN_REASON: ${{ inputs.reason }}
+          IN_RELEASE: ${{ inputs.release }}
+          IN_COMPUTE: ${{ inputs.compute }}
+          IN_MACHINE_TYPE: ${{ inputs.machine_type }}
+          IN_ZONE: ${{ inputs.zone }}
+          IN_DAG: ${{ inputs.dag }}
         run: |
-          pip install torch==2.12.1 --index-url https://download.pytorch.org/whl/cpu
-          pip install -r requirements.txt
-      # Logs in as the training service account, and gets an ID token for the hosted
-      # MLflow on Cloud Run, which only lets in callers with run.invoker.
-      - id: auth
-        uses: google-github-actions/auth@v3
+          if [ "$EVENT" = "push" ]; then
+            # A merge: train only if retrain.yaml's request changed since the commit before.
+            git show "$BEFORE:Model_Pipeline/config/retrain.yaml" > /tmp/before.yaml 2>/dev/null || : > /tmp/before.yaml
+            python -m scripts.retrain_request conf --before /tmp/before.yaml > /tmp/run.json
+          else
+            python - > /tmp/run.json <<'PY'
+          import json, os
+          env = os.environ
+          if env["IN_DAG"] == "cops_data_pipeline":
+              conf = {"mode": "full"}
+          else:
+              conf = {"candidates": env["IN_CANDIDATES"].split(), "tune": env["IN_TUNE"] == "true",
+                      "reason": env["IN_REASON"],
+                      # A release only from main, whatever the input says.
+                      "release": env["IN_RELEASE"] == "true" and env["ON_MAIN"] == "true"}
+          print(json.dumps({"dag": env["IN_DAG"], "dag_conf": conf, "compute": env["IN_COMPUTE"],
+                            "machine_type": env["IN_MACHINE_TYPE"], "zone": env["IN_ZONE"]}))
+          PY
+          fi
+          python - >> "$GITHUB_OUTPUT" <<'PY'
+          import json
+          text = open("/tmp/run.json").read().strip()
+          if not text:
+              print("train=false")
+          else:
+              run = json.loads(text)
+              print("train=true")
+              print(f"dag={run.get('dag', 'model_pipeline')}")
+              print(f"dag_conf={json.dumps(run['dag_conf'])}")
+              for key in ("compute", "machine_type", "zone"):
+                  print(f"{key}={run.get(key, '')}")
+          PY
+          cat "$GITHUB_OUTPUT"
+
+  images:
+    name: Build the images
+    needs: settings
+    if: needs.settings.outputs.train == 'true'
+    runs-on: ubuntu-latest
+    outputs:
+      airflow: ${{ steps.build.outputs.airflow }}
+      data: ${{ steps.build.outputs.data }}
+      model: ${{ steps.build.outputs.model }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: google-github-actions/auth@v3
         with:
           workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
           service_account: ${{ vars.GCP_SERVICE_ACCOUNT }}
-          token_format: id_token
-          id_token_audience: ${{ vars.MLFLOW_TRACKING_URI }}
-          id_token_include_email: true
-      # dvc pull goes here once the data and the patient split are in the bucket (P5_Setup_Plan.md,
-      # step 4). Until then the run stops at train: there's no data on the runner.
-      - name: Run the model pipeline
-        id: pipeline
-        env:
-          MLFLOW_TRACKING_URI: ${{ vars.MLFLOW_TRACKING_URI }}
-          MLFLOW_TRACKING_TOKEN: ${{ steps.auth.outputs.id_token }}
-          # The registry in the models bucket, so releases and the active version persist
-          # between runs (scripts/steps/register.py).
-          MODEL_REGISTRY: gs://team17-mlops-neu-models
-        # A failed gate exits 1 and fails the job. The pipeline emails the team itself on
-        # a failed gate, a crash or a release.
-        run: python -m scripts.run_model_pipeline ${{ env.RELEASE != 'true' && '--no-register' || '' }}
-      - name: Upload the reports and bundle
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: model-run
-          path: |
-            Model_Pipeline/artifacts/
-            Model_Pipeline/logs/
-          if-no-files-found: ignore
-      # The image that made this release, tagged with the commit, to rerun it later.
-      - if: env.RELEASE == 'true'
-        uses: google-github-actions/setup-gcloud@v3
-      - name: Push the training image
-        if: env.RELEASE == 'true'
+      - uses: google-github-actions/setup-gcloud@v3
+      # The model image with PyTorch's CUDA build is several GB; the runner's preinstalled SDKs
+      # it doesn't use make room for it.
+      - name: Make room on the runner
+        run: sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
+      - name: Build and push what changed
+        id: build
         run: |
           gcloud auth configure-docker us-central1-docker.pkg.dev --quiet
-          docker build -t "$IMAGE:${{ github.sha }}" .
-          docker push "$IMAGE:${{ github.sha }}"
-      # The pipeline already emailed about its own failure, so this covers every other
-      # step: installing, logging in to GCP, pushing the image.
+          # name, folder, build arguments. The model image has PyTorch's CUDA build: it runs on a
+          # CPU machine too.
+          while read -r name folder args; do
+            tag="$(git rev-parse "HEAD:$folder")"          # the folder's tree hash: same code, same tag
+            image="$REGISTRY/$name:$tag"
+            if gcloud artifacts docker images describe "$image" > /dev/null 2>&1; then
+              echo "$name: $folder unchanged, reusing $tag"
+            else
+              echo "$name: building $tag"
+              # shellcheck disable=SC2086  # args is a list of build arguments
+              docker build -q -t "$image" $args "$folder"
+              docker push -q "$image"
+              docker image rm "$image" > /dev/null
+            fi
+            echo "$name=$image" >> "$GITHUB_OUTPUT"
+          done <<'LIST'
+          airflow airflow
+          data Data_Pipeline
+          model Model_Pipeline --build-arg TORCH=cu128
+          LIST
+
+  train:
+    name: Train on a VM
+    needs: [settings, images]
+    runs-on: ubuntu-latest
+    # GitHub stops a job at six hours. A longer run goes on: the VM saves its result and deletes
+    # itself, and the team gets the result by email.
+    timeout-minutes: 355
+    env:
+      RUN_ID: gh-${{ github.run_id }}-${{ github.run_attempt }}
+      VM: mednova-run-${{ github.run_id }}-${{ github.run_attempt }}
+      VM_SERVICE_ACCOUNT: training-vm@${{ vars.GCP_COMPUTE_PROJECT }}.iam.gserviceaccount.com
+    steps:
+      - uses: actions/checkout@v7
+      - uses: google-github-actions/auth@v3
+        with:
+          workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
+          service_account: ${{ vars.GCP_SERVICE_ACCOUNT }}
+      - uses: google-github-actions/setup-gcloud@v3
+      # One file per metadata key (airflow/vm/startup.sh lists them), so values with commas, like
+      # the DAG's config, pass through whole.
+      - name: The VM's settings
+        env:
+          DAG: ${{ needs.settings.outputs.dag }}
+          DAG_CONF: ${{ needs.settings.outputs.dag_conf }}
+          AIRFLOW_IMAGE: ${{ needs.images.outputs.airflow }}
+          DATA_IMAGE: ${{ needs.images.outputs.data }}
+          MODEL_IMAGE: ${{ needs.images.outputs.model }}
+          GPU: ${{ needs.settings.outputs.compute != 'cpu' && '1' || '0' }}
+          MLFLOW_URI: ${{ vars.MLFLOW_TRACKING_URI }}
+        run: |
+          mkdir -p /tmp/vm/metadata && cd /tmp/vm/metadata
+          cp "$GITHUB_WORKSPACE/airflow/vm/startup.sh" startup-script
+          printf '%s' "$RUN_ID"         > mednova-run-id
+          printf '%s' "$GITHUB_SHA"     > mednova-git-sha
+          printf '%s' "$DAG"            > mednova-dag
+          printf '%s' "$DAG_CONF"       > mednova-dag-conf
+          printf '%s' "$AIRFLOW_IMAGE"  > mednova-airflow-image
+          printf '%s' "$DATA_IMAGE"     > mednova-data-image
+          printf '%s' "$MODEL_IMAGE"    > mednova-model-image
+          printf '%s' "$GPU"            > mednova-gpu
+          printf '%s' "$MLFLOW_URI"     > mednova-mlflow-uri
+          printf '%s' "$TEAM_PROJECT"   > mednova-team-project
+      - name: Make the VM
+        id: vm
+        env:
+          COMPUTE: ${{ needs.settings.outputs.compute }}
+          MACHINE_TYPE: ${{ needs.settings.outputs.machine_type }}
+          ONLY_ZONE: ${{ needs.settings.outputs.zone }}
+        run: |
+          zone="$(bash airflow/vm/create_vm.sh "$VM" "$COMPUTE" /tmp/vm/metadata "$MACHINE_TYPE" "$ONLY_ZONE" | tail -n 1)"
+          echo "zone=$zone" >> "$GITHUB_OUTPUT"
+          {
+            echo "### Training run \`$RUN_ID\`"
+            echo "- VM \`$VM\` in \`$zone\` (compute: $COMPUTE)"
+            echo "- The Airflow UI's link is emailed to the team, with your Airflow login."
+            echo "- MLflow: ${{ vars.MLFLOW_TRACKING_URI }}, experiment \`parkinsons-risk\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+      # The VM writes runs/<run id>/result.json when the DAG ends (startup.sh).
+      - name: Wait for the run
+        run: |
+          result="gs://$TEAM_PROJECT-training-data/runs/$RUN_ID/result.json"
+          while ! gcloud storage cat "$result" > /tmp/result.json 2>/dev/null; do sleep 60; done
+          python3 -c "import json; r = json.load(open('/tmp/result.json')); print('result:', r)"
+          state="$(python3 -c "import json; print(json.load(open('/tmp/result.json'))['state'])")"
+          echo "- Result: **$state**" >> "$GITHUB_STEP_SUMMARY"
+          [ "$state" = "success" ]
+      # The VM deletes itself when it's done; this covers a VM that never got that far. It's left
+      # alone when the job only timed out, so a long run can still finish.
+      - name: Delete the VM
+        if: always() && steps.vm.outputs.zone != '' && !cancelled()
+        run: |
+          gcloud compute instances delete "$VM" --project "$COMPUTE_PROJECT" \
+            --zone "${{ steps.vm.outputs.zone }}" --quiet 2>/dev/null || echo "already deleted"
+      # The pipeline and the VM alert the team about their own failures; this covers CI's: no
+      # free machine, a failed build, a lost login.
       - name: Email the team about a failed step
-        if: failure() && steps.pipeline.outcome != 'failure'
+        if: failure()
+        working-directory: Model_Pipeline
         env:
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
           pip install -q requests==2.33.0 PyYAML==6.0.2
-          python -c "import os; from scripts.alerts import notify; notify('[MedNOVA model] CI job failed', 'A step outside the pipeline failed (install, GCP login or image push).\n\nRun: ' + os.environ['RUN_URL'])"
+          python -c "import os; from scripts.alerts import notify; notify('[MedNOVA model] CI job failed', 'A CI step failed: making the VM, or waiting for the run (see the job).\n\nRun: ' + os.environ['RUN_URL'])"

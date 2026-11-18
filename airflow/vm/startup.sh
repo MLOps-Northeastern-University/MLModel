@@ -11,7 +11,7 @@
 #   4. Airflow   started with each teammate's login; its API off, so only the login page answers
 #   5. the run   the DAG triggered with the run's settings, a Cloudflare tunnel to the UI, the
 #                link emailed to the team (never printed in a public log)
-#   6. after     what runs keep, the logs and the result back to GCS, then shut down
+#   6. after     what runs keep, the logs and the result back to GCS, then the VM deletes itself
 #
 # The run's metadata (set by CI):
 #   mednova-run-id        a name for this run, unique (CI: gh-<run id>-<attempt>)
@@ -50,6 +50,12 @@ metadata() {   # metadata <key>: one of the VM's metadata values, or empty
     "http://metadata.google.internal/computeMetadata/v1/instance/attributes/$1" || true
 }
 
+end_vm() {     # delete this VM (it may delete only itself: infra/compute/), or at least shut it down
+  local zone
+  zone="$(curl -sf -H "Metadata-Flavor: Google" "http://metadata.google.internal/computeMetadata/v1/instance/zone")"
+  gcloud compute instances delete "$(hostname)" --zone "${zone##*/}" --quiet || shutdown -h now
+}
+
 secret() {     # secret <name>: the latest version of a Secret Manager secret, or empty
   gcloud secrets versions access latest --secret "$1" --project "$TEAM_PROJECT" 2>/dev/null || true
 }
@@ -77,13 +83,13 @@ mkdir -p "$WORK"
 exec > >(tee -a "$WORK/startup.log") 2>&1
 
 for name in RUN_ID SHA DAG AIRFLOW_IMAGE DATA_IMAGE MODEL_IMAGE TEAM_PROJECT; do
-  if [ -z "${!name}" ]; then log "missing metadata for $name: CI sets it"; shutdown -h now; exit 1; fi
+  if [ -z "${!name}" ]; then log "missing metadata for $name: CI sets it"; end_vm; exit 1; fi
 done
 
 # A reboot after the run finished (the VM is waiting to be deleted): nothing more to do.
 if gcloud storage ls "$RUN_DIR/result.json" >/dev/null 2>&1; then
-  log "run $RUN_ID already has a result; shutting down"
-  shutdown -h now
+  log "run $RUN_ID already has a result; deleting this VM"
+  end_vm
   exit 0
 fi
 
@@ -109,7 +115,7 @@ print(json.dumps({"state": state, "detail": detail, "released_version": released
 PY
   gcloud storage cp "$WORK/startup.log" "$RUN_DIR/startup.log" || true
   gcloud storage cp "$WORK/result.json" "$RUN_DIR/result.json" || true
-  shutdown -h now
+  end_vm
 }
 trap 'finish failed "the start-up script stopped at line $LINENO"' ERR
 
@@ -222,6 +228,7 @@ AIRFLOW_IMAGE=$AIRFLOW_IMAGE
 DATA_IMAGE=$DATA_IMAGE
 MODEL_IMAGE=$MODEL_IMAGE
 MODEL_GPU=${GPU:-0}
+GIT_COMMIT=$SHA
 MLFLOW_TRACKING_URI=$MLFLOW_URI
 MODEL_MLFLOW_GOOGLE_AUTH=1
 MODEL_REGISTRY=gs://${TEAM_PROJECT}-models

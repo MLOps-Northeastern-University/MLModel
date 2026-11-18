@@ -41,6 +41,9 @@ PASSED_ON = [
     "MODEL_REGISTRY",                                                                           # the registry
     # Another config for this machine, as a path inside the container (a test with fewer participants).
     "COPS_CONFIG", "MODEL_CONFIG",
+    # The commit being run: MLflow records it (the images may be from an earlier commit with the
+    # same pipeline code, so their own GIT_COMMIT can be older).
+    "GIT_COMMIT",
 ]
 
 # Where each pipeline's files are inside its image (its Dockerfile's WORKDIR).

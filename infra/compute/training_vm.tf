@@ -31,6 +31,25 @@ resource "google_project_iam_member" "training_vm_observability" {
   member   = "serviceAccount:${google_service_account.training_vm.email}"
 }
 
+# Delete itself when its run ends (airflow/vm/startup.sh), so a run longer than CI's six-hour job
+# still cleans up. Only instances named mednova-run-*, so it can't touch any other VM here.
+resource "google_project_iam_custom_role" "delete_training_vm" {
+  role_id     = "deleteTrainingVm"
+  title       = "Delete a training VM"
+  permissions = ["compute.instances.delete"]
+}
+
+resource "google_project_iam_member" "training_vm_deletes_itself" {
+  project = var.compute_project
+  role    = google_project_iam_custom_role.delete_training_vm.name
+  member  = "serviceAccount:${google_service_account.training_vm.email}"
+
+  condition {
+    title      = "training VMs only"
+    expression = "resource.name.extract(\"/instances/{name}\").startsWith(\"mednova-run-\")"
+  }
+}
+
 # ---- who may make the VMs: CI ------------------------------------------------------------
 
 # Create, start and delete the VM of each training run.

@@ -170,23 +170,27 @@ Then open <http://localhost:5001>, and leave the command running while you use i
 
 ### CI: the model workflow
 
-[`.github/workflows/model.yml`](../.github/workflows/model.yml) runs the pipeline on GitHub Actions:
+[`.github/workflows/model.yml`](../.github/workflows/model.yml) trains on a VM that exists only for the run:
 
-1. Installs Python 3.12, PyTorch's CPU build and `requirements.txt`.
-2. Signs in to GCP as the `training` service account through Workload Identity Federation, so there's no key file, and gets an ID token for the hosted MLflow.
-3. Runs `python -m scripts.run_model_pipeline`, logged to the hosted MLflow. A failed gate fails the job.
-4. Uploads `artifacts/` and `logs/` as the run's `model-run` artifact, even when it fails.
-5. On a push to `main` only: releases the model, and pushes the training image as `ml/training:<commit>`.
+1. **What to run:** from `config/retrain.yaml` on a merge into `main`, or from the inputs of Actions → Model → Run workflow (which the Backend also calls on drift).
+2. **The images:** the Airflow, data and model images (the model's with PyTorch's CUDA build), each tagged with its folder's git tree hash and built only when that folder changed.
+3. **The VM:** made in the compute project ([`airflow/vm/create_vm.sh`](../airflow/vm/create_vm.sh)), trying machines and zones until GCP has one free: a T4 first, then an L4, in every zone GCP offers them in our four regions, us-central1 first; or an e2 machine for `compute: cpu`. The VM runs the DAG in Airflow ([`airflow/vm/startup.sh`](../airflow/vm/startup.sh)), logged to the hosted MLflow, and deletes itself when it ends.
+4. **The result:** CI waits for the VM's `result.json` in GCS and passes or fails with it. The Airflow UI's link goes to the team by email, never into this public log.
 
-**When it runs:** by hand for now, with Actions → Model → Run workflow, on any branch; a run releases only from `main`. The triggers for a pull request into `main` and a push to `main` (on `Model_Pipeline/**` or a new `Data_Pipeline/dvc.lock`) are in the file, commented out, until CI trains on a GPU (see [CI/CD](#cicd-assignment-section-7)).
+CI signs in to GCP as the `training` service account through Workload Identity Federation, so there's no key file. One training run at a time, across branches: the compute project has one GPU.
 
-**Asking for a training run:** [`config/retrain.yaml`](config/retrain.yaml). A PR that bumps its `request` asks CI to train once it merges into `main`, with the candidates, tuning and reason it names; a merge that leaves `request` alone trains nothing, so docs and fixes never train. Every PR checks the file (`python -m scripts.retrain_request check`), so a typo fails the PR, not the merge. On the merge, CI reads it with `python -m scripts.retrain_request conf --before <the file in the commit before>`, which prints the model DAG's trigger config only when `request` changed.
+**When it runs:** a merge into `main` that bumps `retrain.yaml`'s `request`; or by hand, on any branch, releasing only from `main`.
+
+**Asking for a training run:** [`config/retrain.yaml`](config/retrain.yaml). A PR that bumps its `request` asks CI to train once it merges into `main`, with the candidates, tuning, reason and machine it names; a merge that leaves `request` alone trains nothing, so docs and fixes never train. Every PR checks the file (`python -m scripts.retrain_request check`), so a typo fails the PR, not the merge. On the merge, CI reads it with `python -m scripts.retrain_request conf --before <the file in the commit before>`, which prints the run only when `request` changed.
 
 ```yaml
 request: 2                                  # was 1: bumped, so this merge trains
 reason: "transformer: deeper encoder"
 candidates: [motor_causal_transformer]      # empty: all of them
 tune: true
+compute: gpu                                # gpu (T4, else L4), t4, l4, or cpu (e2)
+machine_type: ""                            # optional: n1-standard-16, e2-standard-16
+zone: ""                                    # optional: us-central1-b
 ```
 
 ### CI/CD (assignment section 7)
@@ -195,14 +199,12 @@ What each requirement runs on, and where to see it:
 
 | Requirement | How | Evidence |
 |---|---|---|
-| **7.1** Training starts from CI | `model.yml`: GitHub Actions signs in to GCP through Workload Identity Federation (no key file) and runs `python -m scripts.run_model_pipeline`, logged to the hosted MLflow | Manual runs of `model.yml`. The run of 2026-11-13 went through every step, in the hosted MLflow |
+| **7.1** Training starts from CI | `model.yml`: a merge that bumps `retrain.yaml`, or a run by hand, makes a GPU or CPU VM on GCP through Workload Identity Federation (no key file), which runs the model DAG in Airflow, logged to the hosted MLflow | The run of 2026-11-13 went through every step in the hosted MLflow; the VM's runs once `infra/` is applied |
 | **7.2** Validation gate | `steps/evaluate.py`: a candidate fails when a metric in `validation_gate.min` is missing or below it | The real run of 2026-11-15: failed for both candidates (see [The gates](#the-gates)) |
 | **7.3** Bias detection, alert or block | `steps/bias.py`: groups of 5+ patients, AUC gap over 0.15 fails; a failure emails the team, and no passing candidate stops the release | The real run: failed for both, so select stopped the run |
 | **7.4** Registry push | `steps/register.py`: the bundle goes to `gs://team17-mlops-neu-models/parkinsons-risk/v<N>/`, with `active.json` naming the version in use | v1 is there, released by hand as an override after the gates failed (tagged `manual_release` in MLflow) |
 | **7.5** Alerts | `run_model_pipeline.py` emails on a failed gate, a crash and finished training; `model.yml` on any other failed step; the settings are GitHub secrets | [Alerts](#alerts) |
 | **7.6** Rollback | `steps/compare_production.py`: a model worse than the active one on any `release_gate.rules` metric is never exported or released; `python -m scripts.steps.register rollback` makes the previous version active again | The release gate's tests, and `register status` |
-
-**Why CI doesn't train the real model yet.** The full run needs a GPU for harnet10 and the transformer (about 3.5 hours on an NVIDIA L4, tuning included), the 11.6 GB of windows and harnet10's weights. GitHub's runners have no GPU and stop a job after 6 hours, so the real run was made on a GCP GPU machine with the same command. The next step keeps `model.yml` as the trigger: one job starts that machine, the pipeline runs on it as a GitHub self-hosted runner (data, weights and caches stay on its disk), and a last job stops it, so it costs only while it trains.
 
 ### Settings
 
@@ -211,6 +213,7 @@ In the repo's Settings → Secrets and variables → Actions. Changing them need
 | Name | Kind | Value |
 |---|---|---|
 | `GCP_PROJECT_ID` | Variable | `team17-mlops-neu` |
+| `GCP_COMPUTE_PROJECT` | Variable | The project the training VMs run in (`infra/compute/`): `finetuning-499422` |
 | `GCP_WIF_PROVIDER` | Variable | `projects/818790524724/locations/global/workloadIdentityPools/github/providers/mlmodel` |
 | `GCP_SERVICE_ACCOUNT` | Variable | `training@team17-mlops-neu.iam.gserviceaccount.com` |
 | `MLFLOW_TRACKING_URI` | Variable | `https://mlflow-pnpgeaktha-uc.a.run.app`, with no trailing slash: it's also the ID token's audience |

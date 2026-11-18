@@ -79,7 +79,7 @@ Every PR and every push to `dev` or `main` runs [.github/workflows/checks.yml](.
 | Model pipeline tests | flake8 and pytest on Python 3.12. The coverage floor is 0 while the steps are being built, and goes up to 85. |
 | Airflow DAGs | both DAGs load, connect in order and run each step in its pipeline's image, in the Airflow image |
 
-A second workflow, [.github/workflows/model.yml](.github/workflows/model.yml), runs the model pipeline itself in the team's GCP project and emails the team when it fails and when training finishes. It runs by hand for now: the full training needs a GPU, which GitHub's runners don't have, so the real run was made on a GCP GPU machine with the same command. How it works, how it maps to the assignment's CI/CD section, its settings, and how to open the hosted MLflow: [Model_Pipeline/README.md, "Running in the cloud"](Model_Pipeline/README.md#running-in-the-cloud).
+A second workflow, [.github/workflows/model.yml](.github/workflows/model.yml), trains the model on a VM made for the run: a T4 or L4 GPU machine, or a CPU one, in the first zone GCP has free. It runs when a merge into `main` bumps `Model_Pipeline/config/retrain.yaml`'s `request`, or by hand (Actions → Model → Run workflow), runs the model DAG in Airflow on the VM, logs to the hosted MLflow, and emails the team the result. How it works, its settings, and how it maps to the assignment's CI/CD section: [Model_Pipeline/README.md, "Running in the cloud"](Model_Pipeline/README.md#running-in-the-cloud).
 
 Dependabot opens PRs to keep the workflow's actions up to date.
 

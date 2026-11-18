@@ -13,3 +13,10 @@ reason: "v1: the first full run on the real data"
 candidates: []
 # Tune their settings again before training (slow). false reuses the last tuned settings.
 tune: false
+# The machine it trains on: gpu (a T4, else an L4, wherever GCP has one free), cpu (an e2), or
+# t4 or l4 for that GPU only. cpu is enough for logistic regression; the transformer needs a GPU.
+compute: gpu
+# Optional: a machine type and zone to use instead of trying them in turn (e2-standard-16,
+# us-central1-b). Empty: CI picks.
+machine_type: ""
+zone: ""
