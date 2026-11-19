@@ -33,7 +33,7 @@ From Careportal's monitoring types (`src/features/monitoring/model/monitoring.ts
 
 Each score should also carry the model version that made it, for the registry, rollback and drift.
 
-**Today:** the phone model sends one OFF risk (0 to 1) per hour. Backend's monitoring endpoints fill the tremor line with OFF risk × 4, with no band, and dyskinesia as 0. The dashboard shows real data only once the model produces the outputs above.
+**Today:** the Backend scores each hour with the released model (2026-11-18, Backend `app/scoring/`): P(OFF) if awake, P(asleep), P(any tremor) and every class, per hour. The portal's OFF hours use P(OFF and awake). Its monitoring endpoints still fill the tremor line with OFF risk × 4, with no band, and dyskinesia as 0, until they read the tremor and dyskinesia outputs too.
 
 ## 2. Definitions
 
@@ -548,12 +548,12 @@ Still to do before the one-time test on COPS-38 and COPS-45: 3 seeds of the fina
 
 ### LEDD conversion table
 
-_Owner: Sam Selvaraj · Decide by: TBD_
+_Owner: Sam Selvaraj · Decided: 2026-11-11_
 
 Which paper's factors, and how drug names in COPS map to them.
 
-**Decision:** _TBD_
-**Why:** —
+**Decision:** Jost et al. 2023 (Movement Disorders), Table 1 and its footnotes, every factor cited, in `Data_Pipeline/config/ledd.yaml`, checked row by row against the paper on 2026-11-11. Each data source maps its own drug names to the table's rows (`names: cops`; `names: mednova` for the Backend's prescriptions, 2026-11-18), so a factor is written once.
+**Why:** The most recent systematic review of LEDD, with proposals for the newer drugs COPS's patients take.
 
 ### Still open
 
@@ -565,8 +565,8 @@ Which paper's factors, and how drug names in COPS map to them.
 - **Tiebreak** if a shared trunk and a separate in-1-hour copy score the same.
 - **OFF threshold** for counting daily OFF hours.
 - ~~**Runtime,** including the KV cache, until the conversion spike runs.~~ No phone runtime: the model runs on the server (2026-11-13, see On the phone).
-- **Server details:** where it runs (Cloud Run, for example), what exactly the phone uploads, and how the uploads are kept private.
-- **`score_past_h`:** how much past each scored hour sees live (8 h for now).
+- **Server details:** ~~where it runs~~ in the Backend's scoring jobs (2026-11-18, Backend `app/scoring/`), from the raw watch chunks the phone uploads. Still open: where the Backend is deployed (Cloud Run, for example), and how the uploads are kept private.
+- ~~**`score_past_h`:** how much past each scored hour sees live (8 h for now).~~ The Backend gives each scored hour the 7 days before it (the patient baseline's week), which covers it.
 - **Check-in scoring:** the "with check-ins" validation score isn't run yet.
 - **Tremor uncertainty band** on Careportal's timeline, from the predicted 0, 1, 2 probabilities.
 

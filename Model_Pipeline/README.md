@@ -416,7 +416,7 @@ There's no `to_keras()` or phone export: the model runs on the server.
 |---|---|---|
 | `model/` | P4 | The folder `model.save()` wrote: `manifest.json` and `weights/` (for the transformer: `network.pt` and `training.json`, with the harnet10 fingerprint). This replaces a phone model file |
 | `manifest.json` | P4 | What the Backend needs to run and check the model: family, version and `model_id` (added by `register.py`), candidate, labels, window spec version, the training run, the model folder's sha256 and the harnet10 sha256 the server must load |
-| `stats.json` | P4 | The training data's statistics for drift, starting with the 7 hourly features |
+| `stats.json` | P4 | The training data's statistics for drift: the 7 hourly features, and `prediction_reference`, how often the model said each 0.1-wide P(OFF) band on its out-of-fold development hours (counts only), which the Backend's nightly drift check compares the live hours with |
 | `metrics.json` | P1 | The chosen candidate's `artifacts/evaluation/<name>/metrics.json`: train's `cv/` scores plus evaluate's 95% intervals (`_auc_lo`, `_auc_hi`), which the next run's release gate compares against |
 | `bias.json` | P3 | Metrics per slice and the mitigation result: `artifacts/bias/bias.json` |
 | `device/` | P4 | Only with `export.device.enabled` (off by default): the model in a phone format, for testing on-device scoring later. Its converter is a placeholder that fails the run |
