@@ -4,8 +4,8 @@ import pytest
 import torch
 from torch.nn import functional as F
 
-from scripts.core.errors import ConfigError, ModelError
-from scripts.models.motor_causal_transformer.decoder import Decoder
+from model_pipeline.core.errors import ConfigError, ModelError
+from model_pipeline.models.motor_causal_transformer.decoder import Decoder
 from tests.models.motor_causal_transformer.test_rope import reference as rope_reference
 
 HOUR = 3600.0

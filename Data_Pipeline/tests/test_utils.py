@@ -9,7 +9,7 @@ import smtplib
 import numpy as np
 import pytest
 
-from scripts import utils
+from data_pipeline import utils
 from tests.helpers import make_config
 
 ALERT_SETTINGS = ["ALERT_EMAIL", "SMTP_HOST", "SMTP_PORT", "SMTP_USER", "SMTP_PASSWORD", "SLACK_WEBHOOK_URL"]
@@ -79,7 +79,7 @@ def set_email(monkeypatch, user="sender@example.com"):
 
 def test_config_resolves_and_creates_paths(tmp_path):
     cfg = make_config(tmp_path, data={"sample_size": 2})
-    assert cfg["data"]["sample_size"] == 2 and cfg["data"]["mode"] == "sample"  # override merged, rest kept
+    assert cfg["data"]["sample_size"] == 2 and cfg["data"]["mode"] == "list"  # override merged, rest kept
     assert cfg["resolved_paths"]["processed_dir"] == tmp_path / "data" / "processed"
     assert cfg["resolved_paths"]["processed_dir"].is_dir()
 
@@ -169,20 +169,3 @@ def test_notify_uses_only_the_channels_turned_on(monkeypatch, smtp, slack):
     assert smtp["sent"] == [] and slack[0][1]["text"] == "*subject*\n```body```"
     utils.notify("subject", "body", {"alerts": {"email_enabled": True, "slack_enabled": False}})
     assert len(smtp["sent"]) == 1 and len(slack) == 1
-
-
-def test_an_airflow_task_failure_is_alerted_with_the_configs_channels(monkeypatch):
-    sent = []
-    monkeypatch.setattr(utils, "notify", lambda subject, body, cfg: sent.append((subject, body, cfg)))
-
-    class TaskInstance:
-        task_id, dag_id, try_number = "process_participant", "cops_data_pipeline", 2
-        log_url = "http://localhost:8080/log"
-
-    utils.airflow_failure_callback({"task_instance": TaskInstance(), "run_id": "manual__1",
-                                    "exception": ValueError("No symptom diary")})
-    subject, body, cfg = sent[0]
-    assert subject == "[COPS pipeline] Task failed: process_participant"
-    for part in ["cops_data_pipeline", "manual__1", "try 2", "No symptom diary", "http://localhost:8080/log"]:
-        assert part in body
-    assert "alerts" in cfg  # the config's settings decide the channels

@@ -3,8 +3,8 @@ import math
 import pytest
 import torch
 
-from scripts.core.errors import ConfigError, ModelError
-from scripts.models.motor_causal_transformer.rope import Rotation, TimeRoPE
+from model_pipeline.core.errors import ConfigError, ModelError
+from model_pipeline.models.motor_causal_transformer.rope import Rotation, TimeRoPE
 
 DAY = 86_400.0
 

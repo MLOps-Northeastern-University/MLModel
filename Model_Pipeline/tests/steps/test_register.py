@@ -2,12 +2,12 @@ import json
 
 import pytest
 
-from scripts.core.errors import PipelineError
-from scripts.steps import register as register_module
-from scripts.steps.register import (
+from model_pipeline.core.errors import PipelineError
+from model_pipeline.steps import register as register_module
+from model_pipeline.steps.register import (
     RegisterModel, active_metrics, active_version, next_version, notify_backend, publish, set_active, versions)
-from scripts.tracking.memory_tracker import MemoryTracker
-from scripts.utils.file_io import write_json
+from model_pipeline.tracking.memory_tracker import MemoryTracker
+from model_pipeline.utils.file_io import write_json
 from tests.helpers import make_config
 
 

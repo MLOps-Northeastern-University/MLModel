@@ -6,11 +6,11 @@ import pytest
 import torch
 from torch import nn
 
-from scripts.core.data import Dataset, Windows, WindowSpec
-from scripts.core.errors import ConfigError, ModelError
-from scripts.core.model import Predictions
-from scripts.models.motor_causal_transformer import harnet as harnet_module
-from scripts.models.window_classifier import WindowBoosting, WindowLogistic
+from model_pipeline.core.data import Dataset, Windows, WindowSpec
+from model_pipeline.core.errors import ConfigError, ModelError
+from model_pipeline.core.model import Predictions
+from model_pipeline.models.motor_causal_transformer import harnet as harnet_module
+from model_pipeline.models.window_classifier import WindowBoosting, WindowLogistic
 
 H = 3600
 SPEC = WindowSpec(version=1, seconds=10, rate_hz=30, axes=3)

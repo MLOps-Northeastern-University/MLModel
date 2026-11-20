@@ -2,11 +2,11 @@ import json
 
 import pytest
 
-from scripts.core.errors import ConfigError, ModelError
-from scripts.models import registry
-from scripts.models.motor_causal_transformer.model import MotorCausalTransformer
-from scripts.models.window_classifier import WindowBoosting, WindowLogistic
-from scripts.utils.config import load_config
+from model_pipeline.core.errors import ConfigError, ModelError
+from model_pipeline.models import registry
+from model_pipeline.models.motor_causal_transformer.model import MotorCausalTransformer
+from model_pipeline.models.window_classifier import WindowBoosting, WindowLogistic
+from model_pipeline.utils.config import load_config
 from tests.models.test_window_classifier import SPEC, dataset, environment  # noqa: F401  (the fake harnet10)
 
 WINDOWS = {"spec_version": 1, "seconds": 10, "rate_hz": 30, "axes": 3}

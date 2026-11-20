@@ -4,8 +4,8 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from scripts import acquire, pipeline
-from scripts.utils import read_json, read_table
+from data_pipeline import acquire, pipeline
+from data_pipeline.utils import read_json, read_table
 from tests.helpers import make_config, make_demographics, make_local_run, make_participant_zip, raw_dir
 
 
@@ -112,7 +112,7 @@ def test_a_participant_with_one_wrist_recorded_uses_it(tmp_path):
     folder = raw_dir(tmp_path)
     make_participant_zip(folder, "COPS-1", sides=("Left",))
     make_demographics(folder, ["COPS-1"], ["right"])
-    assert pipeline.run(make_config(tmp_path, data={"participants": ["COPS-1"]})) == 0
+    assert pipeline.run(make_config(tmp_path, data={"mode": "list", "participants": ["COPS-1"]})) == 0
     patient = read_table(tmp_path / "data" / "processed" / "patients.csv").iloc[0]
     assert (patient["wrist"], patient["more_affected_side"], patient["mirrored"]) == ("left", False, True)
 
@@ -122,7 +122,7 @@ def test_both_or_blank_sides_use_the_fallback_wrist(tmp_path, side, more_affecte
     folder = raw_dir(tmp_path)
     make_participant_zip(folder, "COPS-1")
     make_demographics(folder, ["COPS-1"], [side])
-    assert pipeline.run(make_config(tmp_path, data={"participants": ["COPS-1"]})) == 0
+    assert pipeline.run(make_config(tmp_path, data={"mode": "list", "participants": ["COPS-1"]})) == 0
     patient = read_table(tmp_path / "data" / "processed" / "patients.csv").iloc[0]
     assert (patient["wrist"], bool(patient["more_affected_side"])) == ("right", more_affected)
 
@@ -160,4 +160,4 @@ def test_the_command_line(monkeypatch):
     seen = {}
     monkeypatch.setattr(pipeline, "run", lambda cfg, mode: seen.update(cfg=cfg, mode=mode) or 0)
     assert pipeline.main(["--mode", "full"]) == 0
-    assert seen["mode"] == "full" and seen["cfg"]["data"]["mode"] == "sample"
+    assert seen["mode"] == "full" and seen["cfg"]["data"]["mode"] == "full"

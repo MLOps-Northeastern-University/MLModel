@@ -3,9 +3,9 @@ import threading
 
 import pytest
 
-from scripts.core.errors import TrackingError
-from scripts.core.tracker import RunStatus
-from scripts.tracking.memory_tracker import MemoryTracker
+from model_pipeline.core.errors import TrackingError
+from model_pipeline.core.tracker import RunStatus
+from model_pipeline.tracking.memory_tracker import MemoryTracker
 
 
 @pytest.fixture

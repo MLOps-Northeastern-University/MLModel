@@ -8,7 +8,7 @@ import smtplib
 
 import pytest
 
-from scripts import alerts
+from model_pipeline import alerts
 
 ALERT_SETTINGS = ["ALERT_EMAIL", "SMTP_HOST", "SMTP_PORT", "SMTP_USER", "SMTP_PASSWORD",
                   "SLACK_WEBHOOK_URL"]

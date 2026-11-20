@@ -1,6 +1,6 @@
 import pytest
 
-from scripts.models.motor_causal_transformer import harnet
+from model_pipeline.models.motor_causal_transformer import harnet
 
 
 @pytest.fixture(autouse=True)

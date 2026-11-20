@@ -3,11 +3,11 @@ import json
 import pandas as pd
 import pytest
 
-from scripts.core.errors import ConfigError
-from scripts.data.folds import Split
-from scripts.steps.train import TrainModels
-from scripts.steps.tune import TuneModels, nest
-from scripts.tracking.memory_tracker import MemoryTracker
+from model_pipeline.core.errors import ConfigError
+from model_pipeline.data.folds import Split
+from model_pipeline.steps.train import TrainModels
+from model_pipeline.steps.tune import TuneModels, nest
+from model_pipeline.tracking.memory_tracker import MemoryTracker
 from tests.models.test_window_classifier import environment  # noqa: F401  (the fake harnet10)
 from tests.steps.test_train import SPLIT, TINY_TRANSFORMER, WINDOWS, data
 
@@ -69,18 +69,34 @@ def test_settings_the_model_refuses_fail_that_trial_only(tmp_path):
     assert set(table.state) <= {"COMPLETE", "FAIL"} and out["window_logistic"]["params"]["c"] == 0.05
 
 
-def test_train_uses_the_tuned_settings_and_refuses_stale_ones(tmp_path):
+def test_train_uses_the_tuned_settings(tmp_path):
     out = TuneModels(config(tmp_path, logistic(2)), MemoryTracker()).run(data(), SPLIT)
     tracker = MemoryTracker()
     [result] = TrainModels(config(tmp_path, {}), tracker).run(data(), SPLIT)
     assert result["tuned"] is True
     assert tracker.runs[result["run_id"]].params["params.c"] == out["window_logistic"]["params"]["c"]
+
+
+def test_settings_tuned_on_another_split_are_reused_and_marked_stale(tmp_path):
+    out = TuneModels(config(tmp_path, logistic(2)), MemoryTracker()).run(data(), SPLIT)
     other = Split(["G"], [["A", "C"], ["B", "D"], ["E", "F"]], seed=0)
-    with pytest.raises(ConfigError, match="tuned on a different split"):
-        TrainModels(config(tmp_path, {}), MemoryTracker()).run(data(), other)
+    tracker = MemoryTracker()
+    [result] = TrainModels(config(tmp_path, {}), tracker).run(data(), other)
+    assert result["tuned"] is True
+    assert tracker.runs[result["run_id"]].params["params.c"] == out["window_logistic"]["params"]["c"]
+    assert tracker.find("train").params["tuned.window_logistic.stale"] == ["split"]
+
+
+def test_a_candidate_whose_config_changed_trains_with_its_config(tmp_path):
+    TuneModels(config(tmp_path, logistic(2)), MemoryTracker()).run(data(), SPLIT)
     changed = {**LOGISTIC, "params": {"max_iter": 100}}
-    with pytest.raises(ConfigError, match="different candidate"):
-        TrainModels(config(tmp_path, {}, entries=(changed,)), MemoryTracker()).run(data(), SPLIT)
+    [result] = TrainModels(config(tmp_path, {}, entries=(changed,)), MemoryTracker()).run(data(), SPLIT)
+    assert result["tuned"] is False
+
+
+def test_with_nothing_tuned_yet_every_candidate_trains_with_its_config(tmp_path):
+    [result] = TrainModels(config(tmp_path, {}), MemoryTracker()).run(data(), SPLIT)
+    assert result["tuned"] is False
 
 
 def test_tuning_the_transformers_diary_step_pretrains_each_fold_once(tmp_path):

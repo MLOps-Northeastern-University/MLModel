@@ -3,11 +3,11 @@ import json
 
 import pytest
 
-from scripts.core.errors import ExportError
-from scripts.steps import export
-from scripts.steps.export import (
+from model_pipeline.core.errors import ExportError
+from model_pipeline.steps import export
+from model_pipeline.steps.export import (
     ExportModel, build_manifest, convert, folder_sha256, harnet10_fingerprint, sha256_of, write_bundle)
-from scripts.tracking.memory_tracker import MemoryTracker
+from model_pipeline.tracking.memory_tracker import MemoryTracker
 from tests.helpers import make_config
 
 HARNET_SHA = hashlib.sha256(b"fake harnet10 weights").hexdigest()

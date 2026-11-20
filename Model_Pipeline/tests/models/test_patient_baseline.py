@@ -1,8 +1,8 @@
 import numpy as np
 import pytest
 
-from scripts.core.errors import ConfigError, ModelError
-from scripts.models import patient_baseline as pb
+from model_pipeline.core.errors import ConfigError, ModelError
+from model_pipeline.models import patient_baseline as pb
 
 H = 3600
 WINDOW_S = 360.0          # 10 windows an hour, so warm-up weights stay readable

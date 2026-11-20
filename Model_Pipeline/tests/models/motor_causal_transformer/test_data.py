@@ -2,11 +2,11 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from scripts.core.data import Dataset, Windows, WindowSpec
-from scripts.core.errors import ConfigError, ModelError
-from scripts.models.motor_causal_transformer.data import (
+from model_pipeline.core.data import Dataset, Windows, WindowSpec
+from model_pipeline.core.errors import ConfigError, ModelError
+from model_pipeline.models.motor_causal_transformer.data import (
     answered_hours, batches, collate, make_example, prepare, tile_chunks)
-from scripts.models.motor_causal_transformer.tokens import EVENT_FIELDS
+from model_pipeline.models.motor_causal_transformer.tokens import EVENT_FIELDS
 
 F = {name: i for i, name in enumerate(EVENT_FIELDS)}
 LABELS = ("sleep_now", "state_now", "tremor_now", "sleep_next_hour", "state_next_hour", "tremor_next_hour")

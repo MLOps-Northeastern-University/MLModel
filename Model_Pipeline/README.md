@@ -36,16 +36,24 @@ Two simpler models are trained next to it as baselines. Both score each window o
 
 ## Running
 
-With Python 3.13, from `Model_Pipeline/` (3.13 for PyTorch; the data pipeline stays on 3.11):
+With Python 3.12, from `Model_Pipeline/` (the same Python as the data pipeline):
 
 ```bash
 pip install torch==2.12.1 --index-url https://download.pytorch.org/whl/cpu   # or a CUDA build for a GPU
 pip install -r requirements.txt
 pytest -q                               # synthetic data only, nothing downloaded
-python -m scripts.run_model_pipeline --no-mlflow   # every step, without an MLflow server
+python -m model_pipeline.run_model_pipeline --no-mlflow   # every step, without an MLflow server
 ```
 
-The run needs the data pipeline's outputs (`dvc pull` in `../Data_Pipeline`), the patient split (`paths.split_file`, made once with `python -m scripts.data.folds create`) harnet10's weights (`MODEL_HARNET_HUB`, below), and, while `train.use_tuned` is true, the tuned settings: run `python -m scripts.steps.tune` first. Without them it stops at train with a clear error.
+The run needs the data pipeline's outputs (`dvc pull` in `../Data_Pipeline`), the patient split (`paths.split_file`, made once with `python -m model_pipeline.data.folds create`) and harnet10's weights (`MODEL_HARNET_HUB`, below).
+
+With `train.use_tuned` on, each candidate trains with its last tuned settings (`artifacts/tuned_params.json`):
+
+- tuned on another split or older data: reused, with a warning, and marked stale in MLflow;
+- tuned before its config changed: skipped, so it trains with its config;
+- never tuned: it trains with its config.
+
+`--tune` tunes again first.
 
 Or with only Docker: `docker compose up -d mlflow` for a local MLflow at <http://localhost:5001>, then `docker compose run --rm train` for the pipeline and `docker compose run --rm tests` for the tests.
 
@@ -56,17 +64,60 @@ The run command's options:
 | `--config <file>` | Another config instead of `config/model.yaml` |
 | `--no-mlflow` | Keeps tracking in memory, so no MLflow server is needed |
 | `--no-register` | Checks every gate and builds the bundle, but releases nothing. CI uses it for every run except a push to `dev` or `main`. |
+| `--candidates <name> ...` | Trains only these candidates (names from `models.candidates`), for a change to one model. The release gate compares the best of them with the active version, whatever its family. Default: all |
+| `--tune` | Tunes the candidates' settings again (`tune.candidates`) before training, and trains with them. Slow; without it, the last tuned settings are reused |
+| `--reason <text>` | Why the run happened (a change, drift), tagged on the MLflow run |
+
+For example, to retrain only the transformer after changing its architecture, tuning it again:
+
+```bash
+python -m model_pipeline.run_model_pipeline --candidates motor_causal_transformer --tune --reason "deeper encoder"
+```
+
+The leakage check (`train.leakage_check`) runs on one of the candidates being trained: the ones it names, or else the first candidate of the run.
+
+### One step at a time
+
+The Airflow DAG runs each step in its own container, with `model_pipeline/run_step.py`. `start` saves the run's choices to `artifacts/run.json` (it takes the options above) and opens the `model_pipeline` run in MLflow. Each step reads `run.json` and logs under that run, and `finish` closes it, so MLflow looks the same as after a whole run:
+
+```bash
+python -m model_pipeline.run_step start --candidates window_logistic --reason "new data"
+python -m model_pipeline.run_step train          # then evaluate, bias, explain, select, compare, export, register
+python -m model_pipeline.run_step finish         # or: finish --status failed
+```
+
+The steps are in `model_pipeline/pipeline_steps.py`, which both this and the whole run use. They hand over only through files in `artifacts/`:
+
+| Step | Reads | Writes |
+|---|---|---|
+| tune | the data | `tuned_params.json` |
+| train | the data, `tuned_params.json` | `candidates.json`, `predictions/`, `models/` |
+| evaluate | `candidates.json`, `predictions/` | `candidates.json`, with the validation gate |
+| bias | `candidates.json`, `predictions/`, the data | `candidates.json`, with the bias gate; `bias/` |
+| explain | `candidates.json`, the data | `explain/` |
+| select | `candidates.json` | `chosen.json` |
+| compare | `chosen.json`, the active version's metrics | nothing: it passes or stops the run |
+| export | `chosen.json`, the data | `bundle/` |
+| register | `bundle/` | the registry's next version |
+
+A step exits 1 when it stops (a failed gate, a missing input) and alerts the team, so Airflow marks it failed and skips the rest.
+
+In a container:
+
+- `GIT_COMMIT` names the commit MLflow records, since there's no git in the image (a build argument of the Dockerfile).
+- `MODEL_MLFLOW_GOOGLE_AUTH=1` makes the tracker get Google ID tokens for the hosted MLflow from the machine's service account and renew them every 45 minutes. A token lasts an hour, and a GPU run takes hours. CI's own token is enough for its run.
+- The GPU image is built with `--build-arg TORCH=cu128` and run with `--gpus all`.
 
 The training data is the data pipeline's output, versioned by DVC. Get it with `dvc pull` in `../Data_Pipeline` (see [Training data](#training-data-dvc)). `paths.features_csv` in `config/model.yaml` points at it.
 
 ### The steps P2 built
 
 ```bash
-python -m scripts.data.folds create --test <ids> --rule "<how they were chosen>"   # once: the patient split
-python -m scripts.data.folds add [--test <new ids>]                               # when patients are added
-python -m scripts.steps.tune                  # tune the candidates in tune: (config/model.yaml)
-python -m scripts.steps.train                 # cross-validate, refit and track every candidate
-python -m scripts.steps.sensitivity_hparams   # which tuned settings mattered, with plots
+python -m model_pipeline.data.folds create --test <ids> --rule "<how they were chosen>"   # once: the patient split
+python -m model_pipeline.data.folds add [--test <new ids>]                               # when patients are added
+python -m model_pipeline.steps.tune                  # tune the candidates in tune: (config/model.yaml)
+python -m model_pipeline.steps.train                 # cross-validate, refit and track every candidate
+python -m model_pipeline.steps.sensitivity_hparams   # which tuned settings mattered, with plots
 ```
 
 Each logs to MLflow at `MLFLOW_TRACKING_URI` (else `mlflow.tracking_uri` in the config). To log to the team's server, see [Opening the hosted MLflow](#opening-the-hosted-mlflow).
@@ -92,7 +143,7 @@ Everything runs in the GCP project `team17-mlops-neu`, region `us-central1`. It'
 | MLflow server | Cloud Run service `mlflow`, private |
 | MLflow runs, parameters and metrics | Cloud SQL instance `mednova-db`, database `mlflow` |
 | MLflow files: plots, reports, bundles of each run | `gs://team17-mlops-neu-models/mlflow` |
-| Released bundles | `gs://team17-mlops-neu-models/parkinsons-risk/v<N>/` and `active.json`. CI sets `MODEL_REGISTRY` to the bucket; on a laptop it's `paths.registry_dir`, a local folder. `python -m scripts.steps.register status` or `rollback` |
+| Released bundles | `gs://team17-mlops-neu-models/parkinsons-risk/v<N>/` and `active.json`. CI sets `MODEL_REGISTRY` to the bucket; on a laptop it's `paths.registry_dir`, a local folder. `python -m model_pipeline.steps.register status` or `rollback` |
 | Images | Artifact Registry `ml`: `mlflow` (the server, from `mlflow/Dockerfile`) and `training` (this folder's image, one per release) |
 
 To use any of it, a teammate needs Editor on the project, and to run once:
@@ -119,15 +170,30 @@ Then open <http://localhost:5001>, and leave the command running while you use i
 
 ### CI: the model workflow
 
-[`.github/workflows/model.yml`](../.github/workflows/model.yml) runs the pipeline on GitHub Actions:
+[`.github/workflows/model.yml`](../.github/workflows/model.yml) trains on a VM that exists only for the run:
 
-1. Installs Python 3.13, PyTorch's CPU build and `requirements.txt`.
-2. Signs in to GCP as the `training` service account through Workload Identity Federation, so there's no key file, and gets an ID token for the hosted MLflow.
-3. Runs `python -m scripts.run_model_pipeline`, logged to the hosted MLflow. A failed gate fails the job.
-4. Uploads `artifacts/` and `logs/` as the run's `model-run` artifact, even when it fails.
-5. On a push to `main` only: releases the model, and pushes the training image as `ml/training:<commit>`.
+1. **What to run:** from `config/retrain.yaml` on a merge into `main`, or from the inputs of Actions → Model → Run workflow (which the Backend also calls on drift).
+2. **The images:** the Airflow, data and model images (the model's with PyTorch's CUDA build), each tagged with its folder's git tree hash and built only when that folder changed.
+3. **The VM:** made in the compute project ([`airflow/vm/create_vm.sh`](../airflow/vm/create_vm.sh)), trying machines and zones until GCP has one free: a T4 first, then an L4, in every zone GCP offers them in our four regions, us-central1 first; or an e2 machine for `compute: cpu`. The VM runs the DAG in Airflow ([`airflow/vm/startup.sh`](../airflow/vm/startup.sh)), logged to the hosted MLflow, and deletes itself when it ends.
+4. **The result:** CI waits for the VM's `result.json` in GCS and passes or fails with it. The Airflow UI's link goes to the team by email, never into this public log.
 
-**When it runs:** by hand for now, with Actions → Model → Run workflow, on any branch; a run releases only from `main`. The triggers for a pull request into `main` and a push to `main` (on `Model_Pipeline/**` or a new `Data_Pipeline/dvc.lock`) are in the file, commented out, until CI trains on a GPU (see [CI/CD](#cicd-assignment-section-7)).
+CI signs in to GCP as the `training` service account through Workload Identity Federation, so there's no key file. One training run at a time, across branches: the compute project has one GPU.
+
+**When it runs:** a merge into `main` that bumps `retrain.yaml`'s `request`; or by hand, on any branch, releasing only from `main`.
+
+**Asking for a training run:** [`config/retrain.yaml`](config/retrain.yaml). A PR that bumps its `request` asks CI to train once it merges into `main`, with the candidates, tuning, reason and machine it names; a merge that leaves `request` alone trains nothing, so docs and fixes never train. Every PR checks the file (`python -m model_pipeline.retrain_request check`), so a typo fails the PR, not the merge. On the merge, CI reads it with `python -m model_pipeline.retrain_request conf --before <the file in the commit before>`, which prints the run only when `request` changed.
+
+```yaml
+request: 2                                  # was 1: bumped, so this merge trains
+reason: "transformer: deeper encoder"
+candidates: [motor_causal_transformer]      # empty: all of them
+tune: true
+compute: gpu                                # gpu (T4, else L4), t4, l4, or cpu (e2)
+machine_type: ""                            # optional: n1-standard-16, e2-standard-16
+zone: ""                                    # optional: us-central1-b
+```
+
+**Retraining on drift:** the Backend scores every patient's hours with the released model and checks prediction drift each night: the PSI of the live P(OFF) against the bundle's `stats.json` `prediction_reference` (how often the model said each P(OFF) band on its out-of-fold training hours). Over 0.25 for 3 nights in a row, with 5+ patients, it writes a report to `gs://team17-mlops-neu-training-data/drift/`. [`drift.yml`](../.github/workflows/drift.yml), hourly, opens a GitHub issue from it, "retrain in 24 h unless closed" ([`.github/scripts/drift_retrain.sh`](../.github/scripts/drift_retrain.sh)). Closing the issue rejects the retrain; one still open after 24 hours starts this workflow on `main` for the drifting model's candidate, releasing if it passes every gate. At most one drift retrain a week. Neither the Backend nor the VM holds a GitHub credential.
 
 ### CI/CD (assignment section 7)
 
@@ -135,14 +201,12 @@ What each requirement runs on, and where to see it:
 
 | Requirement | How | Evidence |
 |---|---|---|
-| **7.1** Training starts from CI | `model.yml`: GitHub Actions signs in to GCP through Workload Identity Federation (no key file) and runs `python -m scripts.run_model_pipeline`, logged to the hosted MLflow | Manual runs of `model.yml`. The run of 2026-11-13 went through every step, in the hosted MLflow |
+| **7.1** Training starts from CI | `model.yml`: a merge that bumps `retrain.yaml`, or a run by hand, makes a GPU or CPU VM on GCP through Workload Identity Federation (no key file), which runs the model DAG in Airflow, logged to the hosted MLflow | The run of 2026-11-13 went through every step in the hosted MLflow; the VM's runs once `infra/` is applied |
 | **7.2** Validation gate | `steps/evaluate.py`: a candidate fails when a metric in `validation_gate.min` is missing or below it | The real run of 2026-11-15: failed for both candidates (see [The gates](#the-gates)) |
 | **7.3** Bias detection, alert or block | `steps/bias.py`: groups of 5+ patients, AUC gap over 0.15 fails; a failure emails the team, and no passing candidate stops the release | The real run: failed for both, so select stopped the run |
 | **7.4** Registry push | `steps/register.py`: the bundle goes to `gs://team17-mlops-neu-models/parkinsons-risk/v<N>/`, with `active.json` naming the version in use | v1 is there, released by hand as an override after the gates failed (tagged `manual_release` in MLflow) |
 | **7.5** Alerts | `run_model_pipeline.py` emails on a failed gate, a crash and finished training; `model.yml` on any other failed step; the settings are GitHub secrets | [Alerts](#alerts) |
-| **7.6** Rollback | `steps/compare_production.py`: a model worse than the active one on any `release_gate.rules` metric is never exported or released; `python -m scripts.steps.register rollback` makes the previous version active again | The release gate's tests, and `register status` |
-
-**Why CI doesn't train the real model yet.** The full run needs a GPU for harnet10 and the transformer (about 3.5 hours on an NVIDIA L4, tuning included), the 11.6 GB of windows and harnet10's weights. GitHub's runners have no GPU and stop a job after 6 hours, so the real run was made on a GCP GPU machine with the same command. The next step keeps `model.yml` as the trigger: one job starts that machine, the pipeline runs on it as a GitHub self-hosted runner (data, weights and caches stay on its disk), and a last job stops it, so it costs only while it trains.
+| **7.6** Rollback | `steps/compare_production.py`: a model worse than the active one on any `release_gate.rules` metric is never exported or released; `python -m model_pipeline.steps.register rollback` makes the previous version active again | The release gate's tests, and `register status` |
 
 ### Settings
 
@@ -151,6 +215,7 @@ In the repo's Settings → Secrets and variables → Actions. Changing them need
 | Name | Kind | Value |
 |---|---|---|
 | `GCP_PROJECT_ID` | Variable | `team17-mlops-neu` |
+| `GCP_COMPUTE_PROJECT` | Variable | The project the training VMs run in (`infra/compute/`): `finetuning-499422` |
 | `GCP_WIF_PROVIDER` | Variable | `projects/818790524724/locations/global/workloadIdentityPools/github/providers/mlmodel` |
 | `GCP_SERVICE_ACCOUNT` | Variable | `training@team17-mlops-neu.iam.gserviceaccount.com` |
 | `MLFLOW_TRACKING_URI` | Variable | `https://mlflow-pnpgeaktha-uc.a.run.app`, with no trailing slash: it's also the ID token's audience |
@@ -164,7 +229,7 @@ To send alerts from your own machine, put the five alert settings in `Model_Pipe
 
 ### Alerts
 
-[`scripts/alerts.py`](scripts/alerts.py) emails the team. Every subject starts with `[MedNOVA model]`, and every email links to the GitHub Actions run, or names the machine for a local run.
+[`model_pipeline/alerts.py`](model_pipeline/alerts.py) emails the team. Every subject starts with `[MedNOVA model]`, and every email links to the GitHub Actions run, or names the machine for a local run.
 
 | When | Sent by | Subject |
 |---|---|---|
@@ -190,7 +255,7 @@ To publish a new version after changing the data pipeline: `dvc repro`, `dvc pus
 ## Code structure
 
 ```text
-scripts/
+model_pipeline/
 ├── core/                  contracts only, no heavy libraries
 │   ├── targets.py         what is predicted: sleep, the waking state, tremor; now and next hour
 │   ├── data.py            Dataset: named input groups, labels, participants, slices
@@ -215,7 +280,7 @@ scripts/
 ├── utils/                 config, logging and file helpers
 ├── alerts.py              email (and Slack) alerts
 └── run_model_pipeline.py  runs the steps from the config
-tests/                     mirrors scripts/: tests/core, tests/models, ...
+tests/                     mirrors model_pipeline/: tests/core, tests/models, ...
 ```
 
 - **`core/` is what everything depends on.** It holds no MLflow, scikit-learn or deep learning code, so it stays light and portable. Change it only by team agreement.
@@ -234,7 +299,7 @@ Letters are the components in the team plan.
 | P4 | I Selection after bias, J Export + bundle, K Registry + rollback | `steps/select.py`, `steps/export.py`, `steps/compare_production.py`, `steps/register.py` |
 | P5 | L Docker + orchestration, M CI/CD, N Alerts, O Infrastructure | `run_model_pipeline.py`, `alerts.py`, Docker and CI files |
 
-All paths are under `scripts/`. `data/folds.py` was written by P2 as the stand-in training needed. P1 takes it over.
+All paths are under `model_pipeline/`. `data/folds.py` was written by P2 as the stand-in training needed. P1 takes it over.
 
 ## Interfaces
 
@@ -249,7 +314,7 @@ The four hand-offs between owners. Build against these, with stand-ins for a tea
 
 ### 1. `load_dataset(cfg, groups)` → `Dataset` (P1 → P2, P3)
 
-In `scripts/data/loaders.py`; the `Dataset` itself is in `scripts/core/data.py`.
+In `model_pipeline/data/loaders.py`; the `Dataset` itself is in `model_pipeline/core/data.py`.
 
 ```python
 data = load_dataset(cfg, groups=("windows", "events", "patients"))
@@ -269,8 +334,8 @@ Only the groups asked for are read. Every Dataset also has `hours` and `labels`:
 
 - **One clock for everything:** seconds since the participant's first diary day began. A window or event at `time_s` belongs to hour `time_s // 3600`.
 - **The window cut is versioned.** `windows` in `config/model.yaml` gives the seconds, rate and axes, and a Dataset cut with another version is refused.
-- **The patient split is a file** (`paths.split_file`, made with `scripts/data/folds.py`), never recomputed. The test patients never change, no one ever moves into them, and the folds spread the patients with DBS and with dyskinetic hours. It names patients, so it's kept with the data, never in Git.
-- **A label is a target at a horizon,** for example `state_now` or `tremor_next_hour`. The targets are in `scripts/core/targets.py`:
+- **The patient split is a file** (`paths.split_file`, made with `model_pipeline/data/folds.py`), never recomputed. The test patients never change, no one ever moves into them, and the folds spread the patients with DBS and with dyskinetic hours. It names patients, so it's kept with the data, never in Git.
+- **A label is a target at a horizon,** for example `state_now` or `tremor_next_hour`. The targets are in `model_pipeline/core/targets.py`:
 
 | Target | Classes |
 |---|---|
@@ -282,7 +347,7 @@ Only the groups asked for are read. Every Dataset also has `hours` and `labels`:
 
 ### 2. Predictions and scores (P2 → P1, P3)
 
-**In code:** `Predictions` in `scripts/core/model.py`, which `model.predict(data)` returns.
+**In code:** `Predictions` in `model_pipeline/core/model.py`, which `model.predict(data)` returns.
 
 - `hours`: `participant_id` and `hour_index`, one row per hour of the data, in its order.
 - `probs`: per label, the probability of each class per hour. Each row adds up to 1.
@@ -305,7 +370,7 @@ Only the groups asked for are read. Every Dataset also has `hours` and `labels`:
 | `y_true` | The true class index, empty where there's no answer |
 | one column per class | Its probability, named as in `core/targets.py` (`severe_akinesia`, …) |
 
-**Scores** are in `scripts/core/metrics.py`, shared by every step, and named `{split}/{label}/{metric}`, such as `cv/state_now/off_auc_within`. Every score comes **pooled** (all patients' hours together) and **within** (`_within`: each patient's own score, averaged over patients):
+**Scores** are in `model_pipeline/core/metrics.py`, shared by every step, and named `{split}/{label}/{metric}`, such as `cv/state_now/off_auc_within`. Every score comes **pooled** (all patients' hours together) and **within** (`_within`: each patient's own score, averaged over patients):
 
 - AUCs: `off_auc`, `on_auc`, `dyskinetic_auc` (state), `asleep_auc` (sleep), `any_tremor_auc` (tremor), plus `off_auc_no_dbs` (patients without DBS, pooled only);
 - the most likely class: `balanced_accuracy`, `macro_f1`, and per class `recall_<class>` and `precision_<class>` (pooled only);
@@ -315,7 +380,7 @@ Only the groups asked for are read. Every Dataset also has `hours` and `labels`:
 
 ### 3. The model contract (P2 → P4)
 
-Every model family subclasses `Model` in `scripts/core/model.py`. The base class checks inputs, outputs and train/validation overlap, so no family can skip those checks.
+Every model family subclasses `Model` in `model_pipeline/core/model.py`. The base class checks inputs, outputs and train/validation overlap, so no family can skip those checks.
 
 - **Class attributes:**
   - `family`: its name in the config and the registry;
@@ -341,7 +406,7 @@ There's no `to_keras()` or phone export: the model runs on the server.
 
 ### Evaluate (P1)
 
-`scripts/steps/evaluate.py` runs after train, on its `candidates.json` and predictions files, on the same hours train scores (labelled, worn, out of fold). Per candidate it adds a 95% interval for each pooled AUC by resampling patients (1,000 times, `evaluation` in the config), each question's AUC per fold and per patient (`evaluation.json`) and the ROC curves (`roc.png`), all in `artifacts/evaluation/<candidate>/`. It sets `gates_passed` to false when a metric in `validation_gate.min` is missing or below its value, so select skips that candidate.
+`model_pipeline/steps/evaluate.py` runs after train, on its `candidates.json` and predictions files, on the same hours train scores (labelled, worn, out of fold). Per candidate it adds a 95% interval for each pooled AUC by resampling patients (1,000 times, `evaluation` in the config), each question's AUC per fold and per patient (`evaluation.json`) and the ROC curves (`roc.png`), all in `artifacts/evaluation/<candidate>/`. It sets `gates_passed` to false when a metric in `validation_gate.min` is missing or below its value, so select skips that candidate.
 
 ### 4. Bundle folder (P1, P3 → P4 → CI)
 
@@ -351,7 +416,7 @@ There's no `to_keras()` or phone export: the model runs on the server.
 |---|---|---|
 | `model/` | P4 | The folder `model.save()` wrote: `manifest.json` and `weights/` (for the transformer: `network.pt` and `training.json`, with the harnet10 fingerprint). This replaces a phone model file |
 | `manifest.json` | P4 | What the Backend needs to run and check the model: family, version and `model_id` (added by `register.py`), candidate, labels, window spec version, the training run, the model folder's sha256 and the harnet10 sha256 the server must load |
-| `stats.json` | P4 | The training data's statistics for drift, starting with the 7 hourly features |
+| `stats.json` | P4 | The training data's statistics for drift: the 7 hourly features, and `prediction_reference`, how often the model said each 0.1-wide P(OFF) band on its out-of-fold development hours (counts only), which the Backend's nightly drift check compares the live hours with |
 | `metrics.json` | P1 | The chosen candidate's `artifacts/evaluation/<name>/metrics.json`: train's `cv/` scores plus evaluate's 95% intervals (`_auc_lo`, `_auc_hi`), which the next run's release gate compares against |
 | `bias.json` | P3 | Metrics per slice and the mitigation result: `artifacts/bias/bias.json` |
 | `device/` | P4 | Only with `export.device.enabled` (off by default): the model in a phone format, for testing on-device scoring later. Its converter is a placeholder that fails the run |
@@ -367,12 +432,12 @@ Still open:
 
 ## Training, tuning and sensitivity (P2)
 
-They share one cross-validation (`scripts/experiments.py`), so a tuning trial and a training run are scored exactly the same way: each fold's training patients fit, its validation patients scored, for every seed. The test patients are loaded only when `train.score_test` is true, once, at the end of model work.
+They share one cross-validation (`model_pipeline/experiments.py`), so a tuning trial and a training run are scored exactly the same way: each fold's training patients fit, its validation patients scored, for every seed. The test patients are loaded only when `train.score_test` is true, once, at the end of model work.
 
 | Step | Config | What it does | Writes |
 |---|---|---|---|
 | `tune` | `tune:` | One Optuna study (TPE, seeded) per listed candidate. Each trial is a cross-validation scored by `selection.metric`. Studies resume after a crash, and any change to the split, data, candidate or space starts a new one. Transformer trials that change only diary settings reuse each fold's pretrained body | `artifacts/tuning/` (studies, a trials table per candidate), `artifacts/tuned_params.json` |
-| `train` | `models:`, `train:` | A shuffled-label check first (a model must score near chance on shuffled labels), then every candidate cross-validated, refit on all development patients, and saved. With `use_tuned`, a tuned candidate trains with its tuned settings, refused if they were tuned on another split, data or config | `artifacts/models/`, `artifacts/predictions/`, `artifacts/candidates.json`, `artifacts/charts/` |
+| `train` | `models:`, `train:` | A shuffled-label check first (a model must score near chance on shuffled labels), then every candidate cross-validated, refit on all development patients, and saved. With `use_tuned`, a tuned candidate trains with its tuned settings: reused with a warning if they were tuned on another split or data, skipped if its config changed since | `artifacts/models/`, `artifacts/predictions/`, `artifacts/candidates.json`, `artifacts/charts/` |
 | `sensitivity_hparams` | (reads the studies) | Each tuned setting's importance (fANOVA), plus plots: importance, score against each setting, score per trial | `artifacts/sensitivity/<candidate>/` |
 
 In MLflow, each step is a run with a child per candidate. train and tune go on to a child per fold (and tune per trial before that), with the scores above, fit times and each epoch's curves. For the transformer that includes pretraining's skill per target on the validation patients, so one pretraining can be compared with another. Runs carry the split's hash and a data fingerprint, so only comparable runs get compared. For a live look at the tuning studies, `optuna-dashboard sqlite:///artifacts/tuning/studies.db`.
@@ -388,8 +453,8 @@ Each fold run gets them (`folds: false` turns that off), each candidate's run ge
 ## Bias and explanations (P3)
 
 ```bash
-python -m scripts.steps.bias      # after evaluate: reads artifacts/candidates.json and artifacts/predictions/
-python -m scripts.steps.explain   # after bias: explains each final model by its input groups
+python -m model_pipeline.steps.bias      # after evaluate: reads artifacts/candidates.json and artifacts/predictions/
+python -m model_pipeline.steps.explain   # after bias: explains each final model by its input groups
 ```
 
 | Step | Config | What it does | Writes |
@@ -440,7 +505,7 @@ At first every model scored at chance on OFF within patients, about 0.52. A revi
 | Adding tremor-band frequency features | 0.625 → 0.624 | No: harnet10 already holds it |
 | Adding the data pipeline's 7 hourly movement features | 0.625 → 0.636 on all patients, 0.630 → 0.628 on patients with 5+ hours of each answer | No: within noise |
 
-How the baseline works (`scripts/models/patient_baseline.py`): for each hour, the mean and spread of the patient's worn windows over the past 168 hours, never including that hour. Early on, when a patient has little past, it's pulled toward the training patients' mean and spread, as if the patient already had 24 hours of average data (`warmup_h`), so the pull fades as their own hours add up. It only ever looks back, so it works the same way on live data from the app. The training patients' mean and spread are saved with the model.
+How the baseline works (`model_pipeline/models/patient_baseline.py`): for each hour, the mean and spread of the patient's worn windows over the past 168 hours, never including that hour. Early on, when a patient has little past, it's pulled toward the training patients' mean and spread, as if the patient already had 24 hours of average data (`warmup_h`), so the pull fades as their own hours add up. It only ever looks back, so it works the same way on live data from the app. The training patients' mean and spread are saved with the model.
 
 ### The gates
 
@@ -456,9 +521,9 @@ How the baseline works (`scripts/models/patient_baseline.py`): for each hour, th
 The full run needs a GPU for harnet10 and the transformer, so it ran on a GCP machine with one NVIDIA L4 (`g2-standard-8`):
 
 1. The data pipeline ran in Airflow (Dhruv's `cops_data_pipeline` DAG, in Docker on the same machine) for the 60 participants, and pushed the data version and the patient split to the team's DVC remote.
-2. `python -m scripts.steps.tune`: 3 Optuna trials each for logistic regression and boosting. Each trial is a full 2-fold cross-validation.
-3. `python -m scripts.run_model_pipeline`: train, evaluate, bias, explain, select, export and register, with the tuned settings.
-4. `python -m scripts.steps.sensitivity_hparams`: which tuned settings mattered.
+2. `python -m model_pipeline.steps.tune`: 3 Optuna trials each for logistic regression and boosting. Each trial is a full 2-fold cross-validation.
+3. `python -m model_pipeline.run_model_pipeline`: train, evaluate, bias, explain, select, export and register, with the tuned settings.
+4. `python -m model_pipeline.steps.sensitivity_hparams`: which tuned settings mattered.
 
 Every step logged to the team's hosted MLflow in the experiment `parkinsons-risk`, through `gcloud run services proxy` on the machine. The run's logs are attached to a `run_logs` run. When everything finished, `artifacts/` (without the caches), the config, the split and the logs were copied to a bucket, and the machine shut itself down.
 
@@ -492,7 +557,7 @@ The transformer's test scorecard: [`transformer_scorecard_test.png`](docs/result
 | Leakage check | **Passed:** boosting on shuffled labels stayed within 0.40–0.60 within patients |
 | Validation | **Failed** for both: pooled OFF AUC 0.379 and 0.360, under 0.5 (see above) |
 | Bias | **Failed** for both (details below) |
-| Release | No candidate passed, so select stopped the run. Logistic was then released by hand as version 1 of `parkinsons-risk`, with the best within-patient OFF AUC. That run is `manual_release` in MLflow, tagged as an override with both gate failures. The bundle is in the team's registry, `gs://team17-mlops-neu-models/parkinsons-risk/v1/`, and `active.json` names it, so `python -m scripts.steps.register status` and `rollback` work on it |
+| Release | No candidate passed, so select stopped the run. Logistic was then released by hand as version 1 of `parkinsons-risk`, with the best within-patient OFF AUC. That run is `manual_release` in MLflow, tagged as an override with both gate failures. The bundle is in the team's registry, `gs://team17-mlops-neu-models/parkinsons-risk/v1/`, and `active.json` names it, so `python -m model_pipeline.steps.register status` and `rollback` work on it |
 
 The validation gate judges pooled AUC, which the patient baseline pushes below 0.5, while selection and the leakage check judge within patients.
 
@@ -517,7 +582,7 @@ Tremor per group: [`logistic_bias_tremor.png`](docs/results/logistic_bias_tremor
 ## Adding your step
 
 - Fill in your module in the structure above, and put its settings in `config/model.yaml` under your own section. No hard-coded values.
-- Test it in the matching folder, e.g. `tests/steps/test_bias.py` for `scripts/steps/bias.py`, with `tests/helpers.py`: `make_config(tmp_path)` gives a config, `make_features_table()` a synthetic hourly table with the real file's columns, and `make_dataset(spec)` a small synthetic Dataset with windows, events and patients. Tests never read the real data.
+- Test it in the matching folder, e.g. `tests/steps/test_bias.py` for `model_pipeline/steps/bias.py`, with `tests/helpers.py`: `make_config(tmp_path)` gives a config, `make_features_table()` a synthetic hourly table with the real file's columns, and `make_dataset(spec)` a small synthetic Dataset with windows, events and patients. Tests never read the real data.
 - Add libraries under your heading in `requirements.txt`, pinned to an exact version.
-- Don't import from `../Data_Pipeline`. Both folders have a package named `scripts`, so copy what you need, as `scripts/utils/` and `scripts/alerts.py` were.
+- Don't import from `../Data_Pipeline`. Both folders have a package named `scripts`, so copy what you need, as `model_pipeline/utils/` and `model_pipeline/alerts.py` were.
 - Everything a run writes goes in `artifacts/`, which Git ignores. Models and data never go in Git.

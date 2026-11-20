@@ -4,8 +4,8 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from scripts.core.targets import STATE_CLASSES
-from scripts.reporting import charts
+from model_pipeline.core.targets import STATE_CLASSES
+from model_pipeline.reporting import charts
 
 
 def state_frame(y, predicted, seeds=(0,), worn=None):

@@ -4,8 +4,8 @@ import logging
 
 import pytest
 
-from scripts.utils import logging_setup
-from scripts.utils.logging_setup import configure_logging, get_logger, log_context, log_run_start, log_step
+from model_pipeline.utils import logging_setup
+from model_pipeline.utils.logging_setup import configure_logging, get_logger, log_context, log_run_start, log_step
 
 
 @pytest.fixture(autouse=True)
@@ -29,7 +29,7 @@ def entries(buffer):
 
 def test_json_line_has_cloud_logging_fields():
     out = capture()
-    get_logger("scripts.steps.train").info("fold %d done", 2)
+    get_logger("model_pipeline.steps.train").info("fold %d done", 2)
     (entry,) = entries(out)
     assert entry["severity"] == "INFO"
     assert entry["message"] == "fold 2 done"
@@ -141,3 +141,10 @@ def test_log_run_start_records_reproducibility_fields():
     assert set(entry) >= {"git_commit", "git_dirty", "config_sha256", "python", "packages", "host"}
     assert "numpy" in entry["packages"]
     assert again["config_sha256"] == entry["config_sha256"]     # paths don't change the hash
+
+
+def test_without_git_the_images_commit_is_used(monkeypatch):
+    monkeypatch.setattr(logging_setup, "_git", lambda *args: None)        # a container: no git
+    monkeypatch.setenv("GIT_COMMIT", "abc123")
+    env = logging_setup.environment(packages=())
+    assert env["git_commit"] == "abc123" and env["git_dirty"] is False

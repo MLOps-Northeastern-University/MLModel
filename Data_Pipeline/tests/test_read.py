@@ -3,7 +3,7 @@
 import pandas as pd
 import pytest
 
-from scripts.read import Archive, participant_id, read_demographics, read_hour_csv
+from data_pipeline.read import Archive, participant_id, read_demographics, read_hour_csv
 from tests.helpers import csv_bytes, make_config, make_demographics, make_participant_zip, signal
 
 

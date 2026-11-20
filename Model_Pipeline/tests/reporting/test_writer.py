@@ -1,9 +1,9 @@
 import pytest
 
-from scripts.core.errors import ConfigError
-from scripts.reporting import charts as charts_module
-from scripts.reporting.writer import DEFAULT_COMPARE, ChartWriter
-from scripts.tracking.memory_tracker import MemoryTracker
+from model_pipeline.core.errors import ConfigError
+from model_pipeline.reporting import charts as charts_module
+from model_pipeline.reporting.writer import DEFAULT_COMPARE, ChartWriter
+from model_pipeline.tracking.memory_tracker import MemoryTracker
 from tests.reporting.test_charts import state_frame
 
 

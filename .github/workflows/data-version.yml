@@ -1,0 +1,47 @@
+name: Data version
+
+# Opens the PR for each data run that changed the data and has no PR yet
+# (.github/scripts/open_data_pr.sh). model.yml opens it at the end of its run; this catches a run
+# that outlasted that job's six hours. Hourly, and by hand.
+on:
+  schedule:
+    - cron: "17 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write          # push the PR's branch
+  pull-requests: write     # open the PR
+  id-token: write          # read the runs' files in GCS
+
+# Never two at once, so a run can't get two PRs.
+concurrency:
+  group: data-version
+  cancel-in-progress: false
+
+env:
+  TEAM_PROJECT: ${{ vars.GCP_PROJECT_ID }}
+
+jobs:
+  open:
+    name: Open the PRs waiting
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: google-github-actions/auth@v3
+        with:
+          workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
+          service_account: ${{ vars.GCP_SERVICE_ACCOUNT }}
+      - uses: google-github-actions/setup-gcloud@v3
+      - name: Every run with a new data version and no PR
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          locks="$(gcloud storage ls "gs://$TEAM_PROJECT-training-data/runs/*/data-version/dvc.lock" 2>/dev/null || true)"
+          if [ -z "$locks" ]; then echo "No data versions waiting."; exit 0; fi
+          for lock in $locks; do
+            run_id="$(basename "$(dirname "$(dirname "$lock")")")"
+            git switch -q --detach origin/main          # each PR starts from a clean checkout
+            bash .github/scripts/open_data_pr.sh "$run_id"
+          done

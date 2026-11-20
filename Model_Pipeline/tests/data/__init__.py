@@ -1,1 +1,1 @@
-"""Tests for scripts/data: loading and participant splits."""
+"""Tests for model_pipeline/data: loading and participant splits."""

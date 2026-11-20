@@ -3,9 +3,9 @@ import pytest
 import torch
 from torch import nn
 
-from scripts.core.errors import ConfigError, ModelError, NotFittedError
-from scripts.models.motor_causal_transformer import movement
-from scripts.models.motor_causal_transformer.movement import (
+from model_pipeline.core.errors import ConfigError, ModelError, NotFittedError
+from model_pipeline.models.motor_causal_transformer import movement
+from model_pipeline.models.motor_causal_transformer.movement import (
     ENCODERS, Harnet10Projection, MovementEncoder, build_movement_encoder, describe, register)
 
 

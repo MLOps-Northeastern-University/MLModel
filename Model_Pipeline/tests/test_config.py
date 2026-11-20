@@ -1,8 +1,8 @@
-"""The config loads and agrees with the phone model."""
+"""The config loads and agrees with the phone model, and a run can choose which candidates it trains."""
 
 import pytest
 
-from scripts.utils.config import load_config
+from model_pipeline.utils.config import choose_candidates, load_config
 from tests.helpers import FEATURE_NAMES, make_config
 
 # The app's HourFeatures.NAMES for feature spec 3, as the Backend's WRIST_FEATURES lists them.
@@ -30,3 +30,41 @@ def test_overrides_change_only_what_they_name(tmp_path):
 def test_a_missing_config_file_is_reported(tmp_path):
     with pytest.raises(FileNotFoundError):
         load_config(tmp_path / "missing.yaml")
+
+
+# ---- choosing the candidates a run trains ----------------------------------------------------
+
+def names(cfg):
+    return [c["name"] for c in cfg["models"]["candidates"]]
+
+
+def test_choosing_candidates_keeps_only_those_in_config_order(tmp_path):
+    cfg = make_config(tmp_path)
+    chosen = choose_candidates(cfg, ["motor_causal_transformer", "window_logistic"])
+    assert names(chosen) == ["window_logistic", "motor_causal_transformer"]
+    assert list(chosen["tune"]["candidates"]) == ["window_logistic"]       # the transformer isn't tuned
+    assert len(names(cfg)) == 3                                           # the config itself is unchanged
+
+
+def test_the_leakage_check_runs_on_a_chosen_candidate(tmp_path):
+    cfg = make_config(tmp_path)
+    assert cfg["train"]["leakage_check"]["candidates"] == ["window_boosting"]
+    kept = choose_candidates(cfg, ["window_boosting", "window_logistic"])
+    assert kept["train"]["leakage_check"]["candidates"] == ["window_boosting"]
+    moved = choose_candidates(cfg, ["window_logistic"])
+    assert moved["train"]["leakage_check"]["candidates"] == ["window_logistic"]
+
+
+def test_a_leakage_check_turned_off_stays_off(tmp_path):
+    cfg = make_config(tmp_path, train={"leakage_check": {"candidates": []}})
+    assert choose_candidates(cfg, ["window_logistic"])["train"]["leakage_check"]["candidates"] == []
+
+
+@pytest.mark.parametrize("chosen, match", [
+    (["nope"], "unknown candidate"),
+    ([], "once"),
+    (["window_logistic", "window_logistic"], "once"),
+])
+def test_bad_candidate_names_are_refused(tmp_path, chosen, match):
+    with pytest.raises(ValueError, match=match):
+        choose_candidates(make_config(tmp_path), chosen)

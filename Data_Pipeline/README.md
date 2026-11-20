@@ -1,6 +1,6 @@
 # Data Pipeline
 
-Turns the COPS Parkinson's dataset ([osf.io/5xvwn](https://osf.io/5xvwn/)) into the inputs the model trains on: 10-second wrist-movement windows, every diary hour with its answers, every dose, and one row per patient. These are the input groups of `Model_Pipeline/scripts/core/data.py`; the model design is in [MODEL.md](../MODEL.md).
+Turns the COPS Parkinson's dataset ([osf.io/5xvwn](https://osf.io/5xvwn/)) into the inputs the model trains on: 10-second wrist-movement windows, every diary hour with its answers, every dose, and one row per patient. These are the input groups of `Model_Pipeline/model_pipeline/core/data.py`; the model design is in [MODEL.md](../MODEL.md).
 
 ## Dataset
 
@@ -17,30 +17,28 @@ The zips also hold UPDRS exams; the pipeline doesn't use them. Participant IDs a
 Install [Docker Desktop](https://www.docker.com/products/docker-desktop/) and give it at least 4 GB of memory. Then, from this folder:
 
 ```bash
-mkdir -p logs/airflow && echo "AIRFLOW_UID=$(id -u)" > .env    # Linux only, once
-docker compose run --rm tests       # the tests, in the Airflow image (the first run builds it)
+docker compose run --rm tests       # the tests, in the pipeline's image (the first run builds it)
 docker compose run --rm pipeline    # the pipeline on the 5 smallest participants (~1.1 GB download)
-docker compose up airflow-init      # first time only: Airflow's database and login
-docker compose up -d                # Airflow at http://localhost:8080
 ```
 
-Outputs land in `data/` on your machine. Don't run the `pipeline` service and the DAG at the same time: both write to `data/`.
+Outputs land in `data/` on your machine. Airflow, which runs the same steps as a DAG, is in [`../airflow/`](../airflow/README.md), shared with the model pipeline. Don't run the `pipeline` service and the DAG at the same time: both write to `data/`.
 
 ## Without Docker
 
-Use **Python 3.11** or 3.12 (3.13 can't install the pinned libraries).
+Use **Python 3.12**, the same as the model pipeline (3.13 can't install the pinned libraries).
 
 ```bash
-python3.11 -m venv .venv && source .venv/bin/activate
+python3.12 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 pytest -q                                     # synthetic files only, nothing downloaded
-python -m scripts.pipeline --mode sample      # the 5 smallest participants
-python -m scripts.pipeline --mode full        # all 66
+python -m data_pipeline.pipeline --mode sample      # the 5 smallest participants
+python -m data_pipeline.pipeline --mode full        # everyone but the 6 demo patients: the model's 60
+python -m data_pipeline.pipeline --mode list        # exactly data.participants in the config
 ```
 
 - **Downloads:** zips already in `data/raw/` are reused. With every listed participant and `Demographics.csv` there, OSF isn't contacted at all, so copy zips you already have into `data/raw/` to run offline.
 
-- **Who is processed:** `data.participants` in the config names exactly who, whatever the mode. It's set to 60 of the 66: everyone except the 6 patients kept for the app's demo (COPS-6, 41, 50, 51, 52, 59), who are never in the model's data. Set it to `null` to go back to `--mode sample` (the smallest `data.sample_size`) or `--mode full` (all 66).
+- **Who is processed:** `data.mode` (or `--mode`): `sample` the smallest `data.sample_size`, `full` everyone, `list` exactly `data.participants`. `data.exclude` is never processed in any mode: the 6 patients kept for the app's demo (COPS-6, 41, 50, 51, 52, 59), who are never in the model's data. So `full`, the config's default, gives the model's 60.
 - Participants run 4 at a time (`run.parallel_participants`). One failing is skipped and listed in `reports/failed_participants.json` with an alert; more than 20% failing (`data.max_failed_fraction`) stops the run with exit code 1.
 - A dataset that fails its checks also stops the run with exit code 1.
 - Every setting is in `config/pipeline.yaml`. Email and Slack alerts are on once `.env` is filled in from `.env.example`; without it they're logged and skipped.
@@ -147,24 +145,24 @@ The model team's 10 participants (`data.participants`: 5 with DBS, 5 without):
 ## Code
 
 ```text
-scripts/
+data_pipeline/
 ├── acquire.py    list OSF files, choose participants, download with retries and checksums
 ├── read.py       participant zips, the diary file, hourly accelerometer CSVs (pyarrow, with a pandas fallback), demographics
 ├── diary.py      the diary as one row per hour: labels (text trusted over score), wear, doses
 ├── ledd.py       doses → events with LEDD, from config/ledd.yaml (every factor cited)
 ├── sensor.py     windows, wear, orientation, wrist agreement, the 7 hourly features
 ├── pipeline.py   patients, one participant, the build, failures, the command line
+├── run_step.py   one step on its own, as each task of the DAG (../airflow/dags/data_pipeline.py) runs it
 ├── checks.py     the contract, warnings, the bias report
 └── utils.py      config, file I/O, logging, email and Slack alerts
-dags/cops_pipeline_dag.py   the same steps in Airflow
-tests/                      one file per module, on synthetic participants (tests/helpers.py)
+tests/            one file per module, on synthetic participants (tests/helpers.py)
 ```
 
-**Tests:** `pytest -q` runs 138 tests on synthetic participants made by `tests/helpers.py`, and nothing is downloaded or sent. `test_dag.py` needs Airflow, so it skips outside Docker; `docker compose run --rm tests` runs it. Coverage of `scripts/` is about 94% (`pytest --cov=scripts --cov-branch`); CI fails below 85%.
+**Tests:** `pytest -q` runs 149 tests on synthetic participants made by `tests/helpers.py`, and nothing is downloaded or sent. The DAG's tests are in `../airflow/tests/`. Coverage of `data_pipeline/` is about 94% (`pytest --cov=data_pipeline --cov-branch`); CI fails below 85%.
 
 ## Data versioning (DVC)
 
-One stage, `build_dataset` in `dvc.yaml`. Its inputs are `scripts/` and both config files; its outputs are everything in `processed/` and `reports/`. `raw/` and `interim/` are working files. The remote is `gs://team17-mlops-neu-training-data/cops-dvc` (the bucket in `infra/storage.tf`). Sign in first with `gcloud auth application-default login`.
+One stage, `build_dataset` in `dvc.yaml`. Its inputs are `data_pipeline/` and both config files; its outputs are everything in `processed/` and `reports/`. `raw/` and `interim/` are working files. The remote is `gs://team17-mlops-neu-training-data/cops-dvc` (the bucket in `infra/storage.tf`). Sign in first with `gcloud auth application-default login`.
 
 ```bash
 dvc repro                        # rebuild if code, config or data changed; updates dvc.lock
@@ -173,13 +171,15 @@ dvc push                         # upload the data
 dvc pull                         # elsewhere: get exactly the data of the checked-out commit
 ```
 
-After an Airflow run, the `dvc_version` task runs `dvc commit -f build_dataset` and tries `dvc push`. It doesn't commit to Git; do the `git add` and `git commit` yourself.
+After an Airflow run, the `dvc_version` task runs `dvc commit -f build_dataset` and `dvc push`. On the training VM, when that changed the data, CI opens a PR with the new `dvc.lock` and bias report (`.github/scripts/open_data_pr.sh`): merge it to record the data version in git, or close it to ignore it. Bump `Model_Pipeline/config/retrain.yaml`'s `request` in that PR to train on the new data when it merges. On a laptop, commit `dvc.lock` yourself.
 
 ## Airflow
 
-Open <http://localhost:8080> and log in as `airflow` / `airflow` (local test values in `docker-compose.yaml`). Turn `cops_data_pipeline` on, then trigger it with `{"mode": "sample"}` or `{"mode": "full"}`.
+The DAG `cops_data_pipeline` is in [`../airflow/`](../airflow/README.md), next to the model pipeline's. Each task runs one step in this pipeline's image (`python -m data_pipeline.run_step <step>`), with `data/` mounted, so Airflow never imports this code and the steps run the same as on a laptop. Trigger it with `{"mode": "sample"}`, `{"mode": "full"}` or `{"mode": "list"}`.
 
-Tasks run in this order: `fetch_manifest` → `patients` → `process_participant` (one mapped task per participant, 4 at a time, 2 retries) → `check_failures` (runs even when some participants failed) → `build` → `run_checks` (no retries) → `dvc_version` → `notify_success`. Any failed task sends an alert.
+Tasks run in this order: `manifest` → `patients` → `participant` (one task per participant, 4 at a time, 2 retries) → `check_failures` (runs even when some participants failed) → `build` → `checks` (no retries) → `dvc_version` → `notify_success`. Any failed task sends an alert.
+
+The steps hand over only through files (the table in `data_pipeline/run_step.py`). `manifest` also clears the last run's `data/interim/<participant>/` folders, so a participant that fails can't be counted from an earlier run's output.
 
 ## Contributions
 
@@ -187,9 +187,10 @@ Newest first.
 
 | Date | Who | What changed | PR |
 | --- | --- | --- | --- |
+| 2026-11-18 | Sam Selvaraj | Who is processed by mode (`sample`, `full`, `list`), the 6 demo patients excluded in every mode; each step runnable on its own (`data_pipeline/run_step.py`) for the DAG, which moved to `../airflow/`; the package renamed `data_pipeline`; Python 3.12; tests never reach the network; MedNOVA's drug names in the LEDD table | (this PR) |
 | 2026-11-15 | Sam Selvaraj | Full run on 60 participants through Airflow (the 6 demo patients left out), more COPS drug names in the LEDD table, and the patient split under DVC | #22 |
 | 2026-11-14 | Dhruv Puri | Rebuilt the pipeline for the window model: every diary hour kept (sleep is a label), 10-s 30 Hz windows with worn flags, the more affected wrist with an orientation fix checked on both wrists, dose events wired in, a patients table, and checks against Model_Pipeline's `Dataset` contract. Removed UPDRS, the row-dropping cleaning, `hours_since_dose`, the schema baseline and the model-level bias check. 18 modules became 8. Then: a named list of participants (the 10 for the model team), orientation decided per wear bout, a fallback when only one wrist was recorded or the side is "both", every wrist mirrored to read like a right one, zips already in `data/raw/` reused without downloading, and 3 more COPS drug names in the LEDD table | (this PR) |
-| 2026-11-11 | Sam Selvaraj | Added `scripts/ledd.py`: doses as events with their levodopa equivalent dose, from `config/ledd.yaml` (Jost et al. 2023, Table 1, every value cited), with COMT inhibitor boosts and a clear stop on any unknown drug name. Updated requests, pyarrow and pytest for the Dependabot alerts | (this PR) |
+| 2026-11-11 | Sam Selvaraj | Added `data_pipeline/ledd.py`: doses as events with their levodopa equivalent dose, from `config/ledd.yaml` (Jost et al. 2023, Table 1, every value cited), with COMT inhibitor boosts and a clear stop on any unknown drug name. Updated requests, pyarrow and pytest for the Dependabot alerts | (this PR) |
 | 2026-10-26 | Shaikh Basim | Made the pipeline run with only Docker: `tests` and `pipeline` services, Airflow's slim image, the Linux `AIRFLOW_UID` setup, and a README that starts with the Docker commands | #9 |
 | 2026-10-26 | Sam Selvaraj | Corrected the DAG's task count, and made Git check out text files with LF line endings everywhere, so DVC sees the same files on Windows | #7 |
 | 2026-10-25 | Ayush Varma | Ran the pipeline on the 5 sample participants with `dvc repro` and Airflow, recorded the first data version, and documented the results, bias findings, Gantt chart and Airflow steps | #6 |

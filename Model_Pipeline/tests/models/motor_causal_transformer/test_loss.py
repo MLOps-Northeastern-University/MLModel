@@ -5,10 +5,10 @@ import pytest
 import torch
 from sklearn.utils.class_weight import compute_class_weight
 
-from scripts.core.errors import ConfigError, ModelError
-from scripts.core.targets import TARGETS
-from scripts.models.motor_causal_transformer.loss import EPS, MILLoss, as_floats, balanced_weights
-from scripts.models.motor_causal_transformer.pooling import Pooled, hour_members
+from model_pipeline.core.errors import ConfigError, ModelError
+from model_pipeline.core.targets import TARGETS
+from model_pipeline.models.motor_causal_transformer.loss import EPS, MILLoss, as_floats, balanced_weights
+from model_pipeline.models.motor_causal_transformer.pooling import Pooled, hour_members
 
 K = {"sleep": 2, "state": 7, "tremor": 3}
 LABELS = ("sleep_now", "state_now", "tremor_now", "state_next_hour")

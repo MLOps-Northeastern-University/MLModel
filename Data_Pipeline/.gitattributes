@@ -1,4 +1,4 @@
-# DVC fingerprints the exact bytes of its inputs (scripts/, config/) and of the
+# DVC fingerprints the exact bytes of its inputs (data_pipeline/, config/) and of the
 # reports kept in Git. Git would otherwise give Windows checkouts CRLF line
 # endings, so `dvc status` would call unchanged files modified and `dvc repro`
 # would redo the whole run. Text is always checked out with LF, on every system.

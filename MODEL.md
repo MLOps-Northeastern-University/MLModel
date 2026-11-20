@@ -33,7 +33,7 @@ From Careportal's monitoring types (`src/features/monitoring/model/monitoring.ts
 
 Each score should also carry the model version that made it, for the registry, rollback and drift.
 
-**Today:** the phone model sends one OFF risk (0 to 1) per hour. Backend's monitoring endpoints fill the tremor line with OFF risk × 4, with no band, and dyskinesia as 0. The dashboard shows real data only once the model produces the outputs above.
+**Today:** the Backend scores each hour with the released model (2026-11-18, Backend `app/scoring/`): P(OFF) if awake, P(asleep), P(any tremor) and every class, per hour. The portal's OFF hours use P(OFF and awake). Its monitoring endpoints still fill the tremor line with OFF risk × 4, with no band, and dyskinesia as 0, until they read the tremor and dyskinesia outputs too.
 
 ## 2. Definitions
 
@@ -71,7 +71,7 @@ What's available. Which of these the model uses is in [Decisions: Inputs](#input
 
 ### Movement
 
-The data pipeline computes 7 features per hour from the accelerometer (`Data_Pipeline/scripts/features.py`): the signal is band-passed at 0.1 to 3 Hz (movement) and 4 to 8 Hz (tremor), averaged into 1-second epochs, then summarised.
+The data pipeline computes 7 features per hour from the accelerometer (`Data_Pipeline/data_pipeline/features.py`): the signal is band-passed at 0.1 to 3 Hz (movement) and 4 to 8 Hz (tremor), averaged into 1-second epochs, then summarised.
 
 | Feature | What it measures |
 |---|---|
@@ -89,7 +89,7 @@ The same maths runs in the pipeline, the Android app and Backend, tested against
 
 The app logs each dose with its time (`POST /v1/me/doses`), and Backend has the prescription schedule, so medication values are available live as well as in training.
 
-**`hours_since_dose`, as the data pipeline builds it today** (`Data_Pipeline/scripts/diary.py`, `add_hours_since_dose`):
+**`hours_since_dose`, as the data pipeline builds it today** (`Data_Pipeline/data_pipeline/diary.py`, `add_hours_since_dose`):
 
 - From the diary's "medication taken" tick: any medicine counts as a dose.
 - In whole hours: 0 in the dose hour, then 1, 2, and so on until the next tick.
@@ -196,7 +196,7 @@ _Owner: Sam Selvaraj · Decided: 2026-11-10_
 
 Akinesia (the labels) or tremor above a threshold (the dashboard today). Section 2.
 
-**Decision (2026-11-10):** OFF is the diary's akinesia entries (kinesia score −3 to −1, `kinesia_class = off`), as in clinical practice. Tremor is a separate target, not the definition of OFF. Hours with no diary answer (asleep, no data) have no OFF label, not a 0. Defined in `Model_Pipeline/scripts/core/targets.py`.
+**Decision (2026-11-10):** OFF is the diary's akinesia entries (kinesia score −3 to −1, `kinesia_class = off`), as in clinical practice. Tremor is a separate target, not the definition of OFF. Hours with no diary answer (asleep, no data) have no OFF label, not a 0. Defined in `Model_Pipeline/model_pipeline/core/targets.py`.
 **Why:** Clinicians count OFF time with patient diaries (the Hauser diary, MDS-UPDRS Part IV), where OFF is the medicine wearing off, mainly slowness and stiffness. Many patients have little or no tremor, so a tremor threshold would miss their OFF time and count tremor while ON as OFF. Careportal's `offHours` (tremor above 2) will need to count from the OFF output instead.
 
 **Update (2026-11-11):** Asleep is now one of the 4 states (see Outputs), so diary "Sleep" hours are labelled asleep instead of having no label. Hours with no diary answer still have no label. The definition of OFF is unchanged. `core/targets.py` changes to match.
@@ -360,7 +360,7 @@ _Owner: Sam Selvaraj · Decided: 2026-11-11_
 - **Direct forecast:** rolling forward window by window would take 360 steps to reach an hour, with errors compounding.
 - **No 10-minute blocks:** with attention and a KV cache, compressing windows into blocks isn't needed to keep the past cheap.
 
-**Update (2026-11-13): as built, the motor causal transformer** (`Model_Pipeline/scripts/models/motor_causal_transformer/`, family `motor_causal_transformer`). The design is from the prototype's final runs. About 301,000 weights:
+**Update (2026-11-13): as built, the motor causal transformer** (`Model_Pipeline/model_pipeline/models/motor_causal_transformer/`, family `motor_causal_transformer`). The design is from the prototype's final runs. About 301,000 weights:
 
 | Part | What it is | Weights |
 |---|---|---|
@@ -426,7 +426,7 @@ Both steps use: batch 4, gradient clip 1, bf16 on a GPU, weight decay on weight 
 
 **Why:** Pretraining learns from every worn hour, not only the answered ones. In one fold that is 370,000 worn windows, against 1,140 answered hours. Freezing what it learned keeps a few patients' diaries from overfitting it. In the prototype, pretraining was the only thing that beat the floor on pooled OFF AUC (0.61–0.62, against 0.48 trained end to end on the diary), with within-patient OFF about level (0.76) and some cost in tremor.
 
-**Update (2026-11-15): each patient compared with their own past week.** On the 50 development patients, every model first scored at chance on within-patient OFF (about 0.52). The prototype's 12 patients had overstated it. Patients differ from each other much more than one patient's OFF hours differ from their good hours, so the models learned who the patient was. Now each harnet10 feature is standardised by the patient's own mean and spread over the past 168 hours, before the hour being scored (`baseline: {mode: rolling}`, `Model_Pipeline/scripts/models/patient_baseline.py`). With little past, the training patients' statistics stand in, weighted as 24 hours of data. All three model families use it.
+**Update (2026-11-15): each patient compared with their own past week.** On the 50 development patients, every model first scored at chance on within-patient OFF (about 0.52). The prototype's 12 patients had overstated it. Patients differ from each other much more than one patient's OFF hours differ from their good hours, so the models learned who the patient was. Now each harnet10 feature is standardised by the patient's own mean and spread over the past 168 hours, before the hour being scored (`baseline: {mode: rolling}`, `Model_Pipeline/model_pipeline/models/patient_baseline.py`). With little past, the training patients' statistics stand in, weighted as 24 hours of data. All three model families use it.
 
 - Fold 1, within-patient OFF: logistic 0.579 → 0.640, boosting 0.562 → 0.601, transformer 0.522 → 0.636.
 - 3 days of past scored 0.632 for logistic, so 7 days stays.
@@ -548,12 +548,12 @@ Still to do before the one-time test on COPS-38 and COPS-45: 3 seeds of the fina
 
 ### LEDD conversion table
 
-_Owner: Sam Selvaraj · Decide by: TBD_
+_Owner: Sam Selvaraj · Decided: 2026-11-11_
 
 Which paper's factors, and how drug names in COPS map to them.
 
-**Decision:** _TBD_
-**Why:** —
+**Decision:** Jost et al. 2023 (Movement Disorders), Table 1 and its footnotes, every factor cited, in `Data_Pipeline/config/ledd.yaml`, checked row by row against the paper on 2026-11-11. Each data source maps its own drug names to the table's rows (`names: cops`; `names: mednova` for the Backend's prescriptions, 2026-11-18), so a factor is written once.
+**Why:** The most recent systematic review of LEDD, with proposals for the newer drugs COPS's patients take.
 
 ### Still open
 
@@ -565,8 +565,8 @@ Which paper's factors, and how drug names in COPS map to them.
 - **Tiebreak** if a shared trunk and a separate in-1-hour copy score the same.
 - **OFF threshold** for counting daily OFF hours.
 - ~~**Runtime,** including the KV cache, until the conversion spike runs.~~ No phone runtime: the model runs on the server (2026-11-13, see On the phone).
-- **Server details:** where it runs (Cloud Run, for example), what exactly the phone uploads, and how the uploads are kept private.
-- **`score_past_h`:** how much past each scored hour sees live (8 h for now).
+- **Server details:** ~~where it runs~~ in the Backend's scoring jobs (2026-11-18, Backend `app/scoring/`), from the raw watch chunks the phone uploads. Still open: where the Backend is deployed (Cloud Run, for example), and how the uploads are kept private.
+- ~~**`score_past_h`:** how much past each scored hour sees live (8 h for now).~~ The Backend gives each scored hour the 7 days before it (the patient baseline's week), which covers it.
 - **Check-in scoring:** the "with check-ins" validation score isn't run yet.
 - **Tremor uncertainty band** on Careportal's timeline, from the predicted 0, 1, 2 probabilities.
 

@@ -34,7 +34,7 @@ paths:
   windows_folder: ../Data_Pipeline/data/processed/windows
   events_csv: ../Data_Pipeline/data/processed/events.csv
   patients_csv: ../Data_Pipeline/data/processed/patients.csv
-  # The patient split: the fixed test patients and the folds (scripts/data/folds.py). It names
+  # The patient split: the fixed test patients and the folds (model_pipeline/data/folds.py). It names
   # patients, so it's kept with the data (git-ignored there) and versioned by DVC, never in Git.
   split_file: ../Data_Pipeline/data/processed/patient_split.json
   # Everything a run writes: predictions, reports and the model bundle. Not in Git.
@@ -57,14 +57,14 @@ logging:
 
 split:
   # The patient split is a file (paths.split_file), made once and only added to, never
-  # recomputed, so the test patients never change (scripts/data/folds.py). These two are
+  # recomputed, so the test patients never change (model_pipeline/data/folds.py). These two are
   # used when it's made or when development patients are added (which remakes the folds).
   # Folds by patient over the development patients, so no one is in both train and validation.
   cv_folds: 2
   seed: 42
 
 models:
-  # The candidates train trains and select chooses from (scripts/models/registry.py).
+  # The candidates train trains and select chooses from (model_pipeline/models/registry.py).
   # Every candidate predicts these targets at these horizons unless it sets its own.
   targets: [sleep, state, tremor]
   horizons: [now, next_hour]
@@ -82,7 +82,7 @@ models:
       family: window_boosting
       params: {windows_per_hour: 10, baseline: {mode: rolling}}
     # The window model (MODEL.md, Architecture and Training). Its settings are the defaults in
-    # scripts/models/motor_causal_transformer/model.py; a block set here is merged into them.
+    # model_pipeline/models/motor_causal_transformer/model.py; a block set here is merged into them.
     # The diary step runs up to 30 epochs and stops after 6 without a better OFF score within patients
     # (select_by): the mean of OFF, dyskinetic and tremor kept epochs where OFF had dropped.
     - name: motor_causal_transformer
@@ -90,18 +90,20 @@ models:
       params: {baseline: {mode: rolling}, diary: {max_epochs: 30, patience: 6, select_by: off_auc_within}}
 
 train:
-  # scripts/steps/train.py. Every candidate trains with each seed on every fold; the cv
+  # model_pipeline/steps/train.py. Every candidate trains with each seed on every fold; the cv
   # scores are the mean over seeds.
   seeds: [42]
   # Train the candidates tune.py tuned with the settings it chose (artifacts/tuned_params.json),
-  # merged over their config. Refused if they were tuned on another split, data or config, or if
-  # tune hasn't run yet: run tune first.
+  # merged over their config. Reused with a warning when tuned on another split or older data, until
+  # a run tunes again (run_model_pipeline --tune); skipped for a candidate whose config changed since,
+  # and when nothing is tuned yet, so those train with their config.
   use_tuned: true
   # The test patients are scored once, with the final models, at the very end of model
   # work. Leave false; set true only for that one run (it's tagged test_scored in MLflow).
-  score_test: true
+  # The 2026-11-15 run scored them, for v1. Retrains are judged on cross-validation.
+  score_test: false
   charts:
-    # scripts/reporting/: a scorecard and confusion matrices on every run with predictions (each
+    # model_pipeline/reporting/: a scorecard and confusion matrices on every run with predictions (each
     # fold, each candidate's cross-validation, the test run), and the candidates compared on the
     # train run. Attached to the MLflow runs and kept in artifacts/charts/.
     enabled: true
@@ -124,7 +126,7 @@ train:
     within_only: true
 
 tune:
-  # scripts/steps/tune.py. Each trial is a full cross-validation with this seed, scored by
+  # model_pipeline/steps/tune.py. Each trial is a full cross-validation with this seed, scored by
   # selection.metric (so tuning maximises what selection chooses by). A candidate not listed
   # here isn't tuned. Settings are dotted names into the candidate's params.
   # Every family is tuned, with trials of about 8-10 per setting, so the comparison is fair.
@@ -158,7 +160,7 @@ selection:
   metric: cv/state_now/off_auc_within
 
 evaluation:
-  # scripts/steps/evaluate.py: the pooled AUC's interval, patients resampled this many
+  # model_pipeline/steps/evaluate.py: the pooled AUC's interval, patients resampled this many
   # times (ARCHITECTURE.md, Evaluation protocol).
   bootstrap_resamples: 1000
   interval: 0.95
@@ -182,7 +184,7 @@ release_gate:
     - {metric: cv/state_next_hour/off_auc, must_improve: false}
 
 bias:
-  # scripts/steps/bias.py (P3). The columns patients are sliced by: read from the hours table,
+  # model_pipeline/steps/bias.py (P3). The columns patients are sliced by: read from the hours table,
   # or from the patients table when the hours table doesn't have them (dbs).
   slice_columns: [sex, age_group, visit, dbs, hoehn_yahr, pd_subtype]
   # The largest gap allowed between the best and worst group, for a check that sets no max_gap.
@@ -220,7 +222,7 @@ bias:
     max_weight: 5.0
 
 explain:
-  # scripts/steps/explain.py (P3): Shapley values over each model's input groups (windows,
+  # model_pipeline/steps/explain.py (P3): Shapley values over each model's input groups (windows,
   # events, patients, features), and how the score changes when a group is left out.
   # The final models are explained on these patients: development (the ones they were trained
   # on: what the model relies on) or test (only once the test patients have been scored).

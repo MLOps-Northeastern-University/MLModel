@@ -12,7 +12,7 @@ x-tool: &tool
   build: .
   # Not started by "docker compose up"; run with "docker compose run --rm <name>".
   profiles: [tools]
-  # Optional: a .env with the alert settings (see scripts/alerts.py) turns on email/Slack.
+  # Optional: a .env with the alert settings (see model_pipeline/alerts.py) turns on email/Slack.
   env_file:
     - path: .env
       required: false
@@ -34,8 +34,9 @@ services:
       - --backend-store-uri=sqlite:////mlflow/mlflow.db
       - --artifacts-destination=/mlflow/artifacts
       # MLflow 3 only answers requests addressed to the hosts listed here. The
-      # train service reaches it as mlflow:5000, the browser as localhost:5001.
-      - --allowed-hosts=mlflow:5000,localhost:*,127.0.0.1:*
+      # train service reaches it as mlflow:5000, the browser as localhost:5001, and
+      # the Airflow DAG's containers (../airflow/) as host.docker.internal:5001.
+      - --allowed-hosts=mlflow:5000,localhost:*,127.0.0.1:*,host.docker.internal:*
     # 5001 on the host, because macOS uses 5000 for AirPlay.
     ports:
       - "5001:5000"
@@ -49,7 +50,7 @@ services:
 
   train:
     <<: *tool
-    command: ["python", "-m", "scripts.run_model_pipeline"]
+    command: ["python", "-m", "model_pipeline.run_model_pipeline"]
     environment:
       MLFLOW_TRACKING_URI: http://mlflow:5000
     depends_on:

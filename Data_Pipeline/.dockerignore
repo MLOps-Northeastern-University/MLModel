@@ -1,0 +1,10 @@
+# Keep data, outputs, secrets and local environments out of the image. The data is mounted at run time.
+data/
+logs/
+.env
+keys/
+.venv/
+__pycache__/
+.pytest_cache/
+.coverage
+htmlcov/

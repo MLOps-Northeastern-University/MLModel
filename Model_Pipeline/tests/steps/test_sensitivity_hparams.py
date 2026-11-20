@@ -2,10 +2,10 @@ import json
 
 import pytest
 
-from scripts.core.errors import ConfigError
-from scripts.steps.sensitivity_hparams import HyperparameterSensitivity
-from scripts.steps.tune import TuneModels
-from scripts.tracking.memory_tracker import MemoryTracker
+from model_pipeline.core.errors import ConfigError
+from model_pipeline.steps.sensitivity_hparams import HyperparameterSensitivity
+from model_pipeline.steps.tune import TuneModels
+from model_pipeline.tracking.memory_tracker import MemoryTracker
 from tests.models.test_window_classifier import environment  # noqa: F401  (the fake harnet10)
 from tests.steps.test_train import SPLIT, data
 from tests.steps.test_tune import config, logistic
