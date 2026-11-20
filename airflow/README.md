@@ -59,12 +59,11 @@ On Docker Desktop for Windows, `HOST_REPO` is the repo's path as Docker sees it,
 
 ## Trigger a run
 
-From the UI (Trigger DAG w/ config), or the REST API, which is how CI and the Backend start one:
+From the UI (Trigger DAG w/ config), or with Airflow's command line, which needs no login and is how the training VM starts its run (its REST API is off):
 
 ```bash
-curl -X POST "http://localhost:8080/api/v1/dags/model_pipeline/dagRuns" -u airflow:airflow \
-  -H "Content-Type: application/json" \
-  -d '{"conf": {"candidates": ["window_logistic"], "tune": false, "reason": "new data", "release": true}}'
+docker compose exec airflow-scheduler airflow dags trigger model_pipeline \
+  --conf '{"candidates": ["window_logistic"], "tune": false, "reason": "new data", "release": true}'
 ```
 
 | DAG | Config | Default |
