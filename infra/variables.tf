@@ -11,6 +11,11 @@ variable "github_repo" {
   default = "MLOps-Northeastern-University/MLModel"
 }
 
+variable "backend_repo" {
+  # Its deploy workflow logs in as backend-deploy (ci_access.tf).
+  default = "MLOps-Northeastern-University/Backend"
+}
+
 variable "training_vm_email" {
   # The training VMs' account, made in their own project by compute/ (its output training_vm_email).
   # This project lets it use the buckets, MLflow, the images and its secrets.
