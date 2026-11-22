@@ -10,6 +10,9 @@ resource "google_project_service" "apis" {
     "iam",              # service accounts and the WIF pool
     "iamcredentials",   # short-lived logins for the service account
     "sts",              # checks GitHub's ID token
+    "cloudscheduler",   # starts the Backend's scoring jobs on a timer
+    "logging",          # the Backend's and the jobs' logs
+    "monitoring",       # uptime checks, alert emails and the dashboard
   ])
   service = "${each.key}.googleapis.com"
 
