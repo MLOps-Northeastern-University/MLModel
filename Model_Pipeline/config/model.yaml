@@ -13,6 +13,26 @@ data:
   group_column: participant_id
   random_seed: 42
 
+baseline:
+  # The hourly baseline (P1), run alone with `run_model_pipeline --baseline`: logistic regression
+  # on each hour's features (scripts/models/hourly_logistic.py, data/baseline_loader.py), scored by
+  # repeated cross-validation over the development patients (steps/baseline_cv.py); the report goes
+  # to artifacts/baseline/. Add the candidate to models.candidates to have it compete in a full run.
+  cv_folds: 5          # 50 development patients: 40 train, 10 validation per fold
+  repeats: 5           # each a new shuffle of the patients; reported as mean ± sd [min–max]
+  seed: 42
+  threshold: 0.5       # for sensitivity, specificity, precision and F1
+  candidate:
+    name: hourly_logistic
+    family: hourly_logistic
+    params:
+      c: 1.0
+      class_weight: balanced
+      features:                  # baseline_loader.DEFAULTS
+        warmup_hours: 12         # the cohort's normal counts as this many of the patient's own hours
+        max_hours_since_dose: 12
+        recent_ledd_hours: 4
+
 windows:
   # How the signal is cut into windows: the preprocessing spec the data pipeline
   # and the app must follow too. Bump spec_version whenever any value changes;

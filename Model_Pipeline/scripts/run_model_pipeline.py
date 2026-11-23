@@ -4,6 +4,7 @@
     python -m scripts.run_model_pipeline --config config/model.yaml
     python -m scripts.run_model_pipeline --no-mlflow     # without an MLflow server
     python -m scripts.run_model_pipeline --no-register   # every gate, but release nothing (CI on PRs)
+    python -m scripts.run_model_pipeline --baseline      # only the hourly baseline: repeated CV and its report
 
 Runs the steps in order, each logged to MLflow as a child of one model_pipeline run:
 
@@ -37,6 +38,7 @@ from scripts.alerts import notify
 from scripts.core.errors import GateError, PipelineError
 from scripts.data.folds import read_split
 from scripts.data.loaders import load_dataset
+from scripts.steps import baseline_cv
 from scripts.steps.bias import CheckBias
 from scripts.steps.compare_production import CompareProduction
 from scripts.steps.evaluate import EvaluateModel
@@ -110,6 +112,13 @@ def run(cfg, tracker, release=True, data=None, split=None):
             return register.run(bundle_dir)
 
 
+def run_baseline(cfg, tracker, data=None, split=None):
+    """Only the hourly baseline: repeated cross-validation, the final model and its report
+    (steps/baseline_cv.py). Nothing is selected, exported or released: it's there to compare with."""
+    with log_step(logger, "baseline", owner="P1"):
+        return baseline_cv.run(cfg, tracker, data, split)
+
+
 def where():
     """Where the run happened, for alerts: the GitHub Actions run's page, or this machine."""
     run_id = os.environ.get("GITHUB_RUN_ID")
@@ -140,9 +149,20 @@ def main(argv=None):
                         help="Keep tracking in memory instead of logging to MLflow")
     parser.add_argument("--no-register", action="store_true",
                         help="Check every gate and build the bundle, but don't release it")
+    parser.add_argument("--baseline", action="store_true",
+                        help="Only the hourly baseline: repeated CV and a report in artifacts/baseline/")
     args = parser.parse_args(argv)
 
     cfg = load_config(args.config)
+    if args.baseline:
+        configure_logging(cfg)
+        tracker = MemoryTracker() if args.no_mlflow else MlflowTracker.from_config(cfg)
+        try:
+            run_baseline(cfg, tracker)
+        except PipelineError as exc:
+            logger.error("Baseline stopped: %s", exc)
+            return 1
+        return 0
     configure_logging(cfg)
     # One id per run, on every log line, to find a run's lines in Cloud Logging.
     with log_context(run_id=uuid.uuid4().hex[:12]):

@@ -41,6 +41,7 @@ logger = get_logger(__name__)
 
 # Family name -> "module:Class". A new family is one line here.
 FAMILIES: Dict[str, str] = {
+    "hourly_logistic": "scripts.models.hourly_logistic:HourlyLogistic",
     "window_logistic": "scripts.models.window_classifier:WindowLogistic",
     "window_boosting": "scripts.models.window_classifier:WindowBoosting",
     "motor_causal_transformer": "scripts.models.motor_causal_transformer.model:MotorCausalTransformer",
