@@ -6,8 +6,8 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from scripts import checks, pipeline
-from scripts.utils import read_table, write_json, write_table
+from data_pipeline import checks, pipeline
+from data_pipeline.utils import read_table, write_json, write_table
 from tests.helpers import make_local_run
 
 

@@ -11,7 +11,7 @@ from functools import partial
 import numpy as np
 import pandas as pd
 
-from scripts.utils import PROJECT_ROOT, load_config
+from data_pipeline.utils import PROJECT_ROOT, load_config
 
 FS = 100
 SECONDS = 120
@@ -34,7 +34,7 @@ def make_config(tmp_path, **sections):
     """Config with every output under tmp_path, for 2-minute test hours."""
     overrides = {
         "project_root": str(tmp_path),
-        "data": {"participants": None},
+        "data": {"mode": "list", "participants": [], "exclude": []},
         "run": {"parallel_participants": 1},
         "features": {"expected_seconds_per_file": SECONDS, "min_valid_seconds": 30},
         "checks": {"min_labelled_hours": 1},
@@ -142,7 +142,7 @@ def make_local_run(tmp_path, pids=("COPS-1", "COPS-2"), sides=("left", "right"),
     for pid in pids:
         make_participant_zip(folder, pid)
     make_demographics(folder, list(pids), list(sides))
-    data = {"participants": list(pids), **sections.pop("data", {})}
+    data = {"mode": "list", "participants": list(pids), **sections.pop("data", {})}
     return make_config(tmp_path, data=data, **sections)
 
 

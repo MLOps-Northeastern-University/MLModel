@@ -1,0 +1,4 @@
+# Findings gitleaks may skip, each by its fingerprint (commit:file:rule:line), with why.
+# The README's REST example once wrote Airflow's local test login (airflow/airflow, the docker-compose
+# default, never a real credential) in a curl -u; the example now uses Airflow's command line, no login.
+7b176e796d8bb5a6ca053ce82ac935fb2dd622b3:airflow/README.md:curl-auth-user:64

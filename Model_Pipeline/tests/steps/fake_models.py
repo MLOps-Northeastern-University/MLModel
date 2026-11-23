@@ -17,10 +17,10 @@ import numpy as np
 import pandas as pd
 from sklearn.linear_model import LogisticRegression
 
-from scripts.core.data import Dataset, WindowSpec
-from scripts.core.model import Model, Predictions
-from scripts.core.targets import HOUR_INDEX, PARTICIPANT, build_labels, get_target, parse_label
-from scripts.data.folds import Split
+from model_pipeline.core.data import Dataset, WindowSpec
+from model_pipeline.core.model import Model, Predictions
+from model_pipeline.core.targets import HOUR_INDEX, PARTICIPANT, build_labels, get_target, parse_label
+from model_pipeline.data.folds import Split
 
 FEATURES = ["move_mean", "move_std", "move_p95", "still_fraction", "tremor_mean", "tremor_p95", "tremor_ratio"]
 SPEC = WindowSpec(1, 10, 30, 3)

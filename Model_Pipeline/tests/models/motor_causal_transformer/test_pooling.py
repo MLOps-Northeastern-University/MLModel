@@ -3,8 +3,8 @@ import math
 import pytest
 import torch
 
-from scripts.core.errors import ConfigError, ModelError
-from scripts.models.motor_causal_transformer.pooling import GatedPooling, Pooled, hour_members
+from model_pipeline.core.errors import ConfigError, ModelError
+from model_pipeline.models.motor_causal_transformer.pooling import GatedPooling, Pooled, hour_members
 
 LABELS = ("sleep_now", "state_now", "tremor_now")
 CLASSES = {"sleep_now": 2, "state_now": 7, "tremor_now": 3}

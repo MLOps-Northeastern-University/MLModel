@@ -1,10 +1,10 @@
 import pytest
 
-from scripts.core.errors import GateError
-from scripts.core.tracker import RunStatus
-from scripts.steps.compare_production import CompareProduction, failed_rules, passes
-from scripts.tracking.memory_tracker import MemoryTracker
-from scripts.utils.config import load_config
+from model_pipeline.core.errors import GateError
+from model_pipeline.core.tracker import RunStatus
+from model_pipeline.steps.compare_production import CompareProduction, failed_rules, passes
+from model_pipeline.tracking.memory_tracker import MemoryTracker
+from model_pipeline.utils.config import load_config
 
 
 def test_must_improve_needs_a_higher_score():

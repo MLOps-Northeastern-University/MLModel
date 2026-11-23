@@ -1,46 +1,21 @@
 """The whole run, every real step in order, on the small fake family and data the bias tests use."""
 
-import datetime as dt
 import functools
 import json
-from types import SimpleNamespace
 
 import pytest
 
-from scripts import run_model_pipeline
-from scripts.core.errors import GateError
-from scripts.core.tracker import RunStatus
-from scripts.models import registry
-from scripts.run_model_pipeline import run
-from scripts.steps import bias, train
-from scripts.steps.register import active_version, versions
-from scripts.tracking.memory_tracker import MemoryTracker
-from tests.helpers import make_config
-from tests.steps.fake_models import SPLIT, biased_dataset, pipeline_config
-
-STEPS = ["train", "evaluate", "bias", "explain", "select_model", "compare_production", "export"]
-# The release gate's rules that the fake family can be scored on (it predicts now only).
-RULES = [{"metric": "cv/state_now/off_auc", "must_improve": True},
-         {"metric": "cv/sleep_now/asleep_auc", "must_improve": False}]
-
-
-@pytest.fixture(autouse=True)
-def fake_family(monkeypatch):
-    monkeypatch.setitem(registry.FAMILIES, "fake_hourly", "tests.steps.fake_models:HourlyLogistic")
-
-
-@pytest.fixture(autouse=True)
-def ticking_clock(monkeypatch):
-    """A clock a second further on at each call: train names each saved model by the second, and
-    these tests run the pipeline twice within one."""
-    class Ticking(dt.datetime):
-        calls = 0
-
-        @classmethod
-        def now(cls, tz=None):
-            cls.calls += 1
-            return dt.datetime(2026, 1, 1, tzinfo=tz) + dt.timedelta(seconds=cls.calls)
-    monkeypatch.setattr(train, "dt", SimpleNamespace(datetime=Ticking, timezone=dt.timezone))
+from model_pipeline import run_model_pipeline
+from model_pipeline.core.errors import GateError
+from model_pipeline.core.tracker import RunStatus
+from model_pipeline.run_model_pipeline import run
+from model_pipeline.steps import bias
+from model_pipeline.steps.evaluate import EvaluateModel
+from model_pipeline.steps.register import active_version, versions
+from model_pipeline.steps.tune import TuneModels
+from model_pipeline.tracking.memory_tracker import MemoryTracker
+from tests.pipeline_run import STEP_RUNS as STEPS, fake_family, run_config, ticking_clock  # noqa: F401
+from tests.steps.fake_models import SPLIT, biased_dataset
 
 
 @pytest.fixture(autouse=True)
@@ -56,24 +31,12 @@ def alerts(monkeypatch):
 
 @pytest.fixture
 def cfg(tmp_path):
-    """The full config, with the fake family and small bias and explain settings.
-
-    The fake data is biased on purpose; a gap limit of 1 lets a candidate through, so the run
-    reaches the release (test_a_biased_model_stops_the_run checks the bias gate). Its tremor is
-    noise, so the validation gate checks only the OFF score.
-    """
-    small = pipeline_config(tmp_path / "artifacts", max_recall_gap=1.0)
-    sections = {k: small[k] for k in ("models", "train", "bias", "explain")}
-    config = make_config(tmp_path, evaluation={"bootstrap_resamples": 50}, release_gate={"rules": RULES},
-                         **sections)
-    config["validation_gate"]["min"] = {"cv/state_now/off_auc": 0.5}   # replaced, not merged into
-    config["train"].update(use_tuned=False, charts={"enabled": False})  # nothing tuned here
-    return config
+    return run_config(tmp_path)
 
 
-def run_once(cfg, release=True, tracker=None):
+def run_once(cfg, release=True, tracker=None, **options):
     return run(cfg, tracker or MemoryTracker(), release=release, data=biased_dataset(kind="imbalance"),
-               split=SPLIT)
+               split=SPLIT, **options)
 
 
 def family_dir(cfg):
@@ -99,6 +62,10 @@ def test_the_release_holds_the_chosen_model_its_metrics_and_training_stats(cfg):
     assert 0.5 < metrics["cv/state_now/off_auc"] <= 1
     stats = json.loads((release / "stats.json").read_text(encoding="utf-8"))
     assert stats["participants"] == len(SPLIT.development) and "move_mean" in stats["features"]
+    # The drift reference: the chosen model's P(OFF) bands on its out-of-fold hours.
+    reference = stats["prediction_reference"]
+    assert reference["output"] == "p_off" and len(reference["counts"]) == 10 and len(reference["bands"]) == 11
+    assert sum(reference["counts"]) == reference["hours"] > 0
 
 
 def test_without_release_every_gate_runs_but_nothing_is_registered(cfg):
@@ -118,6 +85,28 @@ def test_a_biased_model_stops_the_run_before_selection(cfg, alerts):
     assert versions(family_dir(cfg)) == []
     assert [r.name for r in tracker.children(tracker.find("model_pipeline").run_id)] == ["train", "evaluate", "bias"]
     assert alerts[0][0] == "[Model pipeline] Bias gate failed"         # P3's own alert, with the gaps
+
+
+def test_the_run_is_tagged_with_its_candidates_and_reason(cfg):
+    tracker = MemoryTracker()
+    run_once(cfg, release=False, tracker=tracker, reason="drift: move_mean")
+    tags = tracker.find("model_pipeline").tags
+    assert tags["candidates"] == ",".join(c["name"] for c in cfg["models"]["candidates"])
+    assert tags["reason"] == "drift: move_mean" and tags["tuned_this_run"] == "false"
+
+
+def test_with_tune_the_run_tunes_first_and_trains_with_tuned_settings(cfg, monkeypatch):
+    tuned_with = []
+    monkeypatch.setattr(TuneModels, "run",
+                        lambda self, data, split: tuned_with.append(self.cfg["train"]["use_tuned"]) or {})
+    cfg["train"]["use_tuned"] = False
+    cfg["tune"]["candidates"] = {}                                     # the fake family has nothing to tune
+    tracker = MemoryTracker()
+    run_once(cfg, release=False, tracker=tracker, tune=True)
+    assert tuned_with == [True]                                        # train reads what tune writes
+    pipeline = tracker.find("model_pipeline")
+    assert pipeline.tags["tuned_this_run"] == "true"
+    assert cfg["train"]["use_tuned"] is False                          # the caller's config is unchanged
 
 
 def test_a_model_no_better_than_production_is_not_exported_or_released(cfg):
@@ -153,10 +142,19 @@ def test_main_exits_0_on_release_and_1_on_a_failed_gate(main_with, alerts):
     assert "cv/state_now/off_auc" in body and "a local run on" in body
 
 
+def test_main_takes_the_candidates_to_train(main_with):
+    assert main_with(["--no-mlflow", "--no-register", "--candidates", "fake_hourly"]) == 0
+
+
+def test_main_refuses_a_candidate_the_config_doesnt_have(main_with):
+    with pytest.raises(SystemExit):                                    # argparse's error, exit code 2
+        main_with(["--no-mlflow", "--candidates", "nope"])
+
+
 def test_a_crash_is_alerted_with_its_stack_trace_and_re_raised(main_with, alerts, monkeypatch):
     def broken(self, candidates):
         raise KeyError("missing column")
-    monkeypatch.setattr(run_model_pipeline.EvaluateModel, "run", broken)
+    monkeypatch.setattr(EvaluateModel, "run", broken)
     with pytest.raises(KeyError):
         main_with(["--no-mlflow"])
     (subject, body), = alerts

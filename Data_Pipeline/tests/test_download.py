@@ -7,7 +7,7 @@ import hashlib
 
 import pytest
 
-from scripts import acquire
+from data_pipeline import acquire
 from tests.helpers import make_config, make_demographics, raw_dir
 
 CONTENT = b"participant zip bytes " * 1000
@@ -192,7 +192,7 @@ def test_listed_participants_already_in_raw_are_used_without_osf(tmp_path):
     for name in ["COPS-1.zip", "COPS-2.zip", "COPS-3.zip"]:
         (folder / name).write_bytes(b"x")
     make_demographics(folder, ["COPS-1", "COPS-2", "COPS-3"])
-    cfg = make_config(tmp_path, data={"participants": ["COPS-3", "COPS-2"]})
+    cfg = make_config(tmp_path, data={"mode": "list", "participants": ["COPS-3", "COPS-2"]})
     manifest = acquire.fetch_manifest(cfg, session=NoNetwork())
     assert [p["name"] for p in manifest["participants"]] == ["COPS-2.zip", "COPS-3.zip"]
     assert manifest["mode"] == "list" and manifest["demographics"]["name"] == "Demographics.csv"
@@ -202,13 +202,22 @@ def test_listed_participants_already_in_raw_are_used_without_osf(tmp_path):
 @pytest.mark.parametrize("participants, files", [
     (["COPS-1", "COPS-2"], ["COPS-1.zip", "Demographics.csv"]),   # a listed zip is missing
     (["COPS-1"], ["COPS-1.zip"]),                                  # Demographics.csv is missing
-    (None, ["COPS-1.zip", "Demographics.csv"]),                    # no list: OSF says who there is
+    ([], ["COPS-1.zip", "Demographics.csv"]),                      # no list: OSF says who there is
 ])
 def test_otherwise_osf_is_listed(tmp_path, participants, files):
     for name in files:
         (raw_dir(tmp_path) / name).write_bytes(b"x")
     cfg = make_config(tmp_path, data={"participants": participants})
-    assert not acquire.have_local_files(cfg)
+    assert not acquire.have_local_files(cfg, "list")
+
+
+def test_zips_in_raw_are_used_without_osf_only_in_list_mode(tmp_path):
+    folder = raw_dir(tmp_path)
+    (folder / "COPS-1.zip").write_bytes(b"x")
+    make_demographics(folder, ["COPS-1"])
+    cfg = make_config(tmp_path, data={"participants": ["COPS-1"]})
+    assert acquire.have_local_files(cfg, "list")
+    assert not acquire.have_local_files(cfg, "full")              # full means everyone OSF has
 
 
 # ---------- safety ----------
@@ -279,14 +288,37 @@ def test_unreachable_osf_raises(cfg):
 
 # ---------- a named list of participants ----------
 
-def test_a_named_list_takes_exactly_those_whatever_the_mode(cfg):
+def test_list_mode_takes_exactly_the_named_participants(cfg):
     cfg["data"]["participants"] = ["COPS-3", "COPS-1"]
-    manifest = acquire.build_manifest(acquire.list_osf_files(cfg, FolderSession()), cfg, "sample")
+    manifest = acquire.build_manifest(acquire.list_osf_files(cfg, FolderSession()), cfg, "list")
     assert [p["name"] for p in manifest["participants"]] == ["COPS-1.zip", "COPS-3.zip"]
     assert manifest["mode"] == "list"
+
+
+def test_the_named_list_is_ignored_in_sample_and_full_mode(cfg):
+    cfg["data"]["participants"] = ["COPS-3"]
+    cfg["data"]["sample_size"] = 2
+    files = acquire.list_osf_files(cfg, FolderSession())
+    sampled = acquire.build_manifest(files, cfg, "sample")["participants"]
+    assert [p["name"] for p in sampled] == ["COPS-2.zip", "COPS-4.zip"]
+    assert len(acquire.build_manifest(files, cfg, "full")["participants"]) == 4
+
+
+@pytest.mark.parametrize("mode", ["sample", "full"])
+def test_excluded_participants_are_never_chosen(cfg, mode):
+    cfg["data"]["exclude"] = ["COPS-2"]                            # the smallest, so sample would take it
+    cfg["data"]["sample_size"] = 2
+    manifest = acquire.build_manifest(acquire.list_osf_files(cfg, FolderSession()), cfg, mode)
+    assert "COPS-2.zip" not in [p["name"] for p in manifest["participants"]]
+
+
+def test_a_participant_both_listed_and_excluded_is_refused(cfg):
+    cfg["data"].update(participants=["COPS-2"], exclude=["COPS-2"])
+    with pytest.raises(acquire.AcquisitionError, match="listed and excluded"):
+        acquire.build_manifest(acquire.list_osf_files(cfg, FolderSession()), cfg, "list")
 
 
 def test_a_named_participant_who_isnt_there_is_reported(cfg):
     cfg["data"]["participants"] = ["COPS-1", "COPS-99"]
     with pytest.raises(acquire.AcquisitionError, match="COPS-99"):
-        acquire.build_manifest(acquire.list_osf_files(cfg, FolderSession()), cfg, "full")
+        acquire.build_manifest(acquire.list_osf_files(cfg, FolderSession()), cfg, "list")

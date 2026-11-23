@@ -5,8 +5,8 @@ import pandas as pd
 import pytest
 import torch
 
-from scripts.core.errors import ConfigError, ModelError, SchemaError
-from scripts.models.motor_causal_transformer.tokens import (
+from model_pipeline.core.errors import ConfigError, ModelError, SchemaError
+from model_pipeline.models.motor_causal_transformer.tokens import (
     EVENT_FIELDS, PATIENT_FIELDS, TokenBuilder, event_fields, mark_check_ins, patient_fields)
 
 F = {name: i for i, name in enumerate(EVENT_FIELDS)}

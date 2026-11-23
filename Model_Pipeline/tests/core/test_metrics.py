@@ -5,9 +5,9 @@ import pytest
 from scipy.stats import spearmanr
 from sklearn.metrics import balanced_accuracy_score, confusion_matrix, f1_score, roc_auc_score
 
-from scripts.core.errors import ConfigError
-from scripts.core.metrics import (auc, auc_within, balanced_accuracy, confusion, label_scores, macro_f1, mae,
-                                  mean_scores, spearman)
+from model_pipeline.core.errors import ConfigError
+from model_pipeline.core.metrics import (auc, auc_within, balanced_accuracy, confusion, label_scores, macro_f1,
+                                         mae, mean_scores, spearman)
 
 
 def test_auc_equals_scikit_learn_including_ties():
@@ -90,7 +90,7 @@ def test_mean_scores_ignores_nan_parts():
 
 
 def test_errors_and_spreads_are_better_lower_and_everything_else_higher():
-    from scripts.core.metrics import higher_is_better
+    from model_pipeline.core.metrics import higher_is_better
     assert higher_is_better("cv/state_now/off_auc_within") and higher_is_better("macro_f1")
     assert not higher_is_better("cv/state_now/score_mae") and not higher_is_better("score_mae_within")
     assert not higher_is_better("cv/state_now/off_auc_fold_sd")

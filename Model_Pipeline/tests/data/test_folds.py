@@ -5,9 +5,9 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from scripts.core.errors import ConfigError, SchemaError
-from scripts.data import folds
-from scripts.data.folds import Split
+from model_pipeline.core.errors import ConfigError, SchemaError
+from model_pipeline.data import folds
+from model_pipeline.data.folds import Split
 from tests.data.test_loaders import write_files
 from tests.helpers import make_config
 
@@ -156,7 +156,7 @@ def test_reading_a_missing_split_says_how_to_make_one(tmp_path):
 
 
 def test_patient_facts_reads_dbs_and_dyskinetic_hours():
-    from scripts.core.data import Dataset, WindowSpec
+    from model_pipeline.core.data import Dataset, WindowSpec
     hours = pd.DataFrame({"participant_id": ["A", "A", "B"], "hour_index": [0, 1, 0]})
     labels = pd.DataFrame({"state_now": [3.0, 5.0, np.nan]})
     patients = pd.DataFrame({"participant_id": ["A", "B"], "more_affected_side": True, "dbs": [True, False]})
@@ -165,7 +165,7 @@ def test_patient_facts_reads_dbs_and_dyskinetic_hours():
 
 
 def test_patient_facts_refuses_dbs_that_isnt_true_or_false():
-    from scripts.core.data import Dataset, WindowSpec
+    from model_pipeline.core.data import Dataset, WindowSpec
     hours = pd.DataFrame({"participant_id": ["A", "B"], "hour_index": [0, 0]})
     labels = pd.DataFrame({"state_now": [3.0, 3.0]})
     for bad in ("no", np.nan, "False"):

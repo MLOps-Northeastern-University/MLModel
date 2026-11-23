@@ -6,7 +6,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from scripts.diary import DiaryError, dosage_columns, parse_diary, reconcile
+from data_pipeline.diary import DiaryError, dosage_columns, parse_diary, reconcile
 from tests.helpers import csv_bytes, default_hours, diary_columns, diary_row, make_config
 
 

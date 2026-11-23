@@ -3,8 +3,8 @@ import math
 import pytest
 import torch
 
-from scripts.core.errors import ConfigError, ModelError
-from scripts.models.motor_causal_transformer.network import PARTS, Batch, MotorNetwork
+from model_pipeline.core.errors import ConfigError, ModelError
+from model_pipeline.models.motor_causal_transformer.network import PARTS, Batch, MotorNetwork
 
 SMALL = {"movement_params": {"hidden_dim": 16, "output_dim": 24}, "d_model": 16, "dropout": 0.0,
          "decoder": {"heads": 2, "history_s": 600.0, "query_block": 16}, "heads": {"hidden": 8}}

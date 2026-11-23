@@ -73,7 +73,7 @@ The datasets use different devices and sampling rates, and none matches our watc
 **Decision:** _TBD_
 **Why:** —
 
-**Not built yet:** `Data_Pipeline/` builds hourly features from the 100 Hz data. The 30 Hz window cache that the model trains on (raw windows plus harnet10 embeddings) is built by a script that isn't in this repo yet. Axes and units for MJFF are still to be checked once we have access.
+**Built (2026-11-15):** the data pipeline cuts the windows itself (`Data_Pipeline/data_pipeline/sensor.py`): 30 Hz, 10 s, one wrist, mean removed, the watch's orientation decided per wear bout, and one wrist mirrored so both read alike; harnet10's features are cached by the model pipeline. The Backend cuts live watch data with the same code (Backend `app/scoring/inputs.py`), so a model scores live data as it was trained. Axes and units for MJFF are still to be checked once we have access.
 
 ## 3. Model approach
 
@@ -133,6 +133,11 @@ _Owner: TBD · Decide by: TBD_
 **Decision:** _TBD_
 **Why:** —
 
+_Decided · Owner: Sam Selvaraj · Date: 2026-11-18_
+
+**Decision:** Airflow, self-hosted in Docker: one Airflow for both pipelines ([`airflow/`](airflow/README.md)), on a training VM that CI makes for each run and that deletes itself after. Each task runs one step in its pipeline's own image, so Airflow never imports either pipeline. CI starts every run (a merge that bumps `Model_Pipeline/config/retrain.yaml`, a run by hand, or a drift retrain), so training is triggered from CI, as the model pipeline's assignment asks.
+**Why:** The course teaches Airflow and the data pipeline's assignment asks for it, and its UI shows every step's status, duration and log, next to MLflow's scores. Composer costs a few hundred dollars a month even idle; a VM that exists only while it trains costs only then.
+
 ## 5. Data versioning
 
 _Owner: TBD · Decide by: TBD_
@@ -144,6 +149,8 @@ _Owner: TBD · Decide by: TBD_
 
 **Decision:** _TBD_
 **Why:** —
+
+**As built (2026-11-18):** DVC with the team's Cloud Storage bucket (`Data_Pipeline/dvc.yaml`); CI opens a PR with each new data version's `dvc.lock`.
 
 ## 6. Experiment tracking and model registry
 
@@ -158,6 +165,8 @@ _Owner: TBD · Decide by: TBD_
 **Decision:** _TBD_
 **Why:** —
 
+**As built (2026-11-18):** MLflow for tracking, hosted on Cloud Run (`infra/mlflow.tf`); the registry is a folder per version in the models bucket, with `active.json` naming the one in use (`Model_Pipeline/model_pipeline/steps/register.py`).
+
 ## 7. Data validation
 
 _Owner: TBD · Decide by: TBD_
@@ -170,6 +179,8 @@ _Owner: TBD · Decide by: TBD_
 
 **Decision:** _TBD_
 **Why:** —
+
+**As built (2026-11-18):** the data pipeline's own checks (`Data_Pipeline/data_pipeline/checks.py`): a contract that stops the run, warnings, and the bias report.
 
 ## 8. Where the model runs (all repos)
 
@@ -185,6 +196,11 @@ Input for this decision: the leading model candidate (section 3) includes harnet
 **Decision:** _TBD_
 **Why:** —
 
+_Decided · Owner: Sam Selvaraj · Date: 2026-11-13, built 2026-11-18_
+
+**Decision:** On the server, in the Backend (Backend `app/scoring/`): each hour, it scores every Parkinson's patient's new hours with the version the registry's `active.json` names, with the model pipeline's own code, and stores the predictions the care portal shows. Any model family fits: the Backend builds the inputs the saved model lists.
+**Why:** MODEL.md, "On the phone", update of 2026-11-13: the model is built and checked in Python, and the server runs that exact code; the transformer's state would be the hard part of a phone export. On CPU, v1 scores an hour of one patient's watch data in about 1.5 s.
+
 ## 9. Drift monitoring
 
 _Owner: TBD · Decide by: TBD_
@@ -197,6 +213,11 @@ _Owner: TBD · Decide by: TBD_
 
 **Decision:** _TBD_
 **Why:** —
+
+_Decided · Owner: Sam Selvaraj · Date: 2026-11-18_
+
+**Decision:** Our own statistics, in the Backend: prediction drift. Each night the Backend compares the P(OFF) the released model gave every worn hour with how often it said each P(OFF) band on its out-of-fold training hours (the bundle's `stats.json` `prediction_reference`), as a PSI. Over 0.25 for 3 nights in a row, with 5+ patients, a report goes to GCS; [`drift.yml`](.github/workflows/drift.yml) opens a GitHub issue, and retrains if nobody closes it within 24 hours (at most once a week). The 7 hourly features' drift is shown, not acted on.
+**Why:** It works for any model family, whatever its inputs, since every model gives P(OFF), and needs no extra service. The 7 hourly features aren't the models' inputs any more, so their drift is only a hint that the watch data changed.
 
 ## 10. CI checks
 

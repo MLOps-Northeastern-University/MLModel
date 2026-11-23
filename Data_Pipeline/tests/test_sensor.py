@@ -4,7 +4,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from scripts import sensor
+from data_pipeline import sensor
 from tests.helpers import make_config
 
 HOUR = 10 * 3600

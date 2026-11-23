@@ -1,0 +1,101 @@
+# One Airflow for both pipelines: Postgres, the scheduler and the web UI, with LocalExecutor.
+# Each task starts a container of its pipeline's image through this machine's Docker (dags/containers.py).
+# Run from the airflow folder:
+#
+#   cp .env.example .env                 # then set HOST_REPO and the rest
+#   docker compose up airflow-init       # first time only: Airflow's database and login
+#   docker compose up -d                 # the UI at http://localhost:8080
+#   docker compose run --rm tests        # the DAG tests
+#
+# The pipeline images must be on this machine first, built or pulled (see README.md).
+
+x-airflow: &airflow
+  build: .
+  # On the training VM, the image CI pushed (AIRFLOW_IMAGE in .env), pulled, never built there.
+  image: ${AIRFLOW_IMAGE:-mednova-airflow}
+  env_file:
+    - path: .env
+      required: false
+  environment:
+    AIRFLOW__CORE__EXECUTOR: LocalExecutor
+    AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@postgres/airflow
+    AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+    # Unpaused, so a run CI or the Backend triggers starts at once.
+    AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: "false"
+    # The REST API, with a user and password. The training VM turns it off (AIRFLOW_API_AUTH in its
+    # .env): it triggers its own DAG with Airflow's command line, so only the login page is reachable.
+    AIRFLOW__API__AUTH_BACKENDS: ${AIRFLOW_API_AUTH:-airflow.api.auth.backend.basic_auth,airflow.api.auth.backend.session}
+    # At most 5 login attempts in 40 seconds from one address, so passwords can't be guessed quickly.
+    AIRFLOW__WEBSERVER__AUTH_RATE_LIMITED: "True"
+    AIRFLOW__WEBSERVER__AUTH_RATE_LIMIT: "5 per 40 second"
+  volumes:
+    # The DAGs from this checkout, so an edit needs no rebuild (the image has the same ones).
+    - ./dags:/opt/airflow/dags
+    - ./tests:/opt/airflow/tests
+    - ./logs:/opt/airflow/logs
+    # This machine's Docker, to start each task's container.
+    - /var/run/docker.sock:/var/run/docker.sock
+  # The group that owns Docker's socket, so Airflow may use it (0 on Docker Desktop;
+  # on Linux: stat -c %g /var/run/docker.sock).
+  group_add:
+    - "${DOCKER_GID:-0}"
+  user: "${AIRFLOW_UID:-50000}:0"
+  depends_on:
+    postgres:
+      condition: service_healthy
+
+services:
+  postgres:
+    image: postgres:13
+    environment:
+      POSTGRES_USER: airflow
+      POSTGRES_PASSWORD: airflow
+      POSTGRES_DB: airflow
+    volumes:
+      - postgres-db:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "airflow"]
+      interval: 10s
+      retries: 5
+    restart: unless-stopped
+
+  airflow-init:
+    <<: *airflow
+    # One folded line: extra indentation would keep the line breaks and split the command.
+    # Only "user already exists" is ignored; a failed migration still fails.
+    command:
+      - bash
+      - -c
+      - >-
+        airflow db migrate &&
+        (airflow users create --username "$${AIRFLOW_ADMIN_USER:-airflow}"
+        --password "$${AIRFLOW_ADMIN_PASSWORD:-airflow}"
+        --firstname Admin --lastname User --role Admin --email admin@example.com || true)
+
+  airflow-webserver:
+    <<: *airflow
+    command: webserver
+    ports:
+      - "8080:8080"
+    restart: unless-stopped
+
+  airflow-scheduler:
+    <<: *airflow
+    command: scheduler
+    restart: unless-stopped
+
+  tests:
+    <<: *airflow
+    profiles: [tools]
+    # Its own throwaway database, so the tests need no Postgres (here or in CI).
+    environment:
+      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: sqlite:////tmp/airflow.db
+      AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+    depends_on: []
+    command:
+      - bash
+      - -c
+      - airflow db migrate > /dev/null && python -m pytest -q -p no:cacheprovider /opt/airflow/tests
+
+volumes:
+  postgres-db:

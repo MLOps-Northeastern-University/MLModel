@@ -6,13 +6,13 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from scripts.core.errors import ConfigError, GateError, SchemaError
-from scripts.models import registry
-from scripts.steps import bias
-from scripts.steps.bias import (CheckBias, check_gaps, group_scores, reweighing_weights, settings,
-                                slice_values)
-from scripts.steps.train import TrainModels
-from scripts.tracking.memory_tracker import MemoryTracker
+from model_pipeline.core.errors import ConfigError, GateError, SchemaError
+from model_pipeline.models import registry
+from model_pipeline.steps import bias
+from model_pipeline.steps.bias import (CheckBias, check_gaps, group_scores, reweighing_weights, settings,
+                                       slice_values)
+from model_pipeline.steps.train import TrainModels
+from model_pipeline.tracking.memory_tracker import MemoryTracker
 from tests.steps.fake_models import SPLIT, biased_dataset, pipeline_config
 
 
@@ -75,7 +75,7 @@ def test_a_missing_slice_value_becomes_its_own_unknown_group():
 
 def frame(y, p_off, people):
     """A state_now predictions frame: P(off) all on slight_akinesia, the rest on good_kinesia."""
-    from scripts.core.targets import STATE_CLASSES
+    from model_pipeline.core.targets import STATE_CLASSES
     out = pd.DataFrame({"participant_id": people, "y_true": y})
     for c in STATE_CLASSES:
         out[c] = 0.0

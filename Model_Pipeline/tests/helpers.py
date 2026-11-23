@@ -9,8 +9,8 @@ file can be tested without it.
 import numpy as np
 import pandas as pd
 
-from scripts.utils.config import load_config
-from scripts.utils.file_io import write_table
+from model_pipeline.utils.config import load_config
+from model_pipeline.utils.file_io import write_table
 
 FEATURE_NAMES = ["move_mean", "move_std", "move_p95", "still_fraction", "tremor_mean", "tremor_p95", "tremor_ratio"]
 QC_NAMES = ["n_samples", "valid_fraction", "n_gaps", "n_clipped", "temp_mean", "photo_mean", "status"]
@@ -62,8 +62,8 @@ def make_dataset(spec, n_participants=2, hours=3, first_hour=8, seed=0):
     Each participant has `hours` diary hours from first_hour, a window every
     spec.seconds through them, one dose at the start and one check-in an hour later.
     """
-    from scripts.core.data import Dataset, Windows
-    from scripts.core.targets import build_labels
+    from model_pipeline.core.data import Dataset, Windows
+    from model_pipeline.core.targets import build_labels
 
     rng = np.random.default_rng(seed)
     participants = [f"COPS-{i + 1}" for i in range(n_participants)]

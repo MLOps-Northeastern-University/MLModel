@@ -1,9 +1,9 @@
 import pytest
 import torch
 
-from scripts.core.errors import ConfigError, ModelError
-from scripts.core.targets import LABEL_NAMES, TARGETS
-from scripts.models.motor_causal_transformer.heads import TARGET_CLASSES, Heads, probabilities
+from model_pipeline.core.errors import ConfigError, ModelError
+from model_pipeline.core.targets import LABEL_NAMES, TARGETS
+from model_pipeline.models.motor_causal_transformer.heads import TARGET_CLASSES, Heads, probabilities
 
 LABELS = ("sleep_now", "state_now", "tremor_now", "sleep_next_hour", "state_next_hour", "tremor_next_hour")
 

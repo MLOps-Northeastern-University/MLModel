@@ -5,9 +5,9 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from scripts.core.targets import get_target
-from scripts.steps.evaluate import EvaluateModel, evaluate_candidate, gate_failures, scored_rows
-from scripts.tracking.memory_tracker import MemoryTracker
+from model_pipeline.core.targets import get_target
+from model_pipeline.steps.evaluate import EvaluateModel, evaluate_candidate, gate_failures, scored_rows
+from model_pipeline.tracking.memory_tracker import MemoryTracker
 from tests.helpers import make_config
 
 PEOPLE = [f"COPS-{i}" for i in range(1, 7)]

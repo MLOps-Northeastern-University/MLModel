@@ -4,9 +4,9 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from scripts.core.data import GROUPS, WindowSpec
-from scripts.core.errors import ConfigError, SchemaError
-from scripts.data.loaders import WindowStore, load_dataset
+from model_pipeline.core.data import GROUPS, WindowSpec
+from model_pipeline.core.errors import ConfigError, SchemaError
+from model_pipeline.data.loaders import WindowStore, load_dataset
 from tests.helpers import FEATURE_NAMES, make_config
 
 SPEC = WindowSpec(version=1, seconds=10, rate_hz=30, axes=3)

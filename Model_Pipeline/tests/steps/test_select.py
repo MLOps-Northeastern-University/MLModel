@@ -1,9 +1,9 @@
 import pytest
 
-from scripts.core.errors import GateError
-from scripts.steps.select import SelectModel, best, eligible
-from scripts.tracking.memory_tracker import MemoryTracker
-from scripts.utils.config import load_config
+from model_pipeline.core.errors import GateError
+from model_pipeline.steps.select import SelectModel, best, eligible
+from model_pipeline.tracking.memory_tracker import MemoryTracker
+from model_pipeline.utils.config import load_config
 
 METRIC = "cv/state_now/off_auc"
 

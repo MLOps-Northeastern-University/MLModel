@@ -6,11 +6,11 @@ import pytest
 import torch
 from torch import nn
 
-from scripts.core.data import Dataset, Windows, WindowSpec
-from scripts.core.errors import ConfigError, ModelError
-from scripts.core.model import Predictions
-from scripts.models.motor_causal_transformer import harnet as harnet_module
-from scripts.models.motor_causal_transformer.model import MotorCausalTransformer
+from model_pipeline.core.data import Dataset, Windows, WindowSpec
+from model_pipeline.core.errors import ConfigError, ModelError
+from model_pipeline.core.model import Predictions
+from model_pipeline.models.motor_causal_transformer import harnet as harnet_module
+from model_pipeline.models.motor_causal_transformer.model import MotorCausalTransformer
 
 H = 3600
 SPEC = WindowSpec(version=1, seconds=10, rate_hz=30, axes=3)
@@ -200,7 +200,7 @@ def test_refuses_a_spec_harnet10_cant_read():
 
 
 def test_a_cache_that_cant_be_written_costs_the_speed_up_not_the_fit(tmp_path, monkeypatch):
-    from scripts.models.motor_causal_transformer import pretrained_cache
+    from model_pipeline.models.motor_causal_transformer import pretrained_cache
 
     def full_disk(*args, **kwargs):
         raise OSError("no space left on device")

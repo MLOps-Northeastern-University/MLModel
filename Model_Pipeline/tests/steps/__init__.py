@@ -1,1 +1,1 @@
-"""Tests for scripts/steps: one test_<step>.py per step."""
+"""Tests for model_pipeline/steps: one test_<step>.py per step."""

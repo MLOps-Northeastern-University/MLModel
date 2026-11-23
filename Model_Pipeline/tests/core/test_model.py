@@ -4,11 +4,11 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from scripts.core.data import WindowSpec
-from scripts.core.errors import ConfigError, ModelError, NotFittedError, SchemaError
-from scripts.core.model import FORMAT_VERSION, MANIFEST, Model, Predictions, WindowPredictions
-from scripts.core.targets import get_target, parse_label
-from scripts.utils.file_io import read_json, write_json
+from model_pipeline.core.data import WindowSpec
+from model_pipeline.core.errors import ConfigError, ModelError, NotFittedError, SchemaError
+from model_pipeline.core.model import FORMAT_VERSION, MANIFEST, Model, Predictions, WindowPredictions
+from model_pipeline.core.targets import get_target, parse_label
+from model_pipeline.utils.file_io import read_json, write_json
 from tests.helpers import make_dataset
 
 SPEC = WindowSpec(version=1, seconds=10, rate_hz=30, axes=3)
@@ -427,7 +427,7 @@ def test_a_family_cant_override_the_checked_lifecycle_or_repeat_a_target():
 
 
 def test_hour_index_must_be_whole_numbers():
-    from scripts.core.data import Dataset
+    from model_pipeline.core.data import Dataset
     for bad in ([0, np.nan], [0, 1.5]):
         with pytest.raises(SchemaError, match="whole number"):
             Dataset(SPEC, pd.DataFrame({"participant_id": ["A", "A"], "hour_index": bad}),

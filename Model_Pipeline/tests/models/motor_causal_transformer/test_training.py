@@ -6,12 +6,12 @@ import pandas as pd
 import pytest
 import torch
 
-from scripts.core.data import Dataset, Windows, WindowSpec
-from scripts.core.errors import ConfigError
-from scripts.models.motor_causal_transformer.data import prepare
-from scripts.models.motor_causal_transformer.network import MotorNetwork
-from scripts.models.motor_causal_transformer.pretraining import MovementForecast
-from scripts.models.motor_causal_transformer.training import (
+from model_pipeline.core.data import Dataset, Windows, WindowSpec
+from model_pipeline.core.errors import ConfigError
+from model_pipeline.models.motor_causal_transformer.data import prepare
+from model_pipeline.models.motor_causal_transformer.network import MotorNetwork
+from model_pipeline.models.motor_causal_transformer.pretraining import MovementForecast
+from model_pipeline.models.motor_causal_transformer.training import (
     DiarySettings, PretrainSettings, class_counts, prefetch, pretrain, score_hours, train_diary, within_scores)
 
 H = 3600

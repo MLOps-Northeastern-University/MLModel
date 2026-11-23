@@ -42,7 +42,7 @@ What the model has to produce for the dashboard, the data and inputs it can use,
 |---|---|
 | Orchestration | Airflow 2.10 in Docker (`Data_Pipeline/docker-compose.yaml`) |
 | Data versioning | DVC (`Data_Pipeline/dvc.yaml`, `dvc.lock`) |
-| Data checks and anomalies | Our own checks with pandas against the model's data contract (`Data_Pipeline/scripts/checks.py`) |
+| Data checks and anomalies | Our own checks with pandas against the model's data contract (`Data_Pipeline/data_pipeline/checks.py`) |
 | Bias slicing | Fairlearn |
 | Tests and style | pytest (coverage floor 85%), flake8 |
 
@@ -55,11 +55,11 @@ docker compose run --rm tests       # the tests (the first run builds the image)
 docker compose run --rm pipeline    # the pipeline on 5 participants, 1.08 GB download
 ```
 
-On Linux, run `mkdir -p logs/airflow && echo "AIRFLOW_UID=$(id -u)" > .env` once first, so the containers can write to the folder. To run it in Airflow, or without Docker on Python 3.11 or 3.12, see the [quick start in Data_Pipeline/README.md](Data_Pipeline/README.md#quick-start-only-docker-needed).
+To run it without Docker, on Python 3.12, see the [quick start in Data_Pipeline/README.md](Data_Pipeline/README.md#quick-start-only-docker-needed). Both pipelines also run as DAGs on one Airflow, in [airflow/](airflow/README.md).
 
 ## Running tests
 
-From `Data_Pipeline/`: `docker compose run --rm tests`, or `pytest -v` with Python 3.11 or 3.12 (which skips the Airflow DAG tests). The tests use small synthetic files, so they download nothing.
+From `Data_Pipeline/` or `Model_Pipeline/`: `docker compose run --rm tests`, or `pytest -v` with Python 3.12. The DAGs' tests run in the Airflow image: `docker compose run --rm tests` in `airflow/`. The tests use small synthetic files, so they download nothing.
 
 ## Data rules
 
@@ -75,10 +75,11 @@ Every PR and every push to `dev` or `main` runs [.github/workflows/checks.yml](.
 | Secret scan | Fails if a key, token or password is committed (gitleaks) |
 | Data file guard | Fails on data or model files (`.csv`, `.h5`, `.pt` and similar) or any file over 5 MB. Small synthetic test data may go in `tests/fixtures/`. |
 | Markdown lint | Fails on broken Markdown. Rules are relaxed; see `.markdownlint-cli2.yaml`. |
-| Data pipeline tests | flake8, pytest with an 85% coverage floor, and `dvc dag`, on Python 3.11 |
-| Model pipeline tests | flake8 and pytest on Python 3.11. The coverage floor is 0 while the steps are being built, and goes up to 85. |
+| Data pipeline tests | flake8, pytest with an 85% coverage floor, and `dvc dag`, on Python 3.12 |
+| Model pipeline tests | flake8 and pytest on Python 3.12. The coverage floor is 0 while the steps are being built, and goes up to 85. |
+| Airflow DAGs | both DAGs load, connect in order and run each step in its pipeline's image, in the Airflow image |
 
-A second workflow, [.github/workflows/model.yml](.github/workflows/model.yml), runs the model pipeline itself in the team's GCP project and emails the team when it fails and when training finishes. It runs by hand for now: the full training needs a GPU, which GitHub's runners don't have, so the real run was made on a GCP GPU machine with the same command. How it works, how it maps to the assignment's CI/CD section, its settings, and how to open the hosted MLflow: [Model_Pipeline/README.md, "Running in the cloud"](Model_Pipeline/README.md#running-in-the-cloud).
+A second workflow, [.github/workflows/model.yml](.github/workflows/model.yml), trains the model on a VM made for the run: a T4 or L4 GPU machine, or a CPU one, in the first zone GCP has free. It runs when a merge into `main` bumps `Model_Pipeline/config/retrain.yaml`'s `request`, or by hand (Actions → Model → Run workflow), runs the model DAG in Airflow on the VM, logs to the hosted MLflow, and emails the team the result. How it works, its settings, and how it maps to the assignment's CI/CD section: [Model_Pipeline/README.md, "Running in the cloud"](Model_Pipeline/README.md#running-in-the-cloud).
 
 Dependabot opens PRs to keep the workflow's actions up to date.
 
@@ -101,6 +102,8 @@ Newest first. One row per milestone, not per small change.
 
 | Date | Who | What changed | PR |
 |---|---|---|---|
+| 2026-11-22 | Shaikh Basim | The Backend's deploy, first part, as Terraform in `infra/` (applied): the Cloud Scheduler, Logging and Monitoring APIs; the Backend's database and user on `mednova-db`, with `DATABASE_URL` and `SECRET_KEY` in Secret Manager (`backend.tf`); and the two accounts it runs as, `backend-api` for the public API and `backend-scoring` for the scoring jobs, each with only what it uses (the jobs reach `harnet10/` and `drift/` in the training-data bucket, not the licensed data) | (this PR) |
+| 2026-11-18 | Sam Selvaraj | Training as a production loop: one Airflow for both pipelines (`airflow/`), each step in its pipeline's image, on a training VM CI makes per run (a T4, else an L4, or an e2 for CPU, in the first zone GCP has free) and that deletes itself; `retrain.yaml` decides what trains on a merge; `--candidates` and `--tune`; every model step runnable on its own; CI opens a PR for each new data version, and turns the Backend's drift reports into issues that retrain if left open 24 h. Terraform for the VMs (`infra/compute/`) and their access. The packages renamed `data_pipeline` and `model_pipeline`, Python 3.12, and sample mode no longer downloads every participant | (this PR) |
 | 2026-11-15 | Sam Selvaraj | First full run on real data: the 66-patient split (10 test, 6 demo, 50 development), the data pipeline through Airflow on 60 participants with the data and split under DVC, then tuning and the whole model pipeline on a GCP GPU machine, logged to the hosted MLflow. Model pipeline (P2): each patient compared with their own past week (within-patient OFF from chance to about 0.64), early stopping by OFF, charts per run, and leakage and bias gates that judge what they should. Docs updated with the results and what was tested | #22 |
 | 2026-11-15 | Ayush Varma | Model pipeline (P4): the registry in the models bucket (`MODEL_REGISTRY` in CI), a `status` and `rollback` command, and the release gate skips a metric neither model has | (this PR) |
 | 2026-11-15 | Ayush Varma | Model pipeline (P4): export for the server (the saved model folder, manifest, metrics, stats and bias report; harnet10 not bundled), optional device export off by default, and select no longer needs `exportable` | (this PR) |

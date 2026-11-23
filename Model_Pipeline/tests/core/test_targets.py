@@ -4,8 +4,8 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from scripts.core.errors import ConfigError, SchemaError
-from scripts.core.targets import (
+from model_pipeline.core.errors import ConfigError, SchemaError
+from model_pipeline.core.targets import (
     ASLEEP, AWAKE, KINESIA_SCORES, LABEL_NAMES, SLEEP_CLASSES, STATE_CLASSES, STATE_GROUPS, TARGETS,
     TREMOR_CLASSES, TREMOR_SCORES, at_horizon, build_labels, get_target, label_name)
 

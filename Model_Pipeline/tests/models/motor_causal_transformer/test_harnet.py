@@ -7,10 +7,10 @@ import pytest
 import torch
 from torch import nn
 
-from scripts.core.data import Windows, WindowSpec
-from scripts.core.errors import ConfigError, ModelError
-from scripts.models.motor_causal_transformer import harnet as harnet_module
-from scripts.models.motor_causal_transformer.harnet import FeatureCache, Harnet10, check_spec, windows_key
+from model_pipeline.core.data import Windows, WindowSpec
+from model_pipeline.core.errors import ConfigError, ModelError
+from model_pipeline.models.motor_causal_transformer import harnet as harnet_module
+from model_pipeline.models.motor_causal_transformer.harnet import FeatureCache, Harnet10, check_spec, windows_key
 
 
 class Fake(nn.Module):
