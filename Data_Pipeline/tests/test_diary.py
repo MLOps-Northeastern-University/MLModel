@@ -16,17 +16,20 @@ def cfg(tmp_path):
 
 
 def raw(rows, dose_columns=1):
+    """Rows as a raw diary: through a semicolon CSV and back, so empty cells are NaN, as in a real one."""
     return pd.read_csv(io.BytesIO(csv_bytes(pd.DataFrame(rows, columns=diary_columns(dose_columns)))), sep=";")
 
 
 @pytest.fixture
 def hours(cfg):
+    """default_hours' diary, parsed: (the hours table, the label issues)."""
     return parse_diary(raw([r for r, _ in default_hours("COPS-1")]), cfg)
 
 
 def test_every_hour_is_kept(hours):
     table, _ = hours
     assert len(table) == 7
+    # Rows 4 and 5, Sleep and No Data, have no score but are still there.
     assert table["kinesia_text"].tolist()[4:6] == ["Sleep", "No Data"]
 
 
@@ -45,6 +48,7 @@ def test_sleep_and_no_data_have_no_score(hours):
 
 def test_a_score_without_a_label_is_reported(hours):
     issues = pd.DataFrame(hours[1])
+    # Only the No Data hour with a score is reported; the Sleep hour, with no score, isn't an issue.
     assert set(zip(issues["field"], issues["issue"])) == {("kinesia", "score_without_label")}
 
 
@@ -53,6 +57,7 @@ def test_reconcile_trusts_the_text():
     assert reconcile("Slight Akinesia", -1, mapping) == (-1, None)
     assert reconcile("Slight Akinesia", 2, mapping) == (-1, "score_text_mismatch")
     assert reconcile("Slight Akinesia", np.nan, mapping) == (-1, "score_missing")
+    # Sleep isn't in the mapping, and with no score there's nothing to report.
     assert reconcile("Sleep", np.nan, mapping)[1] is None
 
 
@@ -65,6 +70,8 @@ def test_text_is_stripped(cfg):
 def test_every_dosage_layout_is_read(cfg, dose_columns):
     rows = [r for r, _ in default_hours("COPS-1", dose_columns)]
     table, _ = parse_diary(raw(rows, dose_columns), cfg)
+    # One column holds the single 100. With 2 or 4 columns the two drugs' doses are joined, and the empty
+    # columns are skipped.
     assert table["dosage_mg"][0] == ("100" if dose_columns == 1 else "50;50")
 
 
@@ -82,6 +89,7 @@ def test_bad_diaries_are_refused(cfg):
         parse_diary(pd.DataFrame({"ID": ["COPS-1"]}), cfg)
     with pytest.raises(DiaryError, match="no rows"):
         parse_diary(raw([]), cfg)
+    # A Day with no number is caught after every row is read, as one DiaryError rather than a crash.
     bad = diary_row("COPS-1", 0, 3, "Good Kinesia", 0)
     bad["Day"] = "unknown"
     with pytest.raises(DiaryError, match="isn't a number"):

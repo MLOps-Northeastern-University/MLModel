@@ -21,6 +21,8 @@ from tests.steps.fake_models import SPLIT, biased_dataset
 @pytest.fixture(autouse=True)
 def alerts(monkeypatch):
     """Records alerts instead of sending them, whatever the machine's .env holds."""
+    # Both modules import notify by name, so each one's copy is replaced: patching alerts.notify alone
+    # wouldn't reach them. Without GITHUB_RUN_ID, where() names this machine, even when CI runs the tests.
     sent = []
     record = lambda subject, body, cfg=None: sent.append((subject, body))   # noqa: E731
     monkeypatch.setattr(run_model_pipeline, "notify", record)
@@ -35,11 +37,13 @@ def cfg(tmp_path):
 
 
 def run_once(cfg, release=True, tracker=None, **options):
+    """One whole run on the biased fake data and the fixed split. Returns the released version, or None."""
     return run(cfg, tracker or MemoryTracker(), release=release, data=biased_dataset(kind="imbalance"),
                split=SPLIT, **options)
 
 
 def family_dir(cfg):
+    """The registry folder of the family the run releases: registry_dir/<export.family>."""
     return cfg["resolved_paths"]["registry_dir"] / cfg["export"]["family"]
 
 
@@ -84,6 +88,8 @@ def test_a_biased_model_stops_the_run_before_selection(cfg, alerts):
         run_once(cfg, tracker=tracker)
     assert versions(family_dir(cfg)) == []
     assert [r.name for r in tracker.children(tracker.find("model_pipeline").run_id)] == ["train", "evaluate", "bias"]
+    # run() itself sends no alert (main does), so the first alert is the one bias sends for a failing
+    # candidate, under its own prefix.
     assert alerts[0][0] == "[Model pipeline] Bias gate failed"         # P3's own alert, with the gaps
 
 
@@ -97,6 +103,7 @@ def test_the_run_is_tagged_with_its_candidates_and_reason(cfg):
 
 def test_with_tune_the_run_tunes_first_and_trains_with_tuned_settings(cfg, monkeypatch):
     tuned_with = []
+    # The fake tune only records whether the config it was given trains with tuned settings.
     monkeypatch.setattr(TuneModels, "run",
                         lambda self, data, split: tuned_with.append(self.cfg["train"]["use_tuned"]) or {})
     cfg["train"]["use_tuned"] = False
@@ -111,6 +118,8 @@ def test_with_tune_the_run_tunes_first_and_trains_with_tuned_settings(cfg, monke
 
 def test_a_model_no_better_than_production_is_not_exported_or_released(cfg):
     run_once(cfg)
+    # The second run trains the same model on the same data and seeds, so its OFF AUC only equals v1's, and
+    # the release gate needs it to improve. Export never runs, so nothing is packaged either.
     tracker = MemoryTracker()
     with pytest.raises(GateError, match="production gate failed"):
         run_once(cfg, tracker=tracker)
@@ -125,6 +134,8 @@ def test_a_model_no_better_than_production_is_not_exported_or_released(cfg):
 @pytest.fixture
 def main_with(cfg, monkeypatch):
     """main(), with the small config, data and split."""
+    # main never passes data or a split, so run is wrapped to add the small ones; load_config hands back the
+    # same small config on every call.
     monkeypatch.setattr(run_model_pipeline, "load_config", lambda path=None: cfg)
     monkeypatch.setattr(run_model_pipeline, "run", functools.partial(
         run, data=biased_dataset(kind="imbalance"), split=SPLIT))
@@ -132,6 +143,7 @@ def main_with(cfg, monkeypatch):
 
 
 def test_main_exits_0_on_release_and_1_on_a_failed_gate(main_with, alerts):
+    # Three runs on one registry: a check-only run, the release of v1, then a run that can't beat v1.
     assert main_with(["--no-mlflow", "--no-register"]) == 0
     assert main_with(["--no-mlflow"]) == 0
     assert main_with(["--no-mlflow"]) == 1
@@ -155,6 +167,8 @@ def test_a_crash_is_alerted_with_its_stack_trace_and_re_raised(main_with, alerts
     def broken(self, candidates):
         raise KeyError("missing column")
     monkeypatch.setattr(EvaluateModel, "run", broken)
+    # A KeyError isn't a PipelineError, so main alerts with the stack trace and re-raises it instead of
+    # returning 1.
     with pytest.raises(KeyError):
         main_with(["--no-mlflow"])
     (subject, body), = alerts

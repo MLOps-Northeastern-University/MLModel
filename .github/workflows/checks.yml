@@ -1,5 +1,7 @@
 name: Checks
 
+# Every PR, and every push to dev or main (the merge itself), runs all six jobs at once. None
+# of them touches GCP, so there's no id-token permission and no secret here.
 on:
   pull_request:
   push:
@@ -14,6 +16,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+        # The whole history, so gitleaks scans every commit: a key deleted in a later commit is still
+        # in Git. A known false positive goes in .gitleaksignore at the repo's root.
         with:
           fetch-depth: 0
       # The gitleaks GitHub Action needs a paid license for organization repos, so run the CLI directly.
@@ -27,6 +31,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+      # Every file Git tracks (git ls-files), not only the PR's changes, so a file that got in earlier
+      # still fails. The COPS data and anything made from it belong in DVC, never in this public repo.
       - name: Block data, model and large files
         run: |
           max_bytes=$((5 * 1024 * 1024))
@@ -78,6 +84,8 @@ jobs:
       # Fails if coverage of data_pipeline/ drops below 85%.
       - name: Unit tests, with a coverage floor
         run: pytest -q --cov=data_pipeline --cov-branch --cov-report=term-missing:skip-covered --cov-fail-under=85
+      # dvc dag only parses dvc.yaml and prints the stages in order: a broken stage or dependency
+      # fails here, with no data pulled and no GCP access.
       - name: DVC reads the pipeline
         run: dvc dag
 
@@ -139,5 +147,7 @@ jobs:
       - uses: actions/setup-node@v7
         with:
           node-version: 20
+      # A pinned version, so a new release's rules can't fail an unchanged PR. The rules are in
+      # .markdownlint-cli2.yaml at the repo's root.
       - name: Run markdownlint
         run: npx --yes markdownlint-cli2@0.14.0 "**/*.md"

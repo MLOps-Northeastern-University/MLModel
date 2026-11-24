@@ -8,11 +8,15 @@
 # Airflow, which runs the same steps as a DAG, is in ../airflow/.
 
 x-tool: &tool
+  # Both services build the same image from this folder's Dockerfile and are run once each with
+  # `docker compose run --rm`. There are no profiles, so a plain `docker compose up` starts both.
   build: .
   # Optional: copy .env.example to .env to turn on email/Slack alerts.
   env_file:
     - path: .env
       required: false
+  # The whole repository: DVC needs Git, whose .git folder is at the repository's root, and the
+  # image's own copy of the code is hidden under the mount.
   volumes:
     - ..:/app
   working_dir: /app/Data_Pipeline
@@ -20,6 +24,7 @@ x-tool: &tool
 services:
   tests:
     <<: *tool
+    # -p no:cacheprovider: pytest writes no .pytest_cache into the mounted checkout.
     command: ["python", "-m", "pytest", "-q", "-p", "no:cacheprovider"]
 
   pipeline:

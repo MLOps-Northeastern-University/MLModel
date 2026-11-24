@@ -14,6 +14,7 @@ from model_pipeline.tracking.memory_tracker import MemoryTracker
 from tests.steps.fake_models import SPLIT, biased_dataset
 from tests.pipeline_run import STEP_RUNS, fake_family, run_config, ticking_clock  # noqa: F401
 
+# Every step in pipeline_steps.STEPS but tune, in order: these runs don't tune.
 ALL_STEPS = ["train", "evaluate", "bias", "explain", "select", "compare", "export", "register"]
 
 
@@ -27,6 +28,8 @@ def alerts(monkeypatch):
     """Records alerts instead of sending them."""
     sent = []
     record = lambda subject, body, cfg=None: sent.append(subject)   # noqa: E731
+    # run_step imports notify for finish's release alert, and alert_failure uses run_model_pipeline's, so
+    # both are replaced, along with the one bias imports.
     for module in (run_model_pipeline, run_step, bias):
         monkeypatch.setattr(module, "notify", record)
     monkeypatch.delenv("GITHUB_RUN_ID", raising=False)
@@ -39,6 +42,8 @@ def command(cfg, monkeypatch):
     (in a real run each command is a new process, and MLflow joins them by the run id in run.json)."""
     data = biased_dataset(kind="imbalance")
     monkeypatch.setattr(run_step, "load_config", lambda path=None: cfg)
+    # start reads the split itself, for the run's tags. A real step reads the data and split from the config's
+    # paths, and run_step calls it with (cfg, tracker) only, so each one is wrapped to add the small ones.
     monkeypatch.setattr(run_step, "read_split", lambda cfg: SPLIT)
     monkeypatch.setattr(run_step, "STEPS", {name: (functools.partial(function, data=data, split=SPLIT), owner)
                                             for name, (function, owner) in pipeline_steps.STEPS.items()})
@@ -69,6 +74,7 @@ def test_the_steps_one_by_one_release_v1_under_one_mlflow_run(command, cfg, aler
     pipeline = tracker.find("model_pipeline")
     assert pipeline.status == RunStatus.FINISHED
     assert [r.name for r in tracker.children(pipeline.run_id)] == STEP_RUNS + ["register"]   # as the whole run
+    # run.json is how the commands share the run: start wrote the MLflow run id, register the version.
     run = json.loads((cfg["resolved_paths"]["artifacts_dir"] / "run.json").read_text(encoding="utf-8"))
     assert run["released_version"] == 1 and run["mlflow_run_id"] == pipeline.run_id
     assert alerts[-1] == "[MedNOVA model] parkinsons-risk v1 released"
@@ -85,6 +91,8 @@ def test_evaluate_saves_the_validation_gate_for_the_steps_after_it(command, cfg)
 def test_a_failed_gate_fails_its_step_and_the_run(command, cfg, alerts):
     cfg["bias"]["max_recall_gap"] = 0.01
     codes = run_all(command)
+    # bias exits 1 and run_all stops there, as Airflow skips the tasks after a failed one; finish then closes
+    # the run FAILED.
     assert codes["bias"] == 1 and "[Model pipeline] Bias gate failed" in alerts
     assert command.tracker.find("model_pipeline").status == RunStatus.FAILED
 
@@ -96,6 +104,7 @@ def test_a_run_started_with_no_register_releases_nothing(command, cfg, alerts):
 
 
 def test_a_step_before_start_is_refused(command):
+    # No run.json yet, so the step has no run to log under and exits 1 without running.
     assert command(["evaluate"]) == 1
 
 
@@ -107,6 +116,8 @@ def test_a_failed_start_leaves_no_run_for_finish_to_close(command, cfg, monkeypa
     run_all(command)                                            # an earlier run, finished
     earlier = command.tracker.find("model_pipeline").run_id
 
+    # start removes the earlier run.json before it reads the split, so when the split can't be read, finish
+    # finds nothing to close and the earlier run keeps its FINISHED status.
     def no_split(cfg):
         raise run_step.PipelineError("no patient split")
     monkeypatch.setattr(run_step, "read_split", no_split)

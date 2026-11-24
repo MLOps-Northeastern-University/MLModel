@@ -2,4 +2,7 @@
 *.tfstate*
 # Downloaded providers, recreated by `terraform init`.
 .terraform/
+# What Terraform writes if it crashes, for a bug report; never needed in Git.
 crash.log
+# .terraform.lock.hcl isn't ignored, on purpose: it's committed so every teammate and every plan
+# uses the same provider builds.

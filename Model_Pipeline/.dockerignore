@@ -1,5 +1,9 @@
 # Keep run outputs, secrets and local environments out of the image.
+# The Dockerfile's `COPY . .` takes everything not listed here. .env most of all: an image
+# pushed to Artifact Registry would carry the SMTP password with it.
 .env
+# Run outputs: per-patient predictions, harnet10's feature cache and bundles, which would make
+# the image large and put patient data in it. Airflow mounts artifacts/ at run time instead.
 artifacts/
 mlruns/
 mlartifacts/

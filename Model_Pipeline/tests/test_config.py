@@ -10,11 +10,15 @@ PHONE_INPUTS = ["move_mean", "move_std", "move_p95", "still_fraction", "tremor_m
 
 
 def test_the_model_inputs_are_the_phones_in_the_same_order(tmp_path):
+    # The order is compared as well as the names, so a reordered list in model.yaml fails here rather than
+    # pairing the phone's values with the wrong features.
     cfg = make_config(tmp_path)
     assert cfg["data"]["features"] == PHONE_INPUTS == FEATURE_NAMES
 
 
 def test_output_folders_are_made_but_the_input_table_is_only_read(tmp_path):
+    # features_csv names a file that doesn't exist, as before dvc pull: loading must neither fail nor create
+    # it, while the output folders are made.
     cfg = make_config(tmp_path, features_csv=tmp_path / "not_pulled_yet.csv")
     assert cfg["resolved_paths"]["artifacts_dir"] == tmp_path / "artifacts"
     assert cfg["resolved_paths"]["artifacts_dir"].is_dir()
@@ -24,6 +28,7 @@ def test_output_folders_are_made_but_the_input_table_is_only_read(tmp_path):
 def test_overrides_change_only_what_they_name(tmp_path):
     cfg = make_config(tmp_path, bias={"max_recall_gap": 0.2})
     assert cfg["bias"]["max_recall_gap"] == 0.2
+    # min_slice_rows is model.yaml's: an override merges into its section instead of replacing it.
     assert cfg["bias"]["min_slice_rows"] == 20
 
 
@@ -35,6 +40,7 @@ def test_a_missing_config_file_is_reported(tmp_path):
 # ---- choosing the candidates a run trains ----------------------------------------------------
 
 def names(cfg):
+    """The names of the candidates the config trains, in order."""
     return [c["name"] for c in cfg["models"]["candidates"]]
 
 
@@ -48,6 +54,8 @@ def test_choosing_candidates_keeps_only_those_in_config_order(tmp_path):
 
 def test_the_leakage_check_runs_on_a_chosen_candidate(tmp_path):
     cfg = make_config(tmp_path)
+    # model.yaml runs the check on window_boosting. A run that trains it keeps that; a run that doesn't moves
+    # the check to the first candidate it does train.
     assert cfg["train"]["leakage_check"]["candidates"] == ["window_boosting"]
     kept = choose_candidates(cfg, ["window_boosting", "window_logistic"])
     assert kept["train"]["leakage_check"]["candidates"] == ["window_boosting"]
@@ -60,6 +68,7 @@ def test_a_leakage_check_turned_off_stays_off(tmp_path):
     assert choose_candidates(cfg, ["window_logistic"])["train"]["leakage_check"]["candidates"] == []
 
 
+# Unknown names are checked before the count, so ["nope"] gets the "unknown candidate" message.
 @pytest.mark.parametrize("chosen, match", [
     (["nope"], "unknown candidate"),
     ([], "once"),

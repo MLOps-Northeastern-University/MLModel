@@ -60,6 +60,8 @@ from model_pipeline.utils.logging_setup import configure_logging, get_logger, lo
 logger = get_logger("run_model_pipeline")
 
 # Starts every alert's subject, to filter them in the inbox.
+# run_step.py imports ALERT_PREFIX, alert_failure, where, run_tags and with_tuning from this module, so a
+# run made of Airflow tasks sends the same alerts and tags its MLflow run the same way as a whole run.
 ALERT_PREFIX = "[MedNOVA model]"
 
 
@@ -81,13 +83,22 @@ def run(cfg, tracker, release=True, data=None, split=None, tune=False, reason=No
     Raises:
         PipelineError: A step couldn't go on, such as a failed gate (GateError).
     """
+    # Tuning has to change the config before any step sees it: train reads train.use_tuned to decide whether
+    # to use what tune writes to artifacts/tuned_params.json. with_tuning works on a copy, so the config the
+    # caller passed in is left as it was.
     if tune:
         cfg = with_tuning(cfg)
+    # The split is read once and handed to every step, so the split_hash tag and every step's folds come from
+    # the same file. data stays None in a real run, and each step loads the data it needs from the config's paths.
     split = split or read_split(cfg)
     results = {}
+    # Each step opens its own tracker run inside this one, so MLflow shows one model_pipeline run with a child
+    # per step. A step that raises ends this run FAILED, and the error goes on to the caller (main alerts).
     with tracker.run("model_pipeline", tags=run_tags(cfg, split, tune, reason)):
         for name in steps_for(tune=tune, release=release):
             step, owner = STEPS[name]
+            # log_step logs the step's start, end and duration, with the owner on every line in between, and a failure
+            # with its stack trace, so the logs show which step stopped a run and whose code it was.
             with log_step(logger, name, owner=owner):
                 results[name] = step(cfg, tracker, data, split)
     if not release:
@@ -115,6 +126,8 @@ def run_tags(cfg, split, tune, reason):
 
 def where():
     """Where the run happened, for alerts: the GitHub Actions run's page, or this machine."""
+    # GitHub Actions sets GITHUB_RUN_ID, GITHUB_SERVER_URL and GITHUB_REPOSITORY in every job, which is
+    # enough to link straight to the run's page. Anywhere else the alert names the machine instead.
     run_id = os.environ.get("GITHUB_RUN_ID")
     if run_id:
         return (f"{os.environ.get('GITHUB_SERVER_URL', 'https://github.com')}/"
@@ -124,6 +137,9 @@ def where():
 
 def alert_failure(cfg, exc):
     """Tell the team the run stopped, and why."""
+    # GateError is checked first because it is also a PipelineError. A gate, or any other PipelineError, is a
+    # stop the pipeline makes on purpose and its message says why; anything else is a bug, so the body gets
+    # the stack trace too.
     if isinstance(exc, GateError):
         subject = f"{ALERT_PREFIX} The {exc.gate} gate failed"
     elif isinstance(exc, PipelineError):
@@ -137,6 +153,19 @@ def alert_failure(cfg, exc):
 
 
 def main(argv=None):
+    """Parse the command line, run the pipeline, and alert the team with the outcome.
+
+    Args:
+        argv: The arguments, without the program name. Defaults to sys.argv[1:].
+
+    Returns:
+        int: 0 when every step passed, whether or not a version was released, and 1 when a step
+        stopped the run with a PipelineError (a failed gate, a missing input).
+
+    Raises:
+        SystemExit: Bad arguments, such as a candidate the config doesn't have (argparse's exit code 2).
+        Exception: Any error that isn't a PipelineError, after alerting, so CI shows its traceback.
+    """
     parser = argparse.ArgumentParser(description="Parkinson's risk model pipeline")
     parser.add_argument("--config", default=None, help="Path to a config YAML")
     parser.add_argument("--no-mlflow", action="store_true",
@@ -151,6 +180,8 @@ def main(argv=None):
     args = parser.parse_args(argv)
 
     cfg = load_config(args.config)
+    # A candidate name the config doesn't have is reported as a usage error (exit code 2) before MLflow or
+    # any step starts, so a typo in --candidates costs nothing.
     if args.candidates:
         try:
             cfg = choose_candidates(cfg, args.candidates)
@@ -160,6 +191,9 @@ def main(argv=None):
     # One id per run, on every log line, to find a run's lines in Cloud Logging.
     with log_context(run_id=uuid.uuid4().hex[:12]):
         log_run_start(logger, cfg)
+        # Building the tracker is inside the try too, so failing to reach MLflow is alerted like any other error.
+        # A PipelineError is an expected stop: logged, alerted, and exit code 1 fails the CI job. Anything else
+        # is alerted and re-raised, so its traceback reaches the CI log as well.
         try:
             tracker = MemoryTracker() if args.no_mlflow else MlflowTracker.from_config(cfg)
             version = run(cfg, tracker, release=not args.no_register, tune=args.tune, reason=args.reason)
@@ -171,6 +205,7 @@ def main(argv=None):
             alert_failure(cfg, exc)
             raise
         logger.info("Model pipeline finished: %s", f"released v{version}" if version else "nothing released")
+        # A run that gets here sends one of these two; a run that stopped sent its alert above instead.
         if version:
             notify(f"{ALERT_PREFIX} {cfg['export']['family']} v{version} released",
                    f"Training finished, it passed every gate and is now the active version.\n\nRun: {where()}", cfg)
