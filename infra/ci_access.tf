@@ -1,3 +1,6 @@
+# What this repo's GitHub Actions work as (repo variable GCP_SERVICE_ACCOUNT): model.yml builds
+# and pushes the images and makes the training VM, and data-version.yml and drift.yml read and
+# write the training-data bucket. infra/compute/ lets it make the VMs in the compute project.
 resource "google_service_account" "training" {
   account_id   = "training"
   display_name = "ML training (CI)"
@@ -31,6 +34,8 @@ resource "google_iam_workload_identity_pool_provider" "mlmodel" {
     "google.subject"       = "assertion.sub"
     "attribute.repository" = "assertion.repository"
   }
+  # Without this, a workflow in any repository on GitHub could exchange its token in this pool.
+  # Tokens from every other repository are turned away here, before any IAM grant is looked at.
   attribute_condition = "assertion.repository == '${var.github_repo}'"
 
   oidc {
@@ -41,8 +46,10 @@ resource "google_iam_workload_identity_pool_provider" "mlmodel" {
 # Lets workflows in that repository act as the training account.
 resource "google_service_account_iam_member" "training_wif" {
   service_account_id = google_service_account.training.name
-  role               = "roles/iam.workloadIdentityUser"
-  member             = "principalSet://iam.googleapis.com/${google_iam_workload_identity_pool.github.name}/attribute.repository/${var.github_repo}"
+  # Every branch's workflows match, not only main's, which is why model.yml itself allows a
+  # release only from main.
+  role   = "roles/iam.workloadIdentityUser"
+  member = "principalSet://iam.googleapis.com/${google_iam_workload_identity_pool.github.name}/attribute.repository/${var.github_repo}"
 }
 
 # ---- the Backend's deploys ----------------------------------------------------------------------
@@ -80,6 +87,8 @@ resource "google_project_iam_member" "backend_deploy_run" {
   member  = "serviceAccount:${google_service_account.backend_deploy.email}"
 }
 
+# Pushes the api image each deploy builds into ml (registry.tf), next to the pipelines' images.
+# Writer on that one repository only, not on the project.
 resource "google_artifact_registry_repository_iam_member" "backend_deploy_ml" {
   repository = google_artifact_registry_repository.ml.name
   location   = var.region

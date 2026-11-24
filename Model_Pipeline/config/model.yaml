@@ -11,6 +11,8 @@ data:
   # Binary target: off (1) against on or dyskinetic (0).
   positive_class: "off"
   group_column: participant_id
+  # The seed evaluate.py's bootstrap resamples patients with, so the intervals come out the same
+  # on every run.
   random_seed: 42
 
 windows:
@@ -46,6 +48,8 @@ paths:
   registry_dir: artifacts/registry
 
 logging:
+  # MODEL_LOG_LEVEL, MODEL_LOG_FORMAT and MODEL_LOG_FILE override level, format and file without
+  # editing this file (model_pipeline/utils/logging_setup.py).
   level: INFO
   # console: readable text (local runs, CI). json: one JSON object per line on stdout,
   # which Cloud Logging and CloudWatch parse. Deployments set MODEL_LOG_FORMAT=json.
@@ -152,6 +156,8 @@ tune:
 mlflow:
   # Local MLflow from docker-compose. CI sets MLFLOW_TRACKING_URI to the shared server.
   tracking_uri: http://localhost:5001
+  # Every step and run logs under this experiment. The tracker makes it on the server the first
+  # time it's missing (model_pipeline/tracking/mlflow_tracker.py).
   experiment: parkinsons-risk
 
 selection:
@@ -259,5 +265,8 @@ registry:
   backend_url: null
 
 alerts:
+  # Which channels model_pipeline/alerts.py uses. A channel that's on still needs its settings in
+  # the environment (ALERT_EMAIL and SMTP_HOST, or SLACK_WEBHOOK_URL); without them it's skipped
+  # with a log line, never an error.
   email_enabled: true
   slack_enabled: true

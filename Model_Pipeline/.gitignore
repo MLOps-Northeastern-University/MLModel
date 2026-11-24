@@ -1,13 +1,17 @@
 # Secrets
+# The alert settings, SMTP password included (the README's Settings); docker-compose.yaml reads it.
 .env
 
 # Run outputs: predictions, reports and model bundles. Models go to the models
 # bucket and the registry, never to Git.
 artifacts/
+# mlruns/ and mlartifacts/: what MLflow writes when it runs without a server, or
+# `mlflow server` with no --artifacts-destination.
 mlruns/
 mlartifacts/
 
 # Logs
+# model_pipeline.log, the rotating file paths.log_file names in config/model.yaml.
 logs/
 
 # Python

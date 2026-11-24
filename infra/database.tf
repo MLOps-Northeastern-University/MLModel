@@ -1,9 +1,15 @@
+# One small Postgres for the team: MLflow's run history (database mlflow, below) and the
+# Backend's data (database mednova, backend.tf). Cloud Run reaches it through its Cloud SQL
+# volume, which signs in with the service account's cloudsql.client role, so no network is let in.
 resource "google_sql_database_instance" "main" {
   name             = "mednova-db"
   database_version = "POSTGRES_16"
   region           = var.region
 
   settings {
+    # Enterprise, because Enterprise Plus has no shared-core machines. db-f1-micro is the cheapest
+    # tier and takes about 25 connections in all (backend_run.tf keeps the API to one copy for it).
+    # ZONAL: no standby copy in a second zone, which would double the price.
     edition           = "ENTERPRISE"
     tier              = "db-f1-micro"
     availability_type = "ZONAL"
@@ -16,6 +22,8 @@ resource "google_sql_database_instance" "main" {
     deletion_protection_enabled = true
 
     backup_configuration {
+      # A backup each day, of which Cloud SQL keeps the last 7 by default: the way back if MLflow's
+      # history or the Backend's data is lost.
       enabled = true
     }
   }
@@ -37,6 +45,8 @@ resource "random_password" "mlflow_db" {
   special = false
 }
 
+# A built-in Postgres login with a password, not an IAM one, because MLflow's database URL
+# needs a user and password (mlflow/Dockerfile builds it from DB_PASSWORD).
 resource "google_sql_user" "mlflow" {
   name     = "mlflow"
   instance = google_sql_database_instance.main.name
@@ -54,6 +64,8 @@ resource "google_secret_manager_secret" "mlflow_db_password" {
   depends_on = [google_project_service.apis]
 }
 
+# The password itself, as the secret's version. Like every random_password, it's also in
+# Terraform's state, which is one reason the state stays in the private tfstate bucket.
 resource "google_secret_manager_secret_version" "mlflow_db_password" {
   secret      = google_secret_manager_secret.mlflow_db_password.id
   secret_data = random_password.mlflow_db.result

@@ -17,6 +17,8 @@ resource "random_password" "mednova_db" {
   special = false
 }
 
+# The Backend's own login, apart from MLflow's: each has its own password and secret, so one
+# can be changed without touching the other.
 resource "google_sql_user" "mednova" {
   name     = "mednova"
   instance = google_sql_database_instance.main.name
@@ -35,6 +37,8 @@ resource "google_secret_manager_secret" "backend_database_url" {
   depends_on = [google_project_service.apis]
 }
 
+# postgresql+psycopg is SQLAlchemy's name for the psycopg 3 driver the Backend uses. The
+# password sits inside the URL, so this one secret is all the Backend needs to connect.
 resource "google_secret_manager_secret_version" "backend_database_url" {
   secret      = google_secret_manager_secret.backend_database_url.id
   secret_data = "postgresql+psycopg://${google_sql_user.mednova.name}:${random_password.mednova_db.result}@/${google_sql_database.mednova.name}?host=/cloudsql/${google_sql_database_instance.main.connection_name}"
@@ -116,11 +120,14 @@ resource "google_secret_manager_secret_iam_member" "backend_settings" {
 # The registry: active.json and the released bundles (MODEL_REGISTRY).
 resource "google_storage_bucket_iam_member" "scoring_models" {
   bucket = google_storage_bucket.buckets["models"].name
+  # Viewer: the jobs only read the active bundle. Only a training run or a rollback by hand
+  # (steps/register.py) writes to the registry, and backend-api gets no access to it at all.
   role   = "roles/storage.objectViewer"
   member = "serviceAccount:${google_service_account.backend_scoring.email}"
 }
 
 locals {
+  # The prefix every object's name has in an IAM condition. Both conditions below start from it.
   training_data_objects = "projects/_/buckets/${google_storage_bucket.buckets["training-data"].name}/objects"
 }
 

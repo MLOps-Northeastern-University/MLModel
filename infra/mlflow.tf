@@ -1,3 +1,5 @@
+# The account the server runs as. Its own, not Cloud Run's default (Compute Engine's account,
+# which usually has Editor on the whole project), so it holds only the three grants below.
 resource "google_service_account" "mlflow" {
   account_id   = "mlflow"
   display_name = "MLflow server (Cloud Run)"
@@ -16,6 +18,8 @@ resource "google_project_iam_member" "mlflow_sql" {
 # Plots and reports in models/mlflow/.
 resource "google_storage_bucket_iam_member" "mlflow_models" {
   bucket = google_storage_bucket.buckets["models"].name
+  # objectUser: read, write and delete files, but not change the bucket or who may use it. It
+  # covers the whole bucket; the server writes under mlflow/ (ARTIFACTS_DESTINATION, mlflow/Dockerfile).
   role   = "roles/storage.objectUser"
   member = "serviceAccount:${google_service_account.mlflow.email}"
 }
@@ -61,11 +65,14 @@ resource "google_cloud_run_v2_service" "mlflow" {
     }
 
     containers {
+      # MLflow's version, then the number of our build of mlflow/Dockerfile. No workflow in this repo
+      # builds this image: after a change there it's built and pushed by hand under the next number,
+      # and the tag here is bumped so the next apply rolls out a new revision.
       image = "us-central1-docker.pkg.dev/${var.project_id}/ml/mlflow:3.17.2-3"
 
       resources {
         limits = {
-          cpu    = "1"
+          cpu = "1"
           # Two workers (mlflow/Dockerfile). Billed only while it's answering requests.
           memory = "1536Mi"
         }
@@ -81,7 +88,9 @@ resource "google_cloud_run_v2_service" "mlflow" {
         name = "DB_PASSWORD"
         value_source {
           secret_key_ref {
-            secret  = google_secret_manager_secret.mlflow_db_password.secret_id
+            secret = google_secret_manager_secret.mlflow_db_password.secret_id
+            # Read when an instance starts, so a new version of the secret reaches the server at its next
+            # cold start, with no new revision.
             version = "latest"
           }
         }
@@ -111,6 +120,8 @@ resource "google_cloud_run_v2_service_iam_member" "training_mlflow" {
   member   = "serviceAccount:${google_service_account.training.email}"
 }
 
+# `terraform output MLFLOW_TRACKING_URI` prints the server's address. It's the repo variable of
+# the same name (model.yml), with no trailing slash, because it's also the ID token's audience.
 output "MLFLOW_TRACKING_URI" {
   value = google_cloud_run_v2_service.mlflow.uri
 }

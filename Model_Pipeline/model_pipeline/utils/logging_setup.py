@@ -51,6 +51,8 @@ from pathlib import Path
 
 from model_pipeline.utils.config import PROJECT_ROOT
 
+# Every pipeline logger is named model.<module>, under this one parent, so configure_logging can give the
+# pipeline its own level, apart from the libraries' (third_party_level).
 ROOT = "model"
 DEFAULTS = {"level": "INFO", "format": "console", "third_party_level": "WARNING", "file": True}
 DEFAULT_LOG_FILE = PROJECT_ROOT / "logs" / "model_pipeline.log"
@@ -64,6 +66,8 @@ os.environ.setdefault("MLFLOW_CONFIGURE_LOGGING", "false")
 # Attributes every LogRecord has; anything else on a record is an extra field.
 _STANDARD = set(vars(logging.LogRecord("", 0, "", 0, "", None, None))) | {"message", "asctime"}
 # Fields set by log_context. A ContextVar gives each thread its own copy.
+# The default dict is shared by every context, which is safe only because log_context never changes it in
+# place: it sets a new, merged dict and restores the previous one on exit.
 _context = contextvars.ContextVar("log_context", default={})
 # The handlers we added, so configure_logging can replace exactly these.
 _handlers = []
@@ -106,6 +110,7 @@ def configure_logging(cfg=None, log_file=None, stream=None):
     fmt = os.environ.get("MODEL_LOG_FORMAT", settings["format"]).lower()
     if fmt not in ("console", "json"):
         raise ValueError(f"logging format must be console or json, not {fmt!r}")
+    # MODEL_LOG_FILE=0 turns the file off; any other value turns it on, even when the config turns it off.
     use_file = os.environ.get("MODEL_LOG_FILE", "1" if settings["file"] else "0") != "0"
 
     # Remove our previous handlers first, or every line would print twice.
@@ -122,10 +127,13 @@ def configure_logging(cfg=None, log_file=None, stream=None):
         path = Path(log_file or (cfg or {}).get("resolved_paths", {}).get("log_file") or DEFAULT_LOG_FILE)
         try:
             path.parent.mkdir(parents=True, exist_ok=True)
+            # At most about 20 MB on disk: the file rolls over at 5 MB and the three newest old files are kept.
             _handlers.append(RotatingFileHandler(path, maxBytes=5_000_000, backupCount=3, encoding="utf-8"))
         except OSError as exc:  # a read-only file system shouldn't stop the pipeline
             file_error = (path, exc)
 
+    # The filter goes on the handlers, not on a logger: a logger's filters skip records that propagate up from
+    # other loggers, so only this way do library lines (MLflow's, say) get run_id and step too.
     context_filter = _ContextFilter()
     for handler in _handlers:
         handler.setFormatter(formatter)
@@ -143,6 +151,7 @@ def configure_logging(cfg=None, log_file=None, stream=None):
     pipeline = logging.getLogger(ROOT)
     pipeline.setLevel(level)
     pipeline.propagate = True
+    # Warned only now, once the handlers are in place, so the warning is formatted like every other line.
     if file_error:
         pipeline.warning("Could not create log file %s: %s", *file_error)
 
@@ -191,6 +200,8 @@ def environment(packages=("numpy", "pandas", "scikit-learn", "mlflow")):
     In a container there's no git: the image's GIT_COMMIT (set when CI builds it) names the commit,
     and an image is built from a clean checkout, so it has no uncommitted changes.
     """
+    # A package that isn't installed (torch or optuna, which experiments.py asks for) is left out rather than
+    # raising.
     versions = {}
     for name in packages:
         try:
@@ -208,6 +219,8 @@ def environment(packages=("numpy", "pandas", "scikit-learn", "mlflow")):
 def _git(*args):
     """Run a git command and return its output, or None if git isn't available (e.g. in a container)."""
     try:
+        # cwd=PROJECT_ROOT, so the commit is this repository's whatever folder the command ran from; the timeout
+        # keeps a slow or stuck git from holding up the start of a run.
         out = subprocess.run(["git", *args], cwd=PROJECT_ROOT, capture_output=True, text=True, timeout=5)
         return out.stdout.strip() if out.returncode == 0 else None
     except (OSError, subprocess.SubprocessError):
@@ -225,6 +238,10 @@ class _ContextFilter(logging.Filter):
 
 
 def _extra_fields(record):
+    """The record's fields beyond the standard ones: what extra= and log_context put on it.
+
+    Names starting with "_" are internal and left out.
+    """
     return {k: v for k, v in vars(record).items() if k not in _STANDARD and not k.startswith("_")}
 
 
