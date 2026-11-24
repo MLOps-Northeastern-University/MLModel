@@ -16,9 +16,6 @@ Per question (OFF, ON, dyskinetic, tremor, asleep; now and next hour), from P(qu
     roc_auc, roc_auc_within    rank quality, pooled and per patient (chance 0.5)
     pr_auc                     average precision; chance is the prevalence, reported next to it
     pr_lift                    pr_auc / prevalence: how many times better than chance
-    brier                      mean squared error of the probability (lower is better)
-    sensitivity, specificity, precision, f1   at probability >= threshold
-Per label, the team's scores (core/metrics.py): balanced_accuracy, macro_f1, score_spearman(_within)...
 
 Then the final model is fitted on all development patients and saved, and its standardised
 coefficients show what drives each answer.
@@ -49,9 +46,11 @@ from scripts.utils.logging_setup import get_logger
 
 logger = get_logger(__name__)
 
-DEFAULTS = {"cv_folds": 5, "repeats": 5, "seed": 42, "threshold": 0.5}
-HEADLINE = ["state_now/off", "state_now/dyskinetic", "tremor_now/any_tremor", "sleep_now/asleep",
-            "state_next_hour/off", "tremor_next_hour/any_tremor"]
+DEFAULTS = {"cv_folds": 5, "repeats": 5, "seed": 42}
+# The report's row order: the state's three groups, then tremor, then sleep; now before next hour.
+HEADLINE = ["state_now/off", "state_now/on", "state_now/dyskinetic", "tremor_now/any_tremor", "sleep_now/asleep",
+            "state_next_hour/off", "state_next_hour/on", "state_next_hour/dyskinetic",
+            "tremor_next_hour/any_tremor", "sleep_next_hour/asleep"]
 
 
 def settings(cfg):
@@ -62,37 +61,27 @@ def settings(cfg):
     for key in ("cv_folds", "repeats"):
         if isinstance(out[key], bool) or not isinstance(out[key], int) or out[key] < (2 if key == "cv_folds" else 1):
             raise ConfigError(f"baseline.{key} must be a whole number of {2 if key == 'cv_folds' else 1} or more")
-    if not 0 < out["threshold"] < 1:
-        raise ConfigError("baseline.threshold must be between 0 and 1")
     return out
 
 
 # ---- metrics ---------------------------------------------------------------------------------------
 
-def question_metrics(y, p, participants, threshold):
+def question_metrics(y, p, participants):
     """Every binary score of one question: y is yes/no per hour, p the model's P(yes)."""
     from sklearn.metrics import average_precision_score
     y = np.asarray(y, dtype=bool)
     p = np.asarray(p, dtype=float)
     prevalence = float(y.mean()) if len(y) else math.nan
     both = 0 < y.sum() < len(y)
-    flagged = p >= threshold
-    tp, fp = int((flagged & y).sum()), int((flagged & ~y).sum())
-    fn, tn = int((~flagged & y).sum()), int((~flagged & ~y).sum())
-    sens = tp / (tp + fn) if tp + fn else math.nan
-    prec = tp / (tp + fp) if tp + fp else math.nan
     pr_auc = float(average_precision_score(y, p)) if both else math.nan
     return {
         "hours": int(len(y)), "prevalence": prevalence,
         "roc_auc": auc(y, p), "roc_auc_within": auc_within(participants, y, p),
         "pr_auc": pr_auc, "pr_lift": pr_auc / prevalence if both else math.nan,
-        "brier": float(np.mean((p - y) ** 2)) if len(y) else math.nan,
-        "sensitivity": sens, "specificity": tn / (tn + fp) if tn + fp else math.nan, "precision": prec,
-        "f1": 2 * prec * sens / (prec + sens) if prec and sens and not math.isnan(prec + sens) else math.nan,
     }
 
 
-def frame_metrics(frames, threshold):
+def frame_metrics(frames):
     """{"<label>/<question>/<metric>": value} on the scored hours (labelled and worn) of one repeat."""
     out = {}
     for label, frame in frames.items():
@@ -103,7 +92,7 @@ def frame_metrics(frames, threshold):
         probs = f[classes].to_numpy(float)
         for question, members in QUESTIONS[target].items():
             scores = question_metrics(np.isin(y, members), probs[:, list(members)].sum(axis=1),
-                                      f[PARTICIPANT].to_numpy(), threshold)
+                                      f[PARTICIPANT].to_numpy())
             out.update({f"{label}/{question}/{k}": v for k, v in scores.items()})
     return out
 
@@ -145,8 +134,7 @@ def run(cfg, tracker, data=None, split=None):
             repeat_split = Split(split.test, folds, s["seed"] + r)
             with tracker.run(f"repeat-{r + 1}"):
                 result = cross_validate(name, template, dev, repeat_split, [s["seed"]], tracker)
-                metrics = frame_metrics(result.frames, s["threshold"])
-                metrics.update({f"{label}/{m}": v for label, ms in result.cv.items() for m, v in ms.items()})
+                metrics = frame_metrics(result.frames)
                 tracker.log_metrics({tracker_name(k): v for k, v in metrics.items()
                                      if isinstance(v, (int, float)) and math.isfinite(v)})
             rows += [{"repeat": r + 1, "metric": k, "value": v} for k, v in metrics.items()]
@@ -225,16 +213,9 @@ def report(summary, coefficients, s, name, dev, model_dir):
     ranking = [[q, _hours(summary, q), _cell(summary, f"{q}/prevalence"), _cell(summary, f"{q}/roc_auc"),
                 _cell(summary, f"{q}/roc_auc_within"), _cell(summary, f"{q}/pr_auc"), _cell(summary, f"{q}/pr_lift", 2)]
                for q in questions]
-    calibration = [[q, _cell(summary, f"{q}/brier"), _cell(summary, f"{q}/sensitivity"),
-                    _cell(summary, f"{q}/specificity"), _cell(summary, f"{q}/precision"), _cell(summary, f"{q}/f1")]
-                   for q in questions]
-    labels = sorted({m.split("/")[0] for m in summary["metric"]})
-    team = [[label] + [_cell(summary, f"{label}/{m}") for m in
-                       ("balanced_accuracy", "macro_f1", "score_spearman", "score_spearman_within", "score_mae")]
-            for label in labels]
     top = []
     for (label, cls), g in coefficients.groupby(["label", "class"]):
-        if label.endswith("_now") and (label, cls) != ("state_now", "on"):
+        if label.endswith("_now"):
             best = g.reindex(g["coefficient"].abs().sort_values(ascending=False).index).head(4)
             top.append([label, cls, ", ".join(f"{f} {c:+.2f}" for f, c in zip(best["feature"], best["coefficient"]))])
     return f"""# Hourly baseline: {name}
@@ -252,18 +233,6 @@ ROC AUC: chance 0.5. PR AUC: chance is the prevalence; lift = PR AUC / prevalenc
 "within" is each patient's own AUC, averaged: following one person through the day.
 
 {_table(["question", "hours", "prevalence", "ROC AUC", "ROC AUC within", "PR AUC", "PR lift"], ranking)}
-
-## At probability ≥ {s['threshold']}
-
-Brier: mean squared error of the probability (lower is better). These depend on the threshold, and
-balanced class weights shift the probabilities towards the rare classes, so read them as one
-operating point; the AUCs above don't depend on it.
-
-{_table(["question", "Brier", "sensitivity", "specificity", "precision", "F1"], calibration)}
-
-## The team's scores (core/metrics.py)
-
-{_table(["label", "balanced accuracy", "macro F1", "Spearman", "Spearman within", "MAE"], team)}
 
 ## What drives it (final model, standardised coefficients)
 
