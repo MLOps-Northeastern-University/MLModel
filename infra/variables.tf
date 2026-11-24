@@ -36,6 +36,13 @@ variable "firebase_project" {
   default = null
 }
 
+variable "scoring_paused" {
+  # Pauses score-hours' and check-drift's schedules (backend_run.tf). Both stop at the start without
+  # harnet10's weights in the training-data bucket's harnet10/. Set false once they're there.
+  type    = bool
+  default = true
+}
+
 variable "training_vm_email" {
   # The training VMs' account, made in their own project by compute/ (its output training_vm_email).
   # This project lets it use the buckets, MLflow, the images and its secrets.
