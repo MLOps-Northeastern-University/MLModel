@@ -30,17 +30,27 @@ variable "careportal_origins" {
 }
 
 variable "firebase_project" {
-  # The Firebase project staff and patients sign in with. Until it exists (null), nobody can sign
-  # in to the API and pushes to the phone stay off.
+  # The Firebase project staff and patients sign in with, and the pushes go through: mednova-dhruv,
+  # its own Google Cloud project. Null turns sign-in to the API and pushes to the phone off. The
+  # Backend's accounts get their roles there by hand (Backend docs/DEPLOY.md, "Firebase is in its
+  # own project"), since Terraform here only signs in to this project.
   type    = string
-  default = null
+  default = "mednova-dhruv"
+}
+
+variable "firebase_web_api_key_added" {
+  # True once backend-firebase-web-api-key (backend.tf) has its value, added by hand:
+  #   printf %s "<the web app's key>" | gcloud secrets versions add backend-firebase-web-api-key --data-file=-
+  # Only then does the API read it: Cloud Run won't start a service whose secret has no version.
+  type    = bool
+  default = false
 }
 
 variable "scoring_paused" {
   # Pauses score-hours' and check-drift's schedules (backend_run.tf). Both stop at the start without
-  # harnet10's weights in the training-data bucket's harnet10/. Set false once they're there.
+  # harnet10's weights in the training-data bucket's harnet10/. They're there since 2026-11-24.
   type    = bool
-  default = true
+  default = false
 }
 
 variable "training_vm_email" {
