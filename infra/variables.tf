@@ -53,6 +53,14 @@ variable "scoring_paused" {
   default = false
 }
 
+variable "alert_emails_added" {
+  # True once alert-emails (monitoring.tf) has the team's addresses, comma-separated, added by hand:
+  #   printf %s "<a@x.com,b@y.com>" | gcloud secrets versions add alert-emails --data-file=-
+  # Until then the alerts still open, in the console, but email no one. Added 2026-11-25.
+  type    = bool
+  default = true
+}
+
 variable "training_vm_email" {
   # The training VMs' account, made in their own project by compute/ (its output training_vm_email).
   # This project lets it use the buckets, MLflow, the images and its secrets.
