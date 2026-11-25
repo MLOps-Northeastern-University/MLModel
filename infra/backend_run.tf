@@ -18,9 +18,10 @@ locals {
     DEV_AUTH     = "false"
     DEV_TOOLS    = "false"
     PUSH_ENABLED = var.firebase_project == null ? "false" : "true"
-    # Firebase checks sign-ins against this project. On Cloud Run it would otherwise be this one,
-    # and every sign-in from a separate Firebase project fails as the wrong audience.
-    GOOGLE_CLOUD_PROJECT = var.firebase_project
+    # Firebase checks sign-ins against this project (Backend app/firebase.py). On Cloud Run it would
+    # otherwise be this one, and every sign-in from a separate Firebase project fails as the wrong
+    # audience. Not GOOGLE_CLOUD_PROJECT, which every Google library takes as its default project.
+    FIREBASE_PROJECT_ID = var.firebase_project
   } : name => value if value != null }
 
   # Read from Secret Manager when an instance or a job starts (backend.tf). The jobs need both too:
@@ -29,6 +30,11 @@ locals {
     DATABASE_URL = google_secret_manager_secret.backend_database_url.secret_id
     SECRET_KEY   = google_secret_manager_secret.backend_secret_key.secret_id
   }
+
+  # The API also reads the Firebase web key, once it has its value (variables.tf).
+  api_secret_env = merge(local.secret_env, var.firebase_web_api_key_added ? {
+    FIREBASE_WEB_API_KEY = google_secret_manager_secret.backend_firebase_web_api_key.secret_id
+  } : {})
 }
 
 resource "google_cloud_run_v2_service" "api" {
@@ -90,7 +96,7 @@ resource "google_cloud_run_v2_service" "api" {
         }
       }
       dynamic "env" {
-        for_each = local.secret_env
+        for_each = local.api_secret_env
         content {
           name = env.key
           value_source {
@@ -113,6 +119,7 @@ resource "google_cloud_run_v2_service" "api" {
   depends_on = [
     google_project_iam_member.backend_sql,
     google_secret_manager_secret_iam_member.backend_settings,
+    google_secret_manager_secret_iam_member.api_firebase_web_api_key,
     google_secret_manager_secret_version.backend_database_url,
     google_secret_manager_secret_version.backend_secret_key,
   ]
@@ -196,8 +203,8 @@ locals {
     HARNET_DIR     = "gs://${google_storage_bucket.buckets["training-data"].name}/harnet10"
     DRIFT_REPORTS  = "gs://${google_storage_bucket.buckets["training-data"].name}/drift"
     # end-and-purge tells the phone its monitoring ended, as the API's pushes do.
-    PUSH_ENABLED         = local.api_env["PUSH_ENABLED"]
-    GOOGLE_CLOUD_PROJECT = var.firebase_project
+    PUSH_ENABLED        = local.api_env["PUSH_ENABLED"]
+    FIREBASE_PROJECT_ID = var.firebase_project
   } : name => value if value != null }
 }
 

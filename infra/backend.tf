@@ -66,6 +66,20 @@ resource "google_secret_manager_secret_version" "backend_secret_key" {
   secret_data = random_password.backend_secret_key.result
 }
 
+# The Firebase web app's API key (FIREBASE_WEB_API_KEY), which emails new staff the link to choose
+# a password. Not secret in itself (it ships in Careportal's page), but kept out of git and CI all
+# the same. Terraform makes the empty secret; its value is added by hand, once (variables.tf,
+# firebase_web_api_key_added), so the key is never in code or the state.
+resource "google_secret_manager_secret" "backend_firebase_web_api_key" {
+  secret_id = "backend-firebase-web-api-key"
+
+  replication {
+    auto {}
+  }
+
+  depends_on = [google_project_service.apis]
+}
+
 # ---- who the Backend runs as --------------------------------------------------------------------
 
 # Two accounts, so the public API never holds what the jobs need: the API service runs as
@@ -113,6 +127,13 @@ resource "google_secret_manager_secret_iam_member" "backend_settings" {
   secret_id = each.value.secret
   role      = "roles/secretmanager.secretAccessor"
   member    = "serviceAccount:${each.value.account}"
+}
+
+# Only the API sends staff their password email, so only backend-api reads the web key.
+resource "google_secret_manager_secret_iam_member" "api_firebase_web_api_key" {
+  secret_id = google_secret_manager_secret.backend_firebase_web_api_key.id
+  role      = "roles/secretmanager.secretAccessor"
+  member    = "serviceAccount:${google_service_account.backend_api.email}"
 }
 
 # ---- what only the scoring jobs read and write --------------------------------------------------
