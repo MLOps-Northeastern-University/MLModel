@@ -23,10 +23,10 @@ variable "backend_repo" {
 }
 
 variable "careportal_origins" {
-  # The care portal's addresses, e.g. ["https://<site>.web.app"]: the only web pages that may call
-  # the Backend's API from a browser (its CORS_ORIGINS). Empty until the portal is hosted.
+  # The care portal's addresses: the only web pages that may call the Backend's API from a browser
+  # (its CORS_ORIGINS). The portal is hosted on Firebase Hosting (Careportal's README, "Hosting").
   type    = list(string)
-  default = []
+  default = ["https://mednova-portal.web.app"]
 }
 
 variable "firebase_project" {
