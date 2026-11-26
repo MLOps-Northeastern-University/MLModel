@@ -16,6 +16,8 @@ x-tool: &tool
   env_file:
     - path: .env
       required: false
+  # The whole repository, not just this folder: the pipeline reads ../Data_Pipeline/data, and the
+  # image's own copy of the code is hidden under the mount, so an edit takes effect at once.
   volumes:
     - ..:/app
   working_dir: /app/Model_Pipeline
@@ -42,6 +44,8 @@ services:
       - "5001:5000"
     volumes:
       - mlflow-data:/mlflow
+    # train waits for this (condition: service_healthy below), so it never starts before the
+    # server answers on /health.
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:5000/health')"]
       interval: 10s
@@ -52,6 +56,8 @@ services:
     <<: *tool
     command: ["python", "-m", "model_pipeline.run_model_pipeline"]
     environment:
+      # The server by its service name on compose's network, at its port inside it. This replaces
+      # config/model.yaml's localhost:5001, which inside a container would be the container itself.
       MLFLOW_TRACKING_URI: http://mlflow:5000
     depends_on:
       mlflow:
@@ -59,7 +65,11 @@ services:
 
   tests:
     <<: *tool
+    # -p no:cacheprovider: pytest writes no .pytest_cache into the mounted checkout. No depends_on,
+    # so the tests run without starting MLflow.
     command: ["python", "-m", "pytest", "-q", "-p", "no:cacheprovider"]
 
+# MLflow's database and files. `docker compose down` keeps this volume; `down -v` deletes it,
+# and every local run with it.
 volumes:
   mlflow-data:

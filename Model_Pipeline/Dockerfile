@@ -18,8 +18,15 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 # default, because the CUDA build is several GB that CI and laptops can't use.
 ARG TORCH=cpu
 
+# Airflow mounts the run's artifacts/ at /app/Model_Pipeline/artifacts (MODEL_APP in
+# airflow/dags/containers.py), so this path and that one must stay the same.
 WORKDIR /app/Model_Pipeline
+# requirements.txt first and the code after: Docker reuses the slow install layer below until
+# requirements.txt or TORCH changes, so a code change only redoes `COPY . .`.
 COPY requirements.txt .
+# torch first, from PyTorch's own index for the chosen build. requirements.txt names the same
+# version, which pip then counts as installed, so the CPU or CUDA build stays. Keep the two pins
+# equal: a different one there would make pip swap in PyPI's build instead.
 RUN pip install --no-cache-dir torch==2.12.1 --index-url https://download.pytorch.org/whl/${TORCH} \
     && pip install --no-cache-dir -r requirements.txt
 
@@ -29,4 +36,6 @@ COPY . .
 ARG GIT_COMMIT=""
 ENV GIT_COMMIT=${GIT_COMMIT}
 
+# The whole pipeline by default. Airflow's tasks run one step each instead
+# (python -m model_pipeline.run_step <step>), and the compose services set their own command.
 CMD ["python", "-m", "model_pipeline.run_model_pipeline"]

@@ -39,6 +39,8 @@ x-airflow: &airflow
   # on Linux: stat -c %g /var/run/docker.sock).
   group_add:
     - "${DOCKER_GID:-0}"
+  # Airflow's user in its image (50000) with group 0, as in Airflow's own compose file. CI sets
+  # AIRFLOW_UID to the runner's user (checks.yml), and the training VM gives logs/ to 50000:0.
   user: "${AIRFLOW_UID:-50000}:0"
   depends_on:
     postgres:
@@ -46,6 +48,9 @@ x-airflow: &airflow
 
 services:
   postgres:
+    # Airflow's own database: DAG runs, task states and the logins. No ports are published, so only
+    # the other containers here reach it, and the fixed airflow/airflow login never leaves the
+    # machine. The postgres-db volume keeps it across restarts.
     image: postgres:13
     environment:
       POSTGRES_USER: airflow
@@ -74,6 +79,8 @@ services:
 
   airflow-webserver:
     <<: *airflow
+    # The web UI on port 8080. On the training VM no firewall rule opens it: a Cloudflare tunnel
+    # (airflow/vm/startup.sh) reaches it at localhost:8080, and its link is emailed to the team.
     command: webserver
     ports:
       - "8080:8080"
@@ -81,6 +88,8 @@ services:
 
   airflow-scheduler:
     <<: *airflow
+    # With LocalExecutor the scheduler runs the tasks itself, so this is the container that starts
+    # each step's container through the Docker socket.
     command: scheduler
     restart: unless-stopped
 
@@ -91,6 +100,9 @@ services:
     environment:
       AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: sqlite:////tmp/airflow.db
       AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+    # Empty, replacing the anchor's wait for postgres. The environment above also replaces the
+    # anchor's whole block (a merge key doesn't merge nested maps), so none of its AIRFLOW__
+    # settings apply here.
     depends_on: []
     command:
       - bash

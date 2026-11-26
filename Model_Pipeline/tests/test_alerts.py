@@ -10,12 +10,14 @@ import pytest
 
 from model_pipeline import alerts
 
+# Every environment variable alerts.py reads. A developer's shell or the CI job may have real ones set.
 ALERT_SETTINGS = ["ALERT_EMAIL", "SMTP_HOST", "SMTP_PORT", "SMTP_USER", "SMTP_PASSWORD",
                   "SLACK_WEBHOOK_URL"]
 
 
 @pytest.fixture(autouse=True)
 def no_real_settings(monkeypatch):
+    """Clear every alert setting, so a test sees only what it sets itself."""
     for name in ALERT_SETTINGS:
         monkeypatch.delenv(name, raising=False)
 
@@ -25,6 +27,8 @@ def smtp(monkeypatch):
     """A fake SMTP server that records what it's asked to do."""
     record = {"sent": [], "login": None, "tls": False, "server": None}
 
+    # Only what send_email uses: the constructor, the with block, starttls, login and send_message. record is
+    # filled in as they are called, so a test can check it after the with block has closed.
     class FakeSMTP:
         def __init__(self, host, port, timeout=None):
             record["server"] = (host, port)
@@ -50,6 +54,7 @@ def smtp(monkeypatch):
 
 @pytest.fixture
 def slack(monkeypatch):
+    """A fake requests.post that records each (url, json) and replies as if Slack accepted it."""
     posts = []
 
     class Reply:
@@ -65,6 +70,11 @@ def slack(monkeypatch):
 
 
 def set_email(monkeypatch, user="sender@example.com"):
+    """Set the email settings, as the CI job's secrets do.
+
+    Args:
+        user: The SMTP login. None leaves SMTP_USER and SMTP_PASSWORD unset, for a server with no login.
+    """
     monkeypatch.setenv("ALERT_EMAIL", "team@example.com")
     monkeypatch.setenv("SMTP_HOST", "smtp.example.com")
     monkeypatch.setenv("SMTP_PORT", "2525")
@@ -101,6 +111,8 @@ def test_an_email_can_go_without_a_login(monkeypatch, smtp):
 def test_a_failing_mail_server_does_not_raise(monkeypatch):
     set_email(monkeypatch)
 
+    # smtplib.SMTP connects in its constructor, so a server that's down fails there. SMTPConnectError is an
+    # SMTPException, one of the errors send_email catches.
     class Down:
         def __init__(self, *args, **kwargs):
             raise smtplib.SMTPConnectError(421, "unavailable")
@@ -129,6 +141,7 @@ def test_notify_uses_only_the_channels_turned_on(monkeypatch, smtp, slack):
     set_email(monkeypatch)
     monkeypatch.setenv("SLACK_WEBHOOK_URL", "https://hooks.slack.example/T1")
 
+    # Both channels are set up in the environment, so only the config's alerts section decides which is used.
     alerts.notify("subject", "body", {"alerts": {"email_enabled": False, "slack_enabled": True}})
     assert smtp["sent"] == [] and len(slack) == 1
     assert slack[0][1]["text"] == "*subject*\n```body```"

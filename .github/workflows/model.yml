@@ -23,6 +23,8 @@ on:
   push:
     branches: [main]
     paths: [Model_Pipeline/config/retrain.yaml]
+  # drift.yml starts this the same way, through .github/scripts/drift_retrain.sh
+  # (gh workflow run model.yml --ref main -f ...): a change to these inputs has to be made there too.
   workflow_dispatch:
     inputs:
       candidates:
@@ -71,6 +73,8 @@ concurrency:
   group: training
   cancel-in-progress: false
 
+# Repository variables (vars.), not secrets: they name the projects and the registry but grant
+# nothing on their own. The SMTP settings are secrets, which GitHub masks in the log.
 env:
   TEAM_PROJECT: ${{ vars.GCP_PROJECT_ID }}
   COMPUTE_PROJECT: ${{ vars.GCP_COMPUTE_PROJECT }}
@@ -152,6 +156,38 @@ jobs:
                   print(f"{key}={run.get(key, '')}")
           PY
           cat "$GITHUB_OUTPUT"
+      # "Retrain started", as soon as a model run is decided, before the images and the VM: why (a
+      # drift retrain's reason starts with "drift:"), who started it, and the run's link. Later the VM
+      # emails the Airflow link once it's up, and the pipeline the result.
+      - name: Email the team that a retrain started
+        if: steps.run.outputs.train == 'true' && steps.run.outputs.dag == 'model_pipeline'
+        working-directory: Model_Pipeline
+        env:
+          DAG_CONF: ${{ steps.run.outputs.dag_conf }}
+          COMPUTE: ${{ steps.run.outputs.compute }}
+          EVENT: ${{ github.event_name }}
+          ACTOR: ${{ github.actor }}
+          REF: ${{ github.ref_name }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          pip install -q requests==2.33.0
+          python - <<'PY'
+          import json, os
+          from model_pipeline.alerts import notify
+
+          env = os.environ
+          conf = json.loads(env["DAG_CONF"])
+          reason = conf.get("reason") or "(none given)"
+          how = "a retrain.yaml change merged into main" if env["EVENT"] == "push" else "Run workflow"
+          notify("[MedNOVA model] Retrain started" + (" (drift)" if reason.startswith("drift:") else ""),
+                 f"Why: {reason}\n"
+                 f"Started by: {env['ACTOR']} ({how})\n"
+                 f"Candidates: {' '.join(conf.get('candidates') or []) or '(the config default)'}; "
+                 f"tune: {conf.get('tune')}; release: {conf.get('release')}\n"
+                 f"Compute: {env['COMPUTE'] or 'gpu'}; branch: {env['REF']}\n\n"
+                 f"Run: {env['RUN_URL']}\n\n"
+                 "The VM emails the Airflow link once it's up, and the pipeline the result when it ends.")
+          PY
 
   images:
     name: Build the images
@@ -164,6 +200,9 @@ jobs:
       model: ${{ steps.build.outputs.model }}
     steps:
       - uses: actions/checkout@v7
+      # Signs in as the training account (vars.GCP_SERVICE_ACCOUNT) through the mlmodel provider
+      # (infra/ci_access.tf). Its writer role on the ml repository (infra/registry.tf) is what lets
+      # this job check for and push the images.
       - uses: google-github-actions/auth@v3
         with:
           workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
@@ -206,6 +245,8 @@ jobs:
     # itself, and the team gets the result by email.
     timeout-minutes: 355
     env:
+      # One name per run and attempt, so a re-run gets a new VM and its own runs/<id>/ folder in GCS.
+      # VM_SERVICE_ACCOUNT is the account create_vm.sh gives the VM (made in infra/compute/).
       RUN_ID: gh-${{ github.run_id }}-${{ github.run_attempt }}
       VM: mednova-run-${{ github.run_id }}-${{ github.run_attempt }}
       VM_SERVICE_ACCOUNT: training-vm@${{ vars.GCP_COMPUTE_PROJECT }}.iam.gserviceaccount.com
@@ -240,6 +281,9 @@ jobs:
           printf '%s' "$GPU"            > mednova-gpu
           printf '%s' "$MLFLOW_URI"     > mednova-mlflow-uri
           printf '%s' "$TEAM_PROJECT"   > mednova-team-project
+      # The training account may make, start and delete VMs in the compute project and run them as
+      # training-vm (infra/compute/training_vm.tf); the VM gets its own access to the team's
+      # buckets, MLflow and images (infra/training_vm_access.tf).
       - name: Make the VM
         id: vm
         env:
@@ -290,6 +334,8 @@ jobs:
     needs: [settings, train]
     if: needs.settings.outputs.dag == 'cops_data_pipeline'
     runs-on: ubuntu-latest
+    # A job that sets permissions replaces the workflow's, so id-token: write is listed again here.
+    # The branch and the PR use this job's GITHUB_TOKEN; GCS is reached as the training account.
     permissions:
       contents: write          # push the PR's branch
       pull-requests: write     # open the PR

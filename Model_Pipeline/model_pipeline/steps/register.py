@@ -5,7 +5,7 @@ Owner: Ayush
 The registry keeps every released bundle as <family>/v<N>/ and an active.json
 that names the version patients get. Registering copies the bundle in as the
 next version and makes it active; rolling back makes the previous version
-active again. The active version's metrics.json is what the next run's release
+active again, and emails the team. The active version's metrics.json is what the next run's release
 gate (compare_production.py) compares against.
 
 Where it lives: paths.registry_dir, a local folder, on a laptop and in tests;
@@ -29,6 +29,7 @@ from pathlib import Path
 
 import fsspec
 
+from model_pipeline.alerts import notify
 from model_pipeline.core.errors import PipelineError
 from model_pipeline.utils.config import load_config
 from model_pipeline.utils.logging_setup import get_logger
@@ -132,6 +133,7 @@ class RegisterModel:
         self.family_dir = _join(root, cfg["export"]["family"])
         self.backend_url = cfg["registry"]["backend_url"]
         self.tracker = tracker
+        self.cfg = cfg   # its alerts section, for the rollback's email
 
     def run(self, bundle_dir):
         """Release the bundle as the next version and make it active. Returns the version."""
@@ -152,6 +154,11 @@ class RegisterModel:
             raise PipelineError("nothing to roll back to: no version before the active one")
         set_active(self.family_dir, earlier[-1])
         logger.warning("Rolled back from v%d to v%d", active, earlier[-1])
+        # The team hears of it however it was run (by hand, or in the rollback demo): every new score
+        # comes from the older model from the next scoring run on.
+        notify(f"[MedNOVA model] Rolled back to v{earlier[-1]}",
+               f"The active model in {self.family_dir} is now v{earlier[-1]}, replacing v{active}. The "
+               f"Backend's score-hours scores with it from its next run.", self.cfg)
         return earlier[-1]
 
 

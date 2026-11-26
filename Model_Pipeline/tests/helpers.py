@@ -12,6 +12,9 @@ import pandas as pd
 from model_pipeline.utils.config import load_config
 from model_pipeline.utils.file_io import write_table
 
+# The 7 hourly features in the phone's order; test_config checks model.yaml's data.features against them.
+# QC_NAMES are the data pipeline's quality columns for each wrist hour. Both get the W_ prefix in the
+# table, and W_status "ok" marks an hour that had sensor data.
 FEATURE_NAMES = ["move_mean", "move_std", "move_p95", "still_fraction", "tremor_mean", "tremor_p95", "tremor_ratio"]
 QC_NAMES = ["n_samples", "valid_fraction", "n_gaps", "n_clipped", "temp_mean", "photo_mean", "status"]
 
@@ -34,6 +37,8 @@ _CLASS_LEVELS = {"off": (0.005, 0.85, 0.010), "on": (0.012, 0.60, 0.012), "dyski
 _KINESIA = {"off": [(-1, "Slight Akinesia"), (-2, "Discomforting Akinesia")],
             "on": [(0, "Good Kinesia")],
             "dyskinetic": [(1, "Slight Dyskinesia"), (2, "Discomforting Dyskinesia")]}
+# The clock hours of the day's three doses. hours_since_dose counts from the last one at or before the
+# hour, or from midnight before the first.
 DOSE_HOURS = (8, 14, 20)
 
 
@@ -49,7 +54,9 @@ def make_features_table(n_participants=8, hours=24, seed=0):
     for i in range(n_participants):
         person = _participant(i)
         classes = rng.choice(["off", "on", "dyskinetic"], size=hours, p=[0.35, 0.45, 0.2])
+        # The first two hours are set to off and on, so every participant has both, whatever the draw gave.
         classes[:2] = ["off", "on"]
+        # hour_index starts at 15 (day 0, 15:00), so the default 24 hours run past midnight into day 1.
         for h, label in enumerate(classes):
             rows.append({**_diary_hour(person, 15 + h, label, rng),
                          **_wrist_features(label, rng), **person["updrs"], **person["demographics"]})
@@ -74,6 +81,8 @@ def make_dataset(spec, n_participants=2, hours=3, first_hour=8, seed=0):
             hour_rows.append({"participant_id": p, "hour_index": h, "kinesia_text": "Good Kinesia",
                               "kinesia_score": float(score), "tremor_score": float(rng.integers(0, 3)),
                               "sex": "female"})
+        # Windows back to back over the diary hours, all worn, with a small noise signal. The dose comes a minute
+        # into the first hour and the check-in 30 s into the second, so with 2 or more hours both are inside.
         start = first_hour * 3600
         n = hours * 3600 // spec.seconds
         windows[p] = Windows(time_s=start + spec.seconds * np.arange(n, dtype=np.int64),
@@ -109,12 +118,20 @@ def make_config(tmp_path, features_csv=None, **sections):
     if features_csv is None:
         features_csv = write_features_csv(tmp_path / "data")
     overrides = {"project_root": str(tmp_path), "paths": {"features_csv": str(features_csv)}}
+    # Each section is merged over model.yaml's (load_config's overrides), so a test can change one setting,
+    # bias={"max_recall_gap": 0.2} say, and keep the rest of that section.
     for key, value in sections.items():
         overrides.setdefault(key, {}).update(value)
     return load_config(overrides=overrides)
 
 
 def _participant(i):
+    """Participant i's ID, UPDRS scores, demographics and visit type.
+
+    Each column follows its own pattern over i (sex alternates; age, Hoehn and Yahr and visit cycle
+    through three values; DBS and side change every 2 participants, subtype every 4), so the default 8
+    participants give every group at least 2 of them.
+    """
     age = [50, 60, 70][i % 3]
     off_total, on_total = 30 + 2 * i, 15 + i
     return {
@@ -134,6 +151,7 @@ def _participant(i):
 
 
 def _diary_hour(person, hour_index, label, rng):
+    """One diary hour, with the left wrist's file names as the data pipeline's diary lists them."""
     pid = person["participant_id"]
     day, hour = divmod(hour_index, 24)
     score, text = _KINESIA[label][rng.integers(len(_KINESIA[label]))]
@@ -155,6 +173,8 @@ def _wrist_features(label, rng):
     move, still, tremor = _CLASS_LEVELS[label]
     move_mean = move * rng.lognormal(0, 0.3)
     tremor_mean = tremor * rng.lognormal(0, 0.3)
+    # The spread and the 95th percentile follow the mean, and the ratio is tremor over movement, so an hour's
+    # features hang together rather than being drawn apart. 360,000 samples is a full hour at 100 Hz.
     return {
         "W_move_mean": move_mean, "W_move_std": 2 * move_mean * rng.lognormal(0, 0.1),
         "W_move_p95": 4.5 * move_mean * rng.lognormal(0, 0.1),

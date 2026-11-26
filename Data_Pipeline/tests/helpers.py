@@ -13,8 +13,11 @@ import pandas as pd
 
 from data_pipeline.utils import PROJECT_ROOT, load_config
 
+# 100 Hz, the watches' real rate. SECONDS is a fake hour's length: 2 minutes instead of 60.
 FS = 100
 SECONDS = 120
+# The diary's columns before and after its dose columns, so diary_columns can put one, two or four dose
+# columns between them.
 _BEFORE_DOSES = ["ID", "Day", "Time", "Visit", "Kinesia", "KinesiaScore", "Tremor", "TremorScore",
                  "Freezing", "FreezingScore", "Fall", "FallScore", "Medication"]
 _AFTER_DOSES = ["WearableDataAvailability", "WearableDataLeftCSV", "WearableDataLeftZIP",
@@ -34,10 +37,15 @@ def make_config(tmp_path, **sections):
     """Config with every output under tmp_path, for 2-minute test hours."""
     overrides = {
         "project_root": str(tmp_path),
+        # List mode with no one listed and nothing excluded: a test names exactly whom it processes, and no test
+        # ID is skipped as one of the demo patients.
         "data": {"mode": "list", "participants": [], "exclude": []},
+        # One participant at a time, in this process, with no worker pool to start.
         "run": {"parallel_participants": 1},
+        # A file is a 2-minute hour here, so a full fake hour gets a valid_fraction of 1.
         "features": {"expected_seconds_per_file": SECONDS, "min_valid_seconds": 30},
         "checks": {"min_labelled_hours": 1},
+        # The repository's own LEDD table, by absolute path: a relative one would resolve under tmp_path.
         "medication": {"ledd_table": str(PROJECT_ROOT / "config" / "ledd.yaml")},
         "download": {"backoff_seconds": 0},
     }
@@ -54,6 +62,8 @@ def signal(kind="still", hour=10, seconds=SECONDS, seed=0, side="left", temp=31.
     """
     rng = np.random.default_rng(seed)
     t = np.arange(seconds * FS) / FS
+    # A still wrist reads gravity alone: these three make about 1 g. Noise goes on X only, so a still hour
+    # isn't a perfectly constant signal.
     x, y, z = np.full_like(t, -0.45), np.full_like(t, 0.74), np.full_like(t, -0.49)
     if kind == "moving":
         x = x + 0.3 * np.sin(2 * np.pi * 1.0 * t)
@@ -61,6 +71,8 @@ def signal(kind="still", hour=10, seconds=SECONDS, seed=0, side="left", temp=31.
         x = x + 0.15 * np.sin(2 * np.pi * 5.0 * t)
     x = x + rng.normal(0, 0.002, len(t))
     y = -y if side == "right" else y
+    # Times as HH:MM:SS.sss text, like the real files. Starting 0.01 s after hour:00:00, every sample falls
+    # inside its clock hour, the part of a file pipeline.py keeps.
     clock = [f"{hour:02d}:{int(s // 60):02d}:{s % 60:06.3f}" for s in t + 0.01]
     return pd.DataFrame({"Time": clock, "X": x.round(4), "Y": y.round(4), "Z": z.round(4),
                          "Photo": 60, "Temp": temp})
@@ -71,6 +83,7 @@ def csv_bytes(df):
 
 
 def inner_zip(df, csv_name):
+    """A zip holding one CSV: each wrist-hour is its own small zip inside the participant zip, as in COPS."""
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w") as z:
         z.writestr(csv_name, csv_bytes(df))
@@ -79,6 +92,14 @@ def inner_zip(df, csv_name):
 
 def diary_row(pid, day, hour_end, kinesia, score, wear="Wearable Worn", tremor="No Tremor",
               tremor_score=0, medication=None, doses=None, files=True, visit="outpatient", dose_columns=1):
+    """One raw diary row, as the real CSV has it.
+
+    Args:
+        hour_end: The diary's Time, the end of the hour: 9 is 08:00-09:00.
+        doses: One value per dose column; a single 100 by default when there is medication.
+        files: False leaves out the wearable file names, as for an hour the watch wasn't worn.
+        dose_columns: 1 for one "Dosage" column, or how many "Dosage_<n>" columns there are.
+    """
     stem = f"{pid}_Day{day}_{hour_end - 1}h-{hour_end}h"
     doses = doses if doses is not None else ([100] if medication else [])
     row = {
@@ -123,11 +144,13 @@ def make_participant_zip(folder, pid="COPS-99", hours=None, corrupt=None, dose_c
         diary = pd.DataFrame([row for row, _ in hours], columns=diary_columns(dose_columns))
         z.writestr(f"{pid}/{pid}_symptomdiary.csv", csv_bytes(diary))
         for i, (row, kind) in enumerate(hours):
+            # An hour with no signal kind (not worn) gets no files, like a real hour without a recording.
             if kind is None:
                 continue
             hour = int(row["Time"].split()[0]) - 1
             for side in sides:
                 zip_name = row[f"WearableData{side}ZIP"]
+                # corrupt names one hour's zip to write as junk bytes, to test how an unreadable file is handled.
                 if corrupt == zip_name:
                     z.writestr(f"{pid}/Accelerometry/{zip_name}", b"not a zip")
                     continue
@@ -156,6 +179,7 @@ def raw_dir(tmp_path):
 def make_demographics(folder, pids, sides=None):
     """Demographics.csv with the real file's headers. sides: each participant's more affected side."""
     sides = sides or ["left"] * len(pids)
+    # PD_DominantSide is the side the data pipeline reads as the more affected one, and so the wrist it uses.
     rows = [{"ID": pid, "Age": 50 + 7 * i, "Sex": "male" if i % 2 else "female", "Handedness": "right",
              "PD_Subtype": "akinetic-rigid", "PD_DominantSide": side, "PD_HoehnAndYahr": 2 + i % 2,
              "PD_YearsSinceDiagnosis": 8, "DBS": "yes" if i % 2 else "no"}
