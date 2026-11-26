@@ -156,6 +156,38 @@ jobs:
                   print(f"{key}={run.get(key, '')}")
           PY
           cat "$GITHUB_OUTPUT"
+      # "Retrain started", as soon as a model run is decided, before the images and the VM: why (a
+      # drift retrain's reason starts with "drift:"), who started it, and the run's link. Later the VM
+      # emails the Airflow link once it's up, and the pipeline the result.
+      - name: Email the team that a retrain started
+        if: steps.run.outputs.train == 'true' && steps.run.outputs.dag == 'model_pipeline'
+        working-directory: Model_Pipeline
+        env:
+          DAG_CONF: ${{ steps.run.outputs.dag_conf }}
+          COMPUTE: ${{ steps.run.outputs.compute }}
+          EVENT: ${{ github.event_name }}
+          ACTOR: ${{ github.actor }}
+          REF: ${{ github.ref_name }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          pip install -q requests==2.33.0
+          python - <<'PY'
+          import json, os
+          from model_pipeline.alerts import notify
+
+          env = os.environ
+          conf = json.loads(env["DAG_CONF"])
+          reason = conf.get("reason") or "(none given)"
+          how = "a retrain.yaml change merged into main" if env["EVENT"] == "push" else "Run workflow"
+          notify("[MedNOVA model] Retrain started" + (" (drift)" if reason.startswith("drift:") else ""),
+                 f"Why: {reason}\n"
+                 f"Started by: {env['ACTOR']} ({how})\n"
+                 f"Candidates: {' '.join(conf.get('candidates') or []) or '(the config default)'}; "
+                 f"tune: {conf.get('tune')}; release: {conf.get('release')}\n"
+                 f"Compute: {env['COMPUTE'] or 'gpu'}; branch: {env['REF']}\n\n"
+                 f"Run: {env['RUN_URL']}\n\n"
+                 "The VM emails the Airflow link once it's up, and the pipeline the result when it ends.")
+          PY
 
   images:
     name: Build the images

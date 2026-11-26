@@ -30,6 +30,15 @@ def family_dir(tmp_path):
     return tmp_path / "registry" / "parkinsons-risk"
 
 
+@pytest.fixture(autouse=True)
+def alerts(monkeypatch):
+    """Records the rollback's alerts instead of sending them, whatever the machine's .env holds."""
+    sent = []
+    record = lambda subject, body, cfg=None: sent.append((subject, body))   # noqa: E731
+    monkeypatch.setattr(register_module, "notify", record)
+    return sent
+
+
 @pytest.fixture
 def step(tmp_path):
     tracker = MemoryTracker()
@@ -105,13 +114,25 @@ def test_rollback_steps_back_one_version_at_a_time(tmp_path, step):
     assert active_metrics(register.family_dir) == {"cv/state_now/off_auc": 0.71}
 
 
-def test_rollback_needs_an_earlier_version(tmp_path, step):
+def test_rollback_emails_the_team(tmp_path, step, alerts):
+    register, _ = step
+    for n in (1, 2):
+        register.run(make_bundle(tmp_path / f"b{n}"))
+    assert alerts == []   # a release alone emails nothing from here
+    register.rollback()
+    [(subject, body)] = alerts
+    assert subject == "[MedNOVA model] Rolled back to v1"
+    assert "now v1, replacing v2" in body
+
+
+def test_rollback_needs_an_earlier_version(tmp_path, step, alerts):
     register, _ = step
     with pytest.raises(PipelineError, match="nothing to roll back to"):
         register.rollback()
     register.run(make_bundle(tmp_path / "b1"))
     with pytest.raises(PipelineError, match="nothing to roll back to"):
         register.rollback()
+    assert alerts == []   # nothing rolled back, nothing sent
 
 
 # ---- the registry in a bucket ------------------------------------------------------------
