@@ -42,8 +42,9 @@ variable "firebase_web_api_key_added" {
   # True once backend-firebase-web-api-key (backend.tf) has its value, added by hand:
   #   printf %s "<the web app's key>" | gcloud secrets versions add backend-firebase-web-api-key --data-file=-
   # Only then does the API read it: Cloud Run won't start a service whose secret has no version.
+  # Added 2026-11-27, from the hosted portal's Firebase config (mednova-dhruv).
   type    = bool
-  default = false
+  default = true
 }
 
 variable "scoring_paused" {
