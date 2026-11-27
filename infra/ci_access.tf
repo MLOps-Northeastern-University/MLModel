@@ -50,8 +50,7 @@ resource "google_iam_workload_identity_pool_provider" "mlmodel" {
 # Lets workflows in that repository act as the training account.
 resource "google_service_account_iam_member" "training_wif" {
   service_account_id = google_service_account.training.name
-  # Every branch's workflows match, not only main's, which is why model.yml itself allows a
-  # release only from main.
+  # Only main's workflows get this far: the mlmodel provider above turns other branches' tokens away.
   role   = "roles/iam.workloadIdentityUser"
   member = "principalSet://iam.googleapis.com/${google_iam_workload_identity_pool.github.name}/attribute.repository/${var.github_repo}"
 }
