@@ -33,10 +33,14 @@ resource "google_iam_workload_identity_pool_provider" "mlmodel" {
   attribute_mapping = {
     "google.subject"       = "assertion.sub"
     "attribute.repository" = "assertion.repository"
+    "attribute.ref"        = "assertion.ref"
   }
   # Without this, a workflow in any repository on GitHub could exchange its token in this pool.
   # Tokens from every other repository are turned away here, before any IAM grant is looked at.
-  attribute_condition = "assertion.repository == '${var.github_repo}'"
+  # Only main: every workflow that signs in (model.yml, drift.yml, data-version.yml) runs from main
+  # (a merge, a schedule, or a run by hand on main), so a branch's edited workflow can't act as
+  # training, which makes VMs in the compute project, before it's reviewed and merged.
+  attribute_condition = "assertion.repository == '${var.github_repo}' && assertion.ref == 'refs/heads/main'"
 
   oidc {
     issuer_uri = "https://token.actions.githubusercontent.com"
