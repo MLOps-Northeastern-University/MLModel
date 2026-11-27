@@ -52,10 +52,30 @@ resource "google_project_iam_member" "training_vm_deletes_itself" {
 
 # ---- who may make the VMs: CI ------------------------------------------------------------
 
-# Create, start and delete the VM of each training run.
+# Create, start and delete the VM of each training run, and nothing else here: other VMs and disks
+# in this project (not training's) stay out of CI's reach. Only on resources a run makes or uses:
+# its VM and boot disk (mednova-run-<run>-<attempt>, model.yml), and the training subnets.
 resource "google_project_iam_member" "ci_instances" {
   project = var.compute_project
   role    = "roles/compute.instanceAdmin.v1"
+  member  = "serviceAccount:${var.ci_service_account}"
+
+  condition {
+    title = "training runs only"
+    expression = trimspace(<<-EOT
+      resource.name.extract("/instances/{name}").startsWith("mednova-run-")
+      || resource.name.extract("/disks/{name}").startsWith("mednova-run-")
+      || resource.name.extract("/subnetworks/{name}").startsWith("training-")
+    EOT
+    )
+  }
+}
+
+# Read-only, on the whole project: create_vm.sh lists the zones and GPU types to try, and gcloud
+# waits on each create's operation. Viewer changes nothing, so it needs no condition.
+resource "google_project_iam_member" "ci_compute_viewer" {
+  project = var.compute_project
+  role    = "roles/compute.viewer"
   member  = "serviceAccount:${var.ci_service_account}"
 }
 
