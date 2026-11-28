@@ -7,7 +7,9 @@ keys/
 # The summary reports with no participant IDs are kept in Git to be read.
 data/raw/*
 data/interim/*
-data/processed/*
+# ?*, not *: the same files to git, but DVC's git library lets * match the folder itself, and DVC
+# doesn't look for .dvc files in a folder it thinks is ignored, so it never pulled the split.
+data/processed/?*
 data/reports/*
 !data/raw/.gitkeep
 !data/interim/.gitkeep
