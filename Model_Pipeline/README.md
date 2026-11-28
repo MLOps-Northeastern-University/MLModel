@@ -106,7 +106,7 @@ In a container:
 
 - `GIT_COMMIT` names the commit MLflow records, since there's no git in the image (a build argument of the Dockerfile).
 - `MODEL_MLFLOW_GOOGLE_AUTH=1` makes the tracker get Google ID tokens for the hosted MLflow from the machine's service account and renew them every 45 minutes. A token lasts an hour, and a GPU run takes hours. CI's own token is enough for its run.
-- The GPU image is built with `--build-arg TORCH=cu128` and run with `--gpus all`.
+- The GPU image is built with `--build-arg TORCH=cu129` and run with `--gpus all`.
 
 The training data is the data pipeline's output, versioned by DVC. Get it with `dvc pull` in `../Data_Pipeline` (see [Training data](#training-data-dvc)). `paths.features_csv` in `config/model.yaml` points at it.
 
