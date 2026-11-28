@@ -4,7 +4,7 @@
 # Airflow DAG on the GPU machine).
 #
 #   docker build -t model-pipeline .                                  # CPU: tests, laptops, CI
-#   docker build -t model-pipeline:gpu --build-arg TORCH=cu128 \
+#   docker build -t model-pipeline:gpu --build-arg TORCH=cu129 \
 #       --build-arg GIT_COMMIT=$(git rev-parse HEAD) .                # the GPU machine
 #
 # The GPU image runs with `docker run --gpus all`, on a machine with NVIDIA's
@@ -14,8 +14,9 @@ FROM python:3.12-slim
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1
 
-# PyTorch's build: cpu, or a CUDA version (cu128, what the GPU run of 2026-11-15 used). CPU is the
-# default, because the CUDA build is several GB that CI and laptops can't use.
+# PyTorch's build: cpu, or a CUDA version (cu129: PyTorch's cu128 builds stop at 2.11, before the
+# torch pin below; the GPU run of 2026-11-15 used cu128). CPU is the default, because the CUDA build
+# is several GB that CI and laptops can't use.
 ARG TORCH=cpu
 
 # Airflow mounts the run's artifacts/ at /app/Model_Pipeline/artifacts (MODEL_APP in

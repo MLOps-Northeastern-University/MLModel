@@ -43,7 +43,7 @@ The pipelines' images first, from the repo's root (CI builds them and pushes the
 ```bash
 docker build -t data-pipeline Data_Pipeline
 docker build -t model-pipeline Model_Pipeline                               # CPU
-docker build -t model-pipeline --build-arg TORCH=cu128 Model_Pipeline       # the GPU machine
+docker build -t model-pipeline --build-arg TORCH=cu129 Model_Pipeline       # the GPU machine
 ```
 
 Then Airflow, from this folder:

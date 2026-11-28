@@ -234,7 +234,7 @@ jobs:
           done <<'LIST'
           airflow airflow
           data Data_Pipeline
-          model Model_Pipeline --build-arg TORCH=cu128
+          model Model_Pipeline --build-arg TORCH=cu129
           LIST
 
   train:
